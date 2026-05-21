@@ -10240,10 +10240,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   isEnabledRecording: 1
+  statusText: {fileID: 0}
+  csvExport: {fileID: 0}
   eyeGazeObserver: {fileID: 595959569}
   headObserver: {fileID: 595959566}
   faceObserver: {fileID: 595959564}
   handObserver: {fileID: 595959565}
+  isRecording: 0
 --- !u!114 &595959564
 MonoBehaviour:
   m_ObjectHideFlags: 0
