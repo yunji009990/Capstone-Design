@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e320a629bb7d8bd4bbf5efe5a02453eb
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 131024
+  packageName: Fruits
+  packageVersion: 5.6
+  assetPath: Assets/Fruit/Materials/StrawberryBody_Mat.mat
+  uploadId: 274264

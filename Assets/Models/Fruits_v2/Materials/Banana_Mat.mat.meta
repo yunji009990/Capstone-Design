@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b35ff0f5a4f16f34daa21c8d47c9c501
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 131024
+  packageName: Fruits
+  packageVersion: 5.6
+  assetPath: Assets/Fruit/Materials/Banana_Mat.mat
+  uploadId: 274264
