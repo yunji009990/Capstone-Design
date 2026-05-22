@@ -40,8 +40,11 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("인물이 등장할 위치/회전. 비워두면 본 GameObject 자신을 사용.")]
     public Transform spawnPoint;
 
-    [Tooltip("로드된 모델을 이 높이(m)로 자동 스케일. 0이면 원본 유지.")]
+    [Tooltip("로드된 모델을 이 높이(m)로 자동 스케일. 0이면 자동 스케일 생략(GLB 원본 크기).")]
     public float targetHeightMeters = 1.7f;
+
+    [Tooltip("최종 스케일에 곱하는 추가 배수. 자동 스케일 후(또는 생략 시 GLB 원본에) 적용.\n예: 0.1 = 10%, 0.01 = 1%. 맵이 작을 때 유용.")]
+    public float scaleMultiplier = 1.0f;
 
     [Tooltip("spawnPoint의 회전을 그대로 사용할지 여부.")]
     public bool useSpawnRotation = true;
@@ -116,8 +119,10 @@ public class PersonaSpawner : MonoBehaviour
             await gltf.InstantiateMainSceneAsync(_spawnedInstance.transform);
 
             if (targetHeightMeters > 0f) NormalizeHeight(_spawnedInstance, targetHeightMeters);
+            if (scaleMultiplier > 0f && Mathf.Abs(scaleMultiplier - 1f) > 0.0001f)
+                _spawnedInstance.transform.localScale *= scaleMultiplier;
 
-            if (verboseLog) Debug.Log($"[PersonaSpawner] 스폰 완료: {anchor.position}");
+            if (verboseLog) Debug.Log($"[PersonaSpawner] 스폰 완료: pos={anchor.position}, scale={_spawnedInstance.transform.localScale}");
         }
         finally
         {
@@ -168,5 +173,6 @@ public class PersonaSpawner : MonoBehaviour
 
         float scale = targetHeight / bounds.size.y;
         root.transform.localScale *= scale;
+
     }
 }

@@ -1639,6 +1639,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d71d5783f7ebfd14f91fe84a2ab8f13c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  dataRoot: "C:\\Users\\user\\Desktop\\\uB2E4\uC2DC\uBD04_\uC124\uBB38\uC2DC\uC2A4\uD15C\\data"
+  sessionIdOverride: 
+  currentSessionFile: current_session.txt
+  spawnPoint: {fileID: 1208657647}
+  targetHeightMeters: 0
+  scaleMultiplier: 0.3
+  useSpawnRotation: 1
+  retryIntervalSec: 2
+  maxWaitSec: 0
+  loadingIndicator: {fileID: 0}
+  verboseLog: 1
 --- !u!1001 &950363165
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2223,13 +2234,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1208657646}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 1, y: 1, z: 1}
+  m_LocalRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 0.038, y: 0.163, z: 0.048}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 690565361}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: -90, z: 0}
 --- !u!1001 &1226476263
 PrefabInstance:
   m_ObjectHideFlags: 0
