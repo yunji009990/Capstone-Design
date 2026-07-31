@@ -186,39 +186,67 @@ def best_window(job, spk_id, win=14.0, min_sec=8.0):
     # SNR 과 쉼은 선형 트레이드오프가 아니라 **문턱**이다(실측: 성공 39~58dB·15~28%,
     # 실패 16~25dB·0~9%). 문턱 아래는 급격히 감점해서 "SNR 은 낮지만 겹침이 없는"
     # 창이 이기지 못하게 한다.
-    def scan(max_overlap, min_share):
+    fade = int(0.02 * sr)
+
+    def mute_other(seg, a):
+        """창 안에 들어온 다른 화자 구간만 무음으로 만든다.
+
+        분리기의 ref.wav 는 조각나지만 순수하고, 연속 창은 이어지지만 오염된다.
+        지워버리면 둘 다 가질 수 있다 — 대상 화자의 흐름은 유지되고, 비워진
+        자리는 자연스러운 쉼이 된다. 경계는 페이드로 눌러 클릭을 막는다."""
+        for s in segs:
+            if s["spk"] == cluster:
+                continue
+            i0 = max(0, int((s["start"] - a) * sr))
+            i1 = min(len(seg), int((s["end"] - a) * sr))
+            if i1 <= i0:
+                continue
+            seg[i0:i1] = 0.0
+            if i0 - fade >= 0:
+                seg[i0 - fade:i0] *= np.linspace(1, 0, fade)
+            if i1 + fade <= len(seg):
+                seg[i1:i1 + fade] *= np.linspace(0, 1, fade)
+        return seg
+
+    def scan(min_share):
         out = None
         for i in range(0, max(1, n - W), step):
             share = tgt[i:i + W].mean()
-            intrude = oth[i:i + W].sum() * hop
-            if share < min_share or intrude > max_overlap:
-                continue
+            if share < min_share:
+                continue          # 대상 화자가 창의 상당 부분을 말해야 한다
             a = i * hop
-            seg = y[int(a * sr):int((a + win) * sr)]
-            if len(seg) < sr * min(min_sec, win):
+            raw = y[int(a * sr):int((a + win) * sr)].copy()
+            if len(raw) < sr * min(min_sec, win):
                 continue
-            pk = float(np.abs(seg).max())
-            seg = seg * (min(10.0, 0.8 / pk) if pk > 1e-6 else 1.0)
-            snr, quiet, warn = _quality(seg)
-            snr, quiet = snr or 0.0, quiet or 0.0
-            score = (min(snr, 45) + min(quiet, 0.35) * 150 + share * 15 - intrude * 10
+            muted = oth[i:i + W].sum() * hop
+            pk = float(np.abs(raw).max())
+            g = min(10.0, 0.8 / pk) if pk > 1e-6 else 1.0
+            # SNR 은 **지우기 전** 원본에서 잰다. 지운 자리는 완전한 0 이라 바닥값이
+            # 0 이 되어 SNR 이 무한대로 튄다(실제로 165dB 가 나왔다).
+            snr = _quality(raw * g)[0] or 0.0
+            # 쉼은 **실제로 내보낼 오디오**에서 잰다. 지운 자리가 곧 쉼이 되므로
+            # 원본에서 재면 "쉬지 않고 말하는 창"이 부당하게 유리해진다.
+            out_seg = mute_other(raw.copy(), a) * g
+            quiet = _quality(out_seg)[1] or 0.0
+            # 많이 지웠다는 건 대상 화자의 발화가 그만큼 적다는 뜻이다
+            score = (min(snr, 45) + min(quiet, 0.35) * 150 + share * 20 - muted * 5
                      - (0 if snr >= 30 else (30 - snr) * 4)
                      - (0 if quiet >= 0.10 else (0.10 - quiet) * 300))
             if out is None or score > out[0]:
-                out = (score, a, a + win, seg, snr, quiet, warn, intrude)
+                out = (score, a, a + win, out_seg, snr, quiet,
+                       _warn_text(snr, quiet), muted)
         return out
 
-    # 깨끗한 자리를 먼저 찾고, 없으면 조건을 풀어 최선을 고른다. 원본이 짧으면
-    # 고를 처지가 아니라서, 조각 참조로 물러나는 것보다 겹침을 감수하는 게 낫다.
-    best = scan(win * 0.3, 0.45) or scan(win, 0.30)
+    best = scan(0.55) or scan(0.30)   # 발화가 많은 자리를 먼저, 없으면 완화
     if best is None:
         return None
-    _, a, b, seg, snr, quiet, warn, intrude = best
+    _, a, b, seg, snr, quiet, warn, muted = best
     buf = io.BytesIO()
     sf.write(buf, seg, 24000, format="WAV", subtype="PCM_16")
     return buf.getvalue(), {"start": round(a, 1), "end": round(b, 1),
                             "sec": round(b - a, 1), "snr_db": snr,
-                            "quiet_ratio": quiet, "overlap_sec": round(intrude, 1),
+                            "quiet_ratio": quiet, "muted_sec": round(muted, 1),
+                            "speech_sec": round((b - a) * (1 - quiet), 1),
                             "level": round(_level(seg), 3), "warning": warn}
 
 
@@ -306,6 +334,18 @@ def _level(y):
     return float(np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)).max())
 
 
+def _warn_text(snr, quiet):
+    bad = []
+    if snr is not None and snr < 30:
+        bad.append(f"SNR {snr:.0f}dB (30dB 이상 권장)")
+    if quiet is not None and quiet < 0.10:
+        bad.append(f"쉬는 구간 {quiet:.0%} (10% 이상 권장)")
+    if not bad:
+        return ""
+    return ("참조 품질이 낮습니다 — " + ", ".join(bad) +
+            ". 오디오가 잘리거나 같은 소리를 반복할 수 있습니다.")
+
+
 def _quality(y):
     """참조로 쓸 만한지 본다. 실측으로 갈린 두 지표만 본다 —
 
@@ -320,14 +360,7 @@ def _quality(y):
     peak, floor = float(r.max()), float(np.percentile(r, 10))
     snr = 20 * np.log10(max(peak, 1e-9) / max(floor, 1e-9))
     quiet = float((r < peak * 0.05).mean())
-    bad = []
-    if snr < 30:
-        bad.append(f"SNR {snr:.0f}dB (30dB 이상 권장)")
-    if quiet < 0.10:
-        bad.append(f"쉬는 구간 {quiet:.0%} (10% 이상 권장)")
-    return round(snr, 1), round(quiet, 3), (
-        "참조 품질이 낮습니다 — " + ", ".join(bad) +
-        ". 오디오가 잘리거나 같은 소리를 반복할 수 있습니다." if bad else "")
+    return round(snr, 1), round(quiet, 3), _warn_text(snr, quiet)
 
 
 @app.post("/publish_direct")

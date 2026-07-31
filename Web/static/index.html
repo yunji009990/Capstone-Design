@@ -296,10 +296,10 @@ function renderSpeakers() {
       if (w.detail) { el.textContent = "연속 구간 없음 — 조각 참조로 보냅니다"; return; }
       const ok = v => v ? "ok" : "bad";
       el.innerHTML =
-        `보낼 구간 <b>${w.start}~${w.end}초</b> (${w.sec}초) ` +
+        `보낼 구간 <b>${w.start}~${w.end}초</b> (실제 발화 ${w.speech_sec}초) ` +
         `<span class="pill ${ok(w.snr_db >= 30)}">SNR ${w.snr_db}dB</span> ` +
         `<span class="pill ${ok(w.quiet_ratio >= 0.10)}">쉼 ${(w.quiet_ratio*100).toFixed(0)}%</span> ` +
-        (w.overlap_sec > 0.5 ? `<span class="pill warn">겹침 ${w.overlap_sec}초</span>` : "") +
+        (w.muted_sec > 0.5 ? `<span class="pill">타 화자 ${w.muted_sec}초 지움</span>` : "") +
         (w.warning ? `<div style="color:var(--bad);margin-top:4px">${w.warning}</div>` : "");
     } catch (e) { el.textContent = "구간 확인 실패: " + e; }
   });
