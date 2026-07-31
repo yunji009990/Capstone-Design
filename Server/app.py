@@ -17,9 +17,12 @@ TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"
+# 반복 억제 기본값은 실측으로 정했다. 창을 넓히는 게 임계값을 낮추는 것보다 낫다 —
+# 창 100(8초)이면 1.5초 쉼은 19%라 안 걸리고, 8초를 뒤덮는 루프는 70%가 넘어 걸린다.
+# 창 40 / 임계 0.2 는 루프를 잡긴 했지만 무음에서도 발동할 여지가 컸다.
 RAS   = os.environ.get("RAON_RAS", "1") == "1"
-RAS_WIN  = int(os.environ.get("RAON_RAS_WINDOW", "40"))
-RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.2"))
+RAS_WIN  = int(os.environ.get("RAON_RAS_WINDOW", "100"))
+RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.35"))
 CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 16초
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
