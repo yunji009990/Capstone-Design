@@ -77,6 +77,9 @@ public class RaonVoiceClient : MonoBehaviour
     /// <summary>서버가 알려준 현재 세션에 3D 모델이 준비되어 있는지.</summary>
     public bool SessionHasModel { get; private set; }
 
+    /// <summary>서버에 등록된 인물이 있는지. 없으면 대화를 시작할 수 없습니다.</summary>
+    public bool HasSession { get; private set; }
+
     /// <summary>답변 음성을 재생 중인지. 상태 표시나 립싱크에 사용하세요.</summary>
     public bool IsSpeaking => _audio != null && _audio.isPlaying;
 
@@ -139,7 +142,7 @@ public class RaonVoiceClient : MonoBehaviour
     void Update()
     {
         // 수동 조작 (자동 감지를 꺼두었거나 강제로 보내고 싶을 때)
-        if (Input.GetKeyDown(pushToTalkKey) && !isRecording && !isWaiting) StartRecording();
+        if (Input.GetKeyDown(pushToTalkKey) && !isRecording && !isWaiting && HasSession) StartRecording();
         else if (Input.GetKeyUp(pushToTalkKey) && isRecording) StopAndSend();
 
         UpdateLevel();
@@ -215,6 +218,7 @@ public class RaonVoiceClient : MonoBehaviour
         }
         if (!_listening || Time.time < _cooldownUntil) return;
         if (!serverReady) return;   // 서버가 죽어 있으면 헛되이 보내지 않는다
+        if (!HasSession) return;    // 인물이 등록되지 않았으면 보낼 곳이 없다
 
         float threshold = VadThreshold;
         bool loud = MicLevel > threshold;
@@ -513,7 +517,8 @@ public class RaonVoiceClient : MonoBehaviour
 
     /// <summary>
     /// 서버의 현재 세션을 따라간다. 웹에서 인물을 등록하면 그 세션으로 갈아탄다.
-    /// 등록된 세션이 없으면 인스펙터 값을 그대로 쓰고, 서버는 전역 설정으로 응답한다.
+    /// 등록된 세션이 없으면 HasSession 이 false 가 되어 대화가 막힌다 — 서버에
+    /// 기본 인물이 없으므로, 막지 않으면 매번 409 를 받게 된다.
     /// </summary>
     IEnumerator PollSession()
     {
@@ -532,14 +537,23 @@ public class RaonVoiceClient : MonoBehaviour
                     try { s = JsonUtility.FromJson<SessionResponse>(req.downloadHandler.text); }
                     catch (Exception e) { Debug.LogWarning($"[Raon] 세션 응답 파싱 실패: {e.Message}"); }
 
-                    if (s != null && !string.IsNullOrEmpty(s.session)
-                        && (s.session != sessionId || s.has_model != SessionHasModel))
+                    if (s != null)
                     {
-                        bool changed = s.session != sessionId;
-                        sessionId = s.session;
-                        SessionHasModel = s.has_model;
-                        if (changed) Debug.Log($"[Raon] 세션 전환: {sessionId} (모델 {(s.has_model ? "있음" : "없음")})");
-                        OnSessionChanged?.Invoke(sessionId, s.has_model);
+                        // 서버에 기본 인물이 없다. 등록된 세션이 없으면 대화 자체를 막는다.
+                        string cur = s.session ?? "";
+                        bool has = !string.IsNullOrEmpty(cur);
+                        if (cur != sessionId || has != HasSession || s.has_model != SessionHasModel)
+                        {
+                            bool changed = cur != sessionId;
+                            sessionId = cur;
+                            HasSession = has;
+                            SessionHasModel = s.has_model;
+                            if (changed)
+                                Debug.Log(has
+                                    ? $"[Raon] 세션 전환: {sessionId} (모델 {(s.has_model ? "있음" : "없음")})"
+                                    : "[Raon] 등록된 인물이 없습니다 — 웹에서 등록해야 대화할 수 있습니다.");
+                            OnSessionChanged?.Invoke(sessionId, s.has_model);
+                        }
                     }
                 }
                 else if (req.responseCode == 401)

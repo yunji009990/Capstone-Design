@@ -11,7 +11,6 @@ from starlette.background import BackgroundTask
 BASE  = os.environ.get("RAON_BASE", os.path.expanduser("~"))
 MODEL = os.path.join(BASE, "models", "AX-K2-Raon-Speech")
 SRV   = os.path.join(BASE, "server")
-VOICE = os.environ.get("RAON_VOICE", os.path.join(SRV, "voice.wav"))
 MEMFR = float(os.environ.get("RAON_MEM_FRACTION", "0.60"))
 TOKENS= int(os.environ.get("RAON_ANSWER_TOKENS", "200"))
 TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
@@ -20,12 +19,13 @@ VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
-S = {"pipe": None, "system": "", "loaded_at": 0.0}
+S = {"pipe": None, "loaded_at": 0.0}
 HIST, LOCK = {}, asyncio.Lock()
 
 # ── 세션 ────────────────────────────────────────────────────────────
-# 웹 백엔드가 인물마다 참조 음성과 페르소나를 등록한다. 세션을 모르면
-# 서버 루트의 voice.wav / persona.md 를 그대로 쓴다(기존 동작 유지).
+# 인물은 반드시 웹에서 등록한다. 서버에 기본 음성·기본 인물을 두지 않는다.
+# 폴백이 있으면 "지금 무엇이 쓰이는지" 알 수 없고, 등록을 잊었을 때
+# 오류가 아니라 엉뚱한 목소리로 답해서 코드 결함처럼 보인다.
 SESS_DIR = os.path.join(SRV, "sessions")
 SESS = {}                       # sid -> {"voice": path, "system": str}
 CURRENT = {"session": None}
@@ -45,14 +45,6 @@ BASE_RULES = """당신은 AI 비서가 아니라 아래 [인물]에 설명된 �
 - 되묻기만 하지 말고 당신 이야기도 하세요.
 - 직전에 한 말과 같은 문장을 반복하지 마세요.
 - 모르면 솔직하게 모른다고 말하세요."""
-
-def build_system():
-    parts = []
-    for f in ("persona.md", "knowledge.md"):
-        p = os.path.join(SRV, f)
-        if os.path.exists(p):
-            parts.append(open(p, encoding="utf-8").read().strip())
-    return "\n\n".join(parts)
 
 def _sess_path(sid, *parts):
     return os.path.join(SESS_DIR, sid, *parts)
@@ -85,13 +77,19 @@ def load_sessions():
     if SESS:
         print(f"[세션] {len(SESS)}개 복원, 현재={CURRENT['session']}", flush=True)
 
-def sess_voice(sid):
+def need_session(sid):
+    """등록되지 않은 세션이면 409. 폴백 없이 분명하게 거절한다."""
     s = SESS.get(sid)
-    return s["voice"] if s else VOICE
+    if not s or not s.get("system"):
+        raise HTTPException(409, f"등록되지 않은 세션입니다: {sid or '(없음)'}. "
+                                 f"웹에서 인물을 먼저 등록하세요.")
+    return s
+
+def sess_voice(sid):
+    return need_session(sid)["voice"]
 
 def sess_system(sid):
-    s = SESS.get(sid)
-    return s["system"] if s and s["system"] else S["system"]
+    return need_session(sid)["system"]
 
 def _save_atomic(data, path):
     """임시 파일에 쓴 뒤 rename. 합성 중 반쪽 파일을 읽는 사고를 막는다."""
@@ -124,10 +122,19 @@ def ref_text(voice):
         print(f"[참조전사] {time.time()-t0:.1f}초 — {REF_TEXT[voice]!r}", flush=True)
     return REF_TEXT[voice]
 
-def synth(text, voice=None, tries=2):
-    """음성 합성 + 검증 + 실패 시 재생성"""
+def warm_pipe(voice):
+    """첫 생성은 코드 경로가 처음 도느라 느리다. continuation 은 참조를 토큰화·프리필하는
+    별도 경로라 tts() 로 예열해도 소용없다. 참조 전사도 여기서 캐시된다."""
+    t0 = time.time()
+    if CONT:
+        S["pipe"].tts_continuation("준비 완료.", ref_audio=voice, ref_text=ref_text(voice))
+    else:
+        S["pipe"].tts("준비 완료.", speaker_audio=voice)
+    print(f"[예열] {time.time()-t0:.1f}초", flush=True)
+
+def synth(text, voice, tries=2):
+    """음성 합성 + 검증 + 실패 시 재생성. 참조는 호출자가 반드시 준다."""
     pipe = S["pipe"]
-    voice = voice or VOICE
     for i in range(tries):
         t0 = time.time()
         if CONT:
@@ -162,7 +169,6 @@ async def lifespan(app):
     RP = get_class_from_dynamic_module("modeling_raon.RaonPipeline", MODEL,
                                        revision=getattr(cfg, "_commit_hash", None))
     S["pipe"] = RP(MODEL, device="cuda", dtype="bfloat16")
-    S["system"] = build_system()
     load_sessions()
     if os.environ.get("RAON_COMPILE", "1") == "1":
         try:
@@ -176,11 +182,10 @@ async def lifespan(app):
     print(f"[로딩] {time.time()-t0:.1f}초", flush=True)
     # 첫 생성 불안정 방지 예열. continuation 은 참조를 토큰화·프리필하는 다른 코드
     # 경로라 tts() 로 예열해도 소용없다. 현재 세션의 참조로 예열하면 전사까지 캐시된다.
-    warm = sess_voice(CURRENT["session"]) if CURRENT["session"] else VOICE
-    if CONT:
-        S["pipe"].tts_continuation("준비 완료.", ref_audio=warm, ref_text=ref_text(warm))
+    if CURRENT["session"]:
+        warm_pipe(sess_voice(CURRENT["session"]))
     else:
-        S["pipe"].tts("준비 완료.", speaker_audio=VOICE)
+        print("[예열] 등록된 세션이 없어 건너뜀 — 첫 등록 때 예열한다", flush=True)
     S["loaded_at"] = time.time()
     print(f"[준비완료] VRAM {torch.cuda.memory_allocated()/1024**3:.1f}GB", flush=True)
     yield
@@ -197,13 +202,8 @@ def health():
     return {"status": "ready" if S["pipe"] else "loading",
             "vram_gb": round(torch.cuda.memory_allocated()/1024**3, 1),
             "uptime_sec": round(time.time() - S["loaded_at"]) if S["loaded_at"] else 0,
-            "voice": os.path.basename(VOICE), "sessions": len(HIST),
-            "registered": len(SESS), "current": CURRENT["session"]}
-
-@app.post("/reload")
-def reload_prompt(x_token: str = Header("")):
-    auth(x_token); S["system"] = build_system()
-    return {"ok": True, "system_chars": len(S["system"])}
+            "sessions": len(HIST), "registered": len(SESS),
+            "current": CURRENT["session"], "ready_to_talk": bool(CURRENT["session"])}
 
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
@@ -211,10 +211,11 @@ def reset(session: str = Form("default"), x_token: str = Header("")):
     return {"ok": True}
 
 @app.post("/tts")
-async def tts_ep(text: str = Form(...), x_token: str = Header("")):
+async def tts_ep(text: str = Form(...), session: str = Form(""), x_token: str = Header("")):
     auth(x_token)
+    voice = sess_voice(session or CURRENT["session"])
     async with LOCK:
-        t0 = time.time(); data, _ = synth(text)
+        t0 = time.time(); data, _ = synth(text, voice)
     return Response(data, media_type="audio/wav",
                     headers={"X-Elapsed": f"{time.time()-t0:.2f}"})
 
@@ -254,6 +255,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
     auth(x_token)
     if not S["pipe"]:
         raise HTTPException(503, "model not ready")
+    need_session(session)        # 임시 파일을 만들기 전에 먼저 거절한다
     want_heard = show_heard not in ("0", "false", "False", "")
     raw = await file.read()
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
@@ -299,6 +301,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     auth(x_token)
     if not S["pipe"]:
         raise HTTPException(503, "model not ready")
+    need_session(session)        # 임시 파일을 만들기 전에 먼저 거절한다
     want_heard = show_heard not in ("0", "false", "False", "")
     raw = await file.read()
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
@@ -423,10 +426,9 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
     REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
-    if CONT:
-        # 새 참조의 전사를 지금 캐시해 둔다. 첫 대화가 STT 를 기다리지 않도록.
-        async with LOCK:
-            await asyncio.to_thread(ref_text, SESS[sid]["voice"])
+    async with LOCK:
+        # 새 참조로 예열해 둔다. 등록은 지연에 민감하지 않고, 첫 대화는 민감하다.
+        await asyncio.to_thread(warm_pipe, SESS[sid]["voice"])
     print(f"[세션] {sid} 등록 — 음성 {info.duration:.1f}초, "
           f"페르소나 {len(persona)}자, 모델 {'있음' if has_model else '없음'}", flush=True)
     out = {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}

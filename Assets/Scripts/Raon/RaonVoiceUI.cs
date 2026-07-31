@@ -131,6 +131,8 @@ public class RaonVoiceUI : MonoBehaviour
         else if (client.isWaiting) { color = Waiting; state = $"생각 중… {Time.time - _waitStart:F1}초"; }
         else if (client.IsSpeaking) { color = Speaking; state = "말하는 중"; }
         else if (!client.serverReady) { color = Offline; state = "서버 대기 중"; }
+        // 서버에 기본 인물이 없다. 등록 전에는 시작할 수 없다는 것을 분명히 알린다.
+        else if (!client.HasSession) { color = Offline; state = "인물이 등록되지 않았습니다 — 웹에서 등록하세요"; }
         else if (!client.IsListening) { color = Offline; state = "마이크를 열 수 없습니다"; }
         else if (client.autoDetect) { color = Idle; state = "대기 중 — 그냥 말을 걸어보세요"; }
         else { color = Idle; state = "말하기 버튼 또는 스페이스바"; }
@@ -139,7 +141,7 @@ public class RaonVoiceUI : MonoBehaviour
         SetText(statusLabel, state);
 
         if (talkButtonLabel) talkButtonLabel.text = client.isRecording ? "전송" : "말하기";
-        if (talkButton) talkButton.interactable = !client.isWaiting;
+        if (talkButton) talkButton.interactable = !client.isWaiting && client.HasSession;
         if (micDropdown) micDropdown.interactable = !client.isRecording && client.MicDevices.Length > 0;
 
         // 레벨 미터: 올라갈 땐 즉시, 내려올 땐 부드럽게

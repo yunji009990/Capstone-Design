@@ -15,12 +15,14 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 
 | 파일 | 설명 |
 |---|---|
-| `app.py` | FastAPI 서버. `/talk`, `/talk_stream`, `/tts`, `/stt`, `/reset`, `/reload`, `/health` |
-| `persona.md` | 캐릭터 설정. 통째로 시스템 프롬프트에 들어감. `/reload`로 재시작 없이 반영 |
-| `voice.wav` | 음성 복제용 참조 음성. 교체하려면 **서버 재시작 필요** |
+| `app.py` | FastAPI 서버. `/talk`, `/talk_stream`, `/tts`, `/stt`, `/reset`, `/health` |
 | `modeling_raon.patch` | 모델 파일(`modeling_raon.py`)에 넣은 프레임 단위 스트리밍 훅 |
 | `start.sh` / `stop.sh` / `status.sh` | 기동 · 종료 · 상태 확인 |
 | `*.bak` | 우리가 손대기 전 원본 |
+
+**기본 인물도 기본 음성도 없습니다.** 인물은 웹(`Web/`)에서만 등록되고, 등록되지
+않은 세션으로 들어온 요청은 **409** 로 거절합니다. 폴백을 두면 등록을 잊었을 때
+오류가 아니라 엉뚱한 목소리로 답해서 코드 결함처럼 보입니다 — 실제로 한 번 겪었습니다.
 
 ## 환경변수 (`start.sh`에 설정)
 
@@ -30,6 +32,7 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 | `RAON_COMPILE` | `1` | `code_predictor`에 `torch.compile`. 약 0.66초 단축 |
 | `RAON_FRAME_CHUNK` | `8` | 스트리밍 전송 단위(프레임). 8이면 0.64초 분량 |
 | `RAON_ANSWER_TOKENS` | `200` | 답변 최대 토큰 |
+| `RAON_CONT` | `1` | 참조의 억양·속도까지 복제(`tts_continuation`). 참조가 10초 미만이면 깨지므로 그럴 땐 `0` |
 | `RAON_MAX_TURNS` | `6` | 유지할 대화 턴 수 |
 
 ## 서버를 새로 셋업하거나 복구할 때
