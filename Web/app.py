@@ -150,6 +150,104 @@ def _src_path(job):
     return None
 
 
+def build_reference(job, spk_id, target_speech=16.0, gap=0.45, min_piece=0.8):
+    """대상 화자의 발화 조각을 긴 것부터 골라 **간격을 두고** 이어 붙인다.
+
+    조각을 잇는 것 자체는 문제가 아니다 — 조각 3개짜리 12초 참조도 정상
+    동작했다. 분리기 ref.wav 의 결함은 조각을 **틈 없이** 붙여 쉬는 구간이
+    0.4% 가 된 것이었다. tts_continuation 은 참조를 이어 말하는데, 멈추는
+    패턴을 한 번도 못 본 참조에서는 멈출 줄을 모른다.
+
+    한 구간만 잘라 쓰면 발화가 9초밖에 안 나오는 반면, 파일 전체에서 모으면
+    20초를 채울 수 있다. 조각 사이에 자연스러운 쉼(기본 0.45초)을 넣고 경계를
+    페이드로 눌러 클릭을 막는다.
+    """
+    j = JOBS.get(job)
+    r = j["result"]
+    spk = next((s for s in r["speakers"] if s["spk_id"] == spk_id), None)
+    src = _src_path(job)
+    if not spk or not src:
+        return None
+    cluster, segs = spk["cluster"], r["viz"]["segments"]
+    y, sr = librosa.load(src, sr=24000, mono=True)
+    dur = len(y) / sr
+
+    # 같은 화자의 인접 조각을 붙이고, 다른 화자와 겹치는 것은 버린다
+    others = [(s["start"], s["end"]) for s in segs if s["spk"] != cluster]
+    spans, cur = [], None
+    for s in sorted((x for x in segs if x["spk"] == cluster), key=lambda x: x["start"]):
+        if cur and s["start"] - cur[1] <= 0.3:
+            cur[1] = s["end"]
+        else:
+            if cur:
+                spans.append(cur)
+            cur = [s["start"], s["end"]]
+    if cur:
+        spans.append(cur)
+    # 다른 화자와 겹치면 그 조각을 버리는 게 아니라 **겹친 부분만 잘라낸다**.
+    # 통째로 버리면 짧은 원본에서 남는 게 없다(14초 파일이 3.4초로 줄었다).
+    clean = []
+    for a, b in spans:
+        b = min(b, dur)
+        cuts = sorted((max(a, o0), min(b, o1)) for o0, o1 in others
+                      if o0 < b and o1 > a)
+        cur = a
+        for c0, c1 in cuts:
+            if c0 - cur >= min_piece:
+                clean.append((cur, c0))
+            cur = max(cur, c1)
+        if b - cur >= min_piece:
+            clean.append((cur, b))
+    if not clean:
+        return None
+
+    def snr_of(a, b):
+        return _quality(y[int(a * sr):int(b * sr)])[0] or 0.0
+
+    scored = sorted(((snr_of(a, b), b - a, a, b) for a, b in clean),
+                    key=lambda t: -t[1])          # 긴 조각부터
+    best_snr = max(s for s, *_ in scored)
+    picked, total = [], 0.0
+    for snr, d, a, b in scored:
+        if snr < best_snr - 12:                   # 유독 지저분한 조각은 건너뛴다
+            continue
+        picked.append((a, b))
+        total += d
+        if total >= target_speech:
+            break
+    if not picked:
+        return None
+    picked.sort()                                 # 원래 시간 순서를 지킨다
+
+    fade = int(0.02 * sr)
+    sil = np.zeros(int(gap * sr), dtype="float32")
+    parts = []
+    for a, b in picked:
+        p = y[int(a * sr):int(b * sr)].copy()
+        if len(p) > 2 * fade:
+            p[:fade] *= np.linspace(0, 1, fade)
+            p[-fade:] *= np.linspace(1, 0, fade)
+        parts += [p, sil]
+    out = np.concatenate(parts[:-1] + [sil])      # 끝에도 쉼을 남긴다
+    pk = float(np.abs(out).max())
+    out = out * (min(10.0, 0.8 / pk) if pk > 1e-6 else 1.0)
+
+    quiet = _quality(out)[1]
+    # SNR 은 **발화만 이어붙인 신호**에서 잰다. 넣은 쉼은 완전한 0 이라 바닥값을
+    # 0 으로 만들고, 조각별로 재서 평균 내면 1~2초 조각의 바닥값 추정이 흔들린다.
+    speech = np.concatenate([y[int(a * sr):int(b * sr)] for a, b in picked])
+    spk_pk = float(np.abs(speech).max())
+    snr = _quality(speech * (min(10.0, 0.8 / spk_pk) if spk_pk > 1e-6 else 1.0))[0] or 0.0
+    warn = _warn_text(snr, quiet)
+    buf = io.BytesIO()
+    sf.write(buf, out, 24000, format="WAV", subtype="PCM_16")
+    return buf.getvalue(), {
+        "pieces": len(picked), "sec": round(len(out) / sr, 1),
+        "speech_sec": round(total, 1), "snr_db": snr, "quiet_ratio": quiet,
+        "spans": [[round(a, 1), round(b, 1)] for a, b in picked][:8],
+        "level": round(_level(out), 3), "warning": warn}
+
+
 def best_window(job, spk_id, win=14.0, min_sec=8.0):
     """화자 분리 결과에서 **연속된 한 구간**을 고른다.
 
@@ -255,7 +353,7 @@ def window_info(job: str, spk_id: str, audio: int = 0):
     """등록 전에 실제로 보낼 구간을 들어보고 지표를 확인한다."""
     if job not in JOBS or not JOBS[job].get("result"):
         raise HTTPException(404, "없는 작업")
-    got = best_window(job, spk_id)
+    got = build_reference(job, spk_id)
     if not got:
         raise HTTPException(404, "연속 구간을 찾지 못했습니다")
     wav, info = got
@@ -274,7 +372,7 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
     if not spk:
         raise HTTPException(400, "없는 화자")
 
-    got = best_window(job, spk_id)
+    got = build_reference(job, spk_id)
     if got:
         wav, info = got
     else:
