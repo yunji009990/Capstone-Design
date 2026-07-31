@@ -153,14 +153,13 @@ def _src_path(job):
 def build_reference(job, spk_id, target_speech=16.0, gap=0.45, min_piece=0.8):
     """대상 화자의 발화 조각을 긴 것부터 골라 **간격을 두고** 이어 붙인다.
 
-    조각을 잇는 것 자체는 문제가 아니다 — 조각 3개짜리 12초 참조도 정상
-    동작했다. 분리기 ref.wav 의 결함은 조각을 **틈 없이** 붙여 쉬는 구간이
-    0.4% 가 된 것이었다. tts_continuation 은 참조를 이어 말하는데, 멈추는
-    패턴을 한 번도 못 본 참조에서는 멈출 줄을 모른다.
-
     한 구간만 잘라 쓰면 발화가 9초밖에 안 나오는 반면, 파일 전체에서 모으면
-    20초를 채울 수 있다. 조각 사이에 자연스러운 쉼(기본 0.45초)을 넣고 경계를
-    페이드로 눌러 클릭을 막는다.
+    16~17초를 채울 수 있다. 조각 사이에 쉼(기본 0.45초)을 넣고 경계를 페이드로
+    눌러 클릭을 막는다.
+
+    쉼을 넣는 건 듣기에 자연스럽기 때문이지 품질 조건이라서가 아니다 —
+    통제 실험에서 **쉼 0% 인 깨끗한 참조도 정상 동작했다.** 조각을 붙이는 것
+    자체도 문제가 아니었다(조각 3개짜리 12초 참조가 정상 동작).
     """
     j = JOBS.get(job)
     r = j["result"]
@@ -172,7 +171,7 @@ def build_reference(job, spk_id, target_speech=16.0, gap=0.45, min_piece=0.8):
     y, sr = librosa.load(src, sr=24000, mono=True)
     dur = len(y) / sr
 
-    # 같은 화자의 인접 조각을 붙이고, 다른 화자와 겹치는 것은 버린다
+    # 같은 화자의 인접 조각을 붙인다
     others = [(s["start"], s["end"]) for s in segs if s["spk"] != cluster]
     spans, cur = [], None
     for s in sorted((x for x in segs if x["spk"] == cluster), key=lambda x: x["start"]):
@@ -432,33 +431,47 @@ def _level(y):
     return float(np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)).max())
 
 
-def _warn_text(snr, quiet):
-    bad = []
-    if snr is not None and snr < 30:
-        bad.append(f"SNR {snr:.0f}dB (30dB 이상 권장)")
-    if quiet is not None and quiet < 0.10:
-        bad.append(f"쉬는 구간 {quiet:.0%} (10% 이상 권장)")
-    if not bad:
+def _warn_text(snr, quiet=None):
+    """참조 품질 경고. **기준이 확정적이지 않다는 점을 알고 쓸 것.**
+
+    통제 실험(같은 화자·같은 내용에 핑크 잡음만 추가)으로 확인한 것은 이렇다 —
+    40dB 정상 / 26dB 정상 / 21dB 부터 길이 폭주 / 16dB 는 상한까지 반복.
+    그래서 25dB 아래는 확실히 위험하다.
+
+    다만 이 지표가 모든 실패를 잡지는 못한다. 배경 음악과 다른 목소리가 섞인
+    실제 녹화본은 31dB 로 측정되면서도 루프와 지지직이 났다. 대역별 하위 분위수는
+    **정상 잡음**을 가정하는데 음악은 비정상 신호이기 때문이다.
+
+    쉬는 구간 비율은 기준에서 뺐다 — 쉼 0% 인 깨끗한 참조가 정상 동작했다."""
+    if snr is None or snr >= 25:
         return ""
-    return ("참조 품질이 낮습니다 — " + ", ".join(bad) +
-            ". 오디오가 잘리거나 같은 소리를 반복할 수 있습니다.")
+    return (f"참조 잡음이 많습니다 (SNR {snr:.0f}dB, 25dB 이상 권장). "
+            f"오디오가 늘어지거나 같은 소리를 반복할 수 있습니다.")
 
 
-def _quality(y):
-    """참조로 쓸 만한지 본다. 실측으로 갈린 두 지표만 본다 —
+def _quality(y, sr=24000):
+    """참조의 잡음 정도를 **대역별로** 잰다.
 
-    잘 된 참조: SNR 39~58dB, 무음 15~28%.  실패한 참조: SNR 16~25dB, 무음 0~9%.
-    배경음이 깔려 있어도 SNR 이 확보되면 잘 된다(노래 틀고 녹음한 것도 통과했다).
-    쉼이 없는 참조는 모델이 멈출 줄 몰라서 같은 소리를 반복하는 일이 생긴다."""
+    처음에는 0.1초 창 RMS 의 최댓값과 하위 10퍼센타일 비로 쟀는데, 그건 잡음이
+    아니라 다이내믹 레인지를 재는 것이었다. 쉬는 구간을 잘라낸 깨끗한 녹음이
+    14.9dB 로 나왔다(실제로는 잡음이 없고 정상 동작한다). 대역마다 시간축 하위
+    분위수를 잡음 바닥으로 보면 쉼이 없어도 추정된다.
+
+    쉬는 구간 비율도 같이 돌려주지만 품질 판정에는 쓰지 않는다 — 쉼 0% 인
+    깨끗한 참조가 정상 동작해서 기준에서 뺐다. 화면 표시용이다."""
+    if len(y) < sr // 2:
+        return None, None, ""
+    S = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
+    f = np.fft.rfftfreq(1024, 1 / sr)
+    b = (f >= 200) & (f <= 6000)                 # 음성 대역만 본다
+    floor = float(np.percentile(S, 10, axis=1)[b].mean())
+    sig = float(np.percentile(S, 90, axis=1)[b].mean())
+    snr = float(20 * np.log10(max(sig, 1e-9) / max(floor, 1e-9)))
     w = 2400
     n = len(y) // w
-    if n < 2:
-        return None, None, ""
-    r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1))
-    peak, floor = float(r.max()), float(np.percentile(r, 10))
-    snr = 20 * np.log10(max(peak, 1e-9) / max(floor, 1e-9))
-    quiet = float((r < peak * 0.05).mean())
-    return round(snr, 1), round(quiet, 3), _warn_text(snr, quiet)
+    r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)) if n >= 2 else np.array([0.0])
+    quiet = float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
+    return round(snr, 1), round(quiet, 3), _warn_text(snr)   # 파이썬 float 이어야 JSON 직렬화된다
 
 
 @app.post("/publish_direct")
