@@ -262,17 +262,22 @@ function renderSpeakers() {
   const box = $("#spklist"); box.innerHTML = "";
   result.speakers.forEach(s => {
     const ci = result.viz.color_idx[s.cluster] ?? 0;
+    const ref = s.ref || {};
+    const snr = ref.snr_db ?? 0;
+    const snrCls = snr >= 15 ? "ok" : (snr >= 8 ? "warn" : "bad");
+    const durCls = (ref.dur >= 8 && ref.dur <= 30) ? "ok" : "warn";
     const el = document.createElement("div");
     el.className = "spk"; el.dataset.id = s.spk_id;
     el.innerHTML =
       `<div class="top">
          <span class="dot" style="background:${COLORS[ci % COLORS.length]}"></span>
          <b>${s.spk_id}</b>
+         <span class="pill ${durCls}">참조 ${ref.dur ?? "?"}초</span>
+         <span class="pill ${snrCls}">SNR ${snr}dB</span>
          <span class="grow"></span>
-         <button class="ghost" data-win="${s.spk_id}">듣기</button>
+         <button class="ghost" data-play="${s.ref.file}">듣기</button>
        </div>
-       <div class="meta">이 파일에서 총 ${s.total_speech_sec}초 발화</div>
-       <div class="meta" data-info="${s.spk_id}">보낼 구간 확인 중…</div>`;
+       <div class="meta">이 파일에서 총 ${s.total_speech_sec}초 발화 · 참조는 ${ref.n_pieces ?? 1}개 조각을 이어붙임</div>`;
     el.onclick = ev => {
       if (ev.target.dataset.play) return;
       picked = s.spk_id;
@@ -282,25 +287,9 @@ function renderSpeakers() {
     };
     box.appendChild(el);
   });
-  box.querySelectorAll("[data-win]").forEach(b => b.onclick = ev => {
+  box.querySelectorAll("[data-play]").forEach(b => b.onclick = ev => {
     ev.stopPropagation();
-    const p = $("#player"); p.style.display = "";
-    p.src = `/window/${job}/${b.dataset.win}?audio=1`; p.play();
-  });
-  // 분리기가 준 값이 아니라 **실제로 보낼 구간**의 지표를 보여준다.
-  // 조각을 이어붙인 참조는 continuation 에 맞지 않아 연속 구간을 따로 고른다.
-  result.speakers.forEach(async s => {
-    const el = box.querySelector(`[data-info="${s.spk_id}"]`);
-    try {
-      const w = await (await fetch(`/window/${job}/${s.spk_id}`)).json();
-      if (w.detail) { el.textContent = "연속 구간 없음 — 조각 참조로 보냅니다"; return; }
-      const ok = v => v ? "ok" : "bad";
-      el.innerHTML =
-        `보낼 참조 <b>${w.sec}초</b> — 발화 ${w.speech_sec}초, 조각 ${w.pieces}개를 쉼을 두고 이어붙임 ` +
-        `<span class="pill ${ok(w.snr_db >= 30)}">SNR ${w.snr_db}dB</span> ` +
-        `<span class="pill ${ok(w.quiet_ratio >= 0.10)}">쉼 ${(w.quiet_ratio*100).toFixed(0)}%</span>` +
-        (w.warning ? `<div style="color:var(--bad);margin-top:4px">${w.warning}</div>` : "");
-    } catch (e) { el.textContent = "구간 확인 실패: " + e; }
+    const p = $("#player"); p.style.display = ""; p.src = `/file/${job}/${b.dataset.play}`; p.play();
   });
 }
 
