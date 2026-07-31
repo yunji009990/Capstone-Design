@@ -29,6 +29,21 @@ SESS_DIR = os.path.join(SRV, "sessions")
 SESS = {}                       # sid -> {"voice": path, "system": str}
 CURRENT = {"session": None}
 
+# 세션 페르소나 앞에 항상 붙는 규칙.
+# 이건 캐릭터 설정이 아니라 음성 대화에 필요한 기술 제약이라, 웹이 매번
+# 적어 보내게 하면 반드시 빠뜨린다. 특히 첫 줄이 중요하다 — 짧은 페르소나는
+# 베이스 모델의 "AI 비서" 기본 성격을 못 이겨서 목록과 설명을 늘어놓는다.
+BASE_RULES = """당신은 AI 비서가 아니라 아래 [인물]에 설명된 사람입니다.
+설명·조언·목록을 늘어놓지 말고, 그 사람이 되어 사람처럼 대화하세요.
+
+말하기 규칙
+- 한두 문장으로 답하세요. 세 문장을 넘기지 마세요.
+- 이모지, 특수기호, 목록, 번호, 굵은 글씨를 쓰지 마세요. 음성으로 읽힙니다.
+- "무엇을 도와드릴까요", "말씀해 주세요" 같은 상담원 말투를 쓰지 마세요.
+- 되묻기만 하지 말고 당신 이야기도 하세요.
+- 직전에 한 말과 같은 문장을 반복하지 마세요.
+- 모르면 솔직하게 모른다고 말하세요."""
+
 def build_system():
     parts = []
     for f in ("persona.md", "knowledge.md"):
@@ -41,12 +56,20 @@ def _sess_path(sid, *parts):
     return os.path.join(SESS_DIR, sid, *parts)
 
 def _sess_system(sid):
-    parts = []
-    for f in ("persona.md", "knowledge.md"):
-        p = _sess_path(sid, f)
-        if os.path.exists(p):
-            parts.append(open(p, encoding="utf-8").read().strip())
-    return "\n\n".join([x for x in parts if x])
+    """공통 규칙 + 인물 설명 + 사전지식. 웹은 인물만 보내면 된다."""
+    persona = knowledge = ""
+    p = _sess_path(sid, "persona.md")
+    if os.path.exists(p):
+        persona = open(p, encoding="utf-8").read().strip()
+    k = _sess_path(sid, "knowledge.md")
+    if os.path.exists(k):
+        knowledge = open(k, encoding="utf-8").read().strip()
+    if not persona:
+        return ""
+    out = f"{BASE_RULES}\n\n[인물]\n{persona}"
+    if knowledge:
+        out += f"\n\n[사전지식]\n{knowledge}"
+    return out
 
 def load_sessions():
     """재시작해도 등록된 세션이 살아 있도록 디스크에서 복원한다."""
@@ -349,6 +372,13 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     if not (8 <= info.duration <= 40):
         print(f"[세션] 경고: 참조 음성 {info.duration:.1f}초 (권장 10~30초)", flush=True)
 
+    # 짧은 페르소나는 베이스 모델의 비서 성격을 못 이긴다. 말투와 대화 예시가 있어야 한다.
+    warn = ""
+    if len(persona.strip()) < 120:
+        warn = (f"페르소나가 {len(persona.strip())}자로 짧습니다. 말투와 대화 예시를 포함해 "
+                f"200자 이상을 권장합니다. 짧으면 캐릭터가 아니라 AI 비서처럼 답합니다")
+        print(f"[세션] 경고: {warn}", flush=True)
+
     _save_atomic(raw, _sess_path(sid, "voice.wav"))
     _save_atomic(persona.strip().encode("utf-8"), _sess_path(sid, "persona.md"))
     if knowledge.strip():
@@ -362,7 +392,10 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
     print(f"[세션] {sid} 등록 — 음성 {info.duration:.1f}초, "
           f"페르소나 {len(persona)}자, 모델 {'있음' if has_model else '없음'}", flush=True)
-    return {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}
+    out = {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}
+    if warn:
+        out["warning"] = warn
+    return out
 
 
 @app.post("/session/{sid}/model")

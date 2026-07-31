@@ -21,8 +21,13 @@ public class RaonVoiceClient : MonoBehaviour
     public string serverUrl = "http://220.69.208.201:8000";
     [Tooltip("서버에 RAON_TOKEN을 설정했다면 같은 값을 입력")]
     public string token = "";
-    [Tooltip("대화 맥락을 구분하는 키. 캐릭터/플레이어별로 다르게 주면 각자 기억합니다")]
+    [Tooltip("대화 맥락을 구분하는 키. 서버에서 세션을 받아오면 이 값이 덮어써집니다")]
     public string sessionId = "player1";
+    [Tooltip("서버의 현재 세션을 주기적으로 조회해 sessionId에 반영합니다. "
+           + "웹에서 인물을 등록하면 자동으로 그 인물로 바뀝니다")]
+    public bool followServerSession = true;
+    [Tooltip("세션 조회 간격(초)")]
+    public float sessionPollSec = 5f;
     [Tooltip("시작할 때 /health로 서버 가동 여부를 확인. 자동 감지는 서버가 준비된 뒤에만 동작합니다")]
     public bool checkHealthOnStart = true;
     [Tooltip("내가 한 말(X-Heard) 자막을 받아옵니다. 서버가 음성 인식을 먼저 돌려야 해서 응답이 약 0.55초 느려집니다. "
@@ -66,6 +71,11 @@ public class RaonVoiceClient : MonoBehaviour
     public event Action<string> OnError;
     /// <summary>서버 상태 확인 결과. (준비됨, 안내 메시지)</summary>
     public event Action<bool, string> OnHealth;
+    /// <summary>서버의 현재 세션이 바뀌었을 때. (세션ID, 모델 준비됨)</summary>
+    public event Action<string, bool> OnSessionChanged;
+
+    /// <summary>서버가 알려준 현재 세션에 3D 모델이 준비되어 있는지.</summary>
+    public bool SessionHasModel { get; private set; }
 
     /// <summary>답변 음성을 재생 중인지. 상태 표시나 립싱크에 사용하세요.</summary>
     public bool IsSpeaking => _audio != null && _audio.isPlaying;
@@ -121,6 +131,7 @@ public class RaonVoiceClient : MonoBehaviour
     {
         StartListening();
         if (checkHealthOnStart) StartCoroutine(CheckHealth());
+        if (followServerSession) StartCoroutine(PollSession());
     }
 
     void OnDisable() => StopListening();
@@ -489,6 +500,55 @@ public class RaonVoiceClient : MonoBehaviour
 
         float network = elapsed - serverSec;
         return $"왕복 {elapsed:F1}초 = 서버 {serverSec:F1}초 + 네트워크 {network:F1}초";
+    }
+
+    // ─────────── 세션 추적 ───────────
+    [Serializable]
+    class SessionResponse
+    {
+        public string session;
+        public bool has_model;
+    }
+
+    /// <summary>
+    /// 서버의 현재 세션을 따라간다. 웹에서 인물을 등록하면 그 세션으로 갈아탄다.
+    /// 등록된 세션이 없으면 인스펙터 값을 그대로 쓰고, 서버는 전역 설정으로 응답한다.
+    /// </summary>
+    IEnumerator PollSession()
+    {
+        var wait = new WaitForSeconds(Mathf.Max(1f, sessionPollSec));
+        while (true)
+        {
+            using (var req = UnityWebRequest.Get($"{serverUrl}/session/current"))
+            {
+                if (!string.IsNullOrEmpty(token)) req.SetRequestHeader("X-Token", token);
+                req.timeout = 10;
+                yield return req.SendWebRequest();
+
+                if (req.result == UnityWebRequest.Result.Success)
+                {
+                    SessionResponse s = null;
+                    try { s = JsonUtility.FromJson<SessionResponse>(req.downloadHandler.text); }
+                    catch (Exception e) { Debug.LogWarning($"[Raon] 세션 응답 파싱 실패: {e.Message}"); }
+
+                    if (s != null && !string.IsNullOrEmpty(s.session)
+                        && (s.session != sessionId || s.has_model != SessionHasModel))
+                    {
+                        bool changed = s.session != sessionId;
+                        sessionId = s.session;
+                        SessionHasModel = s.has_model;
+                        if (changed) Debug.Log($"[Raon] 세션 전환: {sessionId} (모델 {(s.has_model ? "있음" : "없음")})");
+                        OnSessionChanged?.Invoke(sessionId, s.has_model);
+                    }
+                }
+                else if (req.responseCode == 401)
+                {
+                    Debug.LogError("[Raon] 토큰이 틀렸습니다. 인스펙터의 Token 값을 확인하세요.");
+                    yield break;   // 토큰이 틀리면 계속 두드려봐야 소용없다
+                }
+            }
+            yield return wait;
+        }
     }
 
     [Serializable]

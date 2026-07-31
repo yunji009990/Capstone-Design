@@ -230,8 +230,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   serverUrl: http://220.69.208.201:8000
-  token: 
+  token: 23605a891e448b5aa46f82c8640b554c
   sessionId: player1
+  followServerSession: 1
+  sessionPollSec: 5
   checkHealthOnStart: 1
   showHeardSubtitle: 0
   useStreaming: 1
