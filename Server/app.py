@@ -17,6 +17,10 @@ TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"
+RAS   = os.environ.get("RAON_RAS", "1") == "1"
+RAS_WIN  = int(os.environ.get("RAON_RAS_WINDOW", "40"))
+RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.2"))
+CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 16초
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
 S = {"pipe": None, "loaded_at": 0.0}
@@ -192,6 +196,24 @@ async def lifespan(app):
     RP = get_class_from_dynamic_module("modeling_raon.RaonPipeline", MODEL,
                                        revision=getattr(cfg, "_commit_hash", None))
     S["pipe"] = RP(MODEL, device="cuda", dtype="bfloat16")
+
+    # 반복 억제(RAS)가 기본으로 꺼져 있다. 꺼두면 오디오가 "아아아아안아아안…"
+    # 처럼 같은 소리를 반복하다 max_new_tokens 에 걸려서야 끊긴다(512프레임=41초).
+    #
+    # RAS 는 "방금 뽑은 토큰이 최근 window 프레임의 threshold 비율을 넘으면 다시
+    # 뽑는다"는 규칙이다. 기본 0.5 는 느슨해서 두세 토큰이 번갈아 도는 패턴을
+    # 놓친다. 같은 파일의 다른 호출부가 0.1/40 을 쓰기에 그쪽에 맞춰 조인다.
+    # 다만 무음도 같은 토큰이 이어지므로 너무 낮추면 쉼에 잡음이 낀다 — 0.2 로 둔다.
+    #
+    # 폭주해도 16초에서 끊기게 상한도 낮춘다. 40자 답변이면 5초면 충분하다.
+    tp = S["pipe"].task_params
+    cont = dict(tp.get("tts_continuation", tp.get("tts", {})))
+    cont.update({"ras_enabled": RAS, "ras_window_size": RAS_WIN,
+                 "ras_repetition_threshold": RAS_THR,
+                 "max_new_tokens": CONT_FRAMES})
+    tp["tts_continuation"] = cont
+    print(f"[설정] tts_continuation — {cont}", flush=True)
+
     load_sessions()
     if os.environ.get("RAON_COMPILE", "1") == "1":
         try:

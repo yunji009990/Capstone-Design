@@ -18,6 +18,7 @@ import uuid
 
 import httpx
 import librosa
+import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
@@ -153,7 +154,11 @@ LAST_REF = os.path.join(WORK, "last_ref.wav")
 
 
 def _to_wav24(raw, name):
-    """무엇이 올라오든 24kHz 모노 wav 로 맞춘다. 서버가 참조로 쓰는 형식이다."""
+    """무엇이 올라오든 24kHz 모노 wav 로 맞춘다. 서버가 참조로 쓰는 형식이다.
+
+    음량도 맞춘다. 영상에서 딴 소리는 작게 녹음된 경우가 많은데, 참조가 작으면
+    합성 결과가 눌리고 억양도 제대로 안 따라온다. 실측으로 잘 됐던 참조가
+    peak RMS 0.14~0.20 이었고 실패한 것이 0.05 였다."""
     tmp = os.path.join(WORK, "_upload" + os.path.splitext(name)[1].lower())
     with open(tmp, "wb") as o:
         o.write(raw)
@@ -163,9 +168,49 @@ def _to_wav24(raw, name):
         os.remove(tmp)
     if len(y) == 0:
         raise HTTPException(400, "오디오를 읽지 못했습니다")
+
+    peak = float(np.abs(y).max())
+    gain = min(10.0, 0.8 / peak) if peak > 1e-6 else 1.0   # 과증폭은 10배로 제한
+    y = y * gain
+    snr, quiet, warn = _quality(y)
     buf = io.BytesIO()
     sf.write(buf, y, 24000, format="WAV", subtype="PCM_16")
-    return buf.getvalue(), len(y) / 24000
+    return buf.getvalue(), len(y) / 24000, {
+        "level": round(_level(y), 3), "gain": round(gain, 1),
+        "snr_db": snr, "quiet_ratio": quiet, "warning": warn}
+
+
+def _level(y):
+    """0.1초 창 RMS 의 최댓값. 사람이 느끼는 음량에 가깝다."""
+    w = 2400
+    if len(y) < w:
+        return float(np.sqrt((y ** 2).mean()))
+    n = len(y) // w
+    return float(np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)).max())
+
+
+def _quality(y):
+    """참조로 쓸 만한지 본다. 실측으로 갈린 두 지표만 본다 —
+
+    잘 된 참조: SNR 39~58dB, 무음 15~28%.  실패한 참조: SNR 16~25dB, 무음 0~9%.
+    배경음이 깔려 있어도 SNR 이 확보되면 잘 된다(노래 틀고 녹음한 것도 통과했다).
+    쉼이 없는 참조는 모델이 멈출 줄 몰라서 같은 소리를 반복하는 일이 생긴다."""
+    w = 2400
+    n = len(y) // w
+    if n < 2:
+        return None, None, ""
+    r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1))
+    peak, floor = float(r.max()), float(np.percentile(r, 10))
+    snr = 20 * np.log10(max(peak, 1e-9) / max(floor, 1e-9))
+    quiet = float((r < peak * 0.05).mean())
+    bad = []
+    if snr < 30:
+        bad.append(f"SNR {snr:.0f}dB (30dB 이상 권장)")
+    if quiet < 0.10:
+        bad.append(f"쉬는 구간 {quiet:.0%} (10% 이상 권장)")
+    return round(snr, 1), round(quiet, 3), (
+        "참조 품질이 낮습니다 — " + ", ".join(bad) +
+        ". 오디오가 잘리거나 같은 소리를 반복할 수 있습니다." if bad else "")
 
 
 @app.post("/publish_direct")
@@ -177,7 +222,7 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
     ext = os.path.splitext(voice.filename)[1].lower()
     if ext not in ALLOWED:
         raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
-    wav, dur = _to_wav24(await voice.read(), voice.filename)
+    wav, dur, qual = _to_wav24(await voice.read(), voice.filename)
     with open(LAST_REF, "wb") as o:      # 보낸 것을 그대로 들어볼 수 있게 남긴다
         o.write(wav)
     try:
@@ -188,7 +233,7 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         raise HTTPException(502, f"Raon 서버에 연결할 수 없습니다: {e}")
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
-    return {**r.json(), "sent": {"file": voice.filename, "sec": round(dur, 2)}}
+    return {**r.json(), "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
 
 @app.get("/last_ref.wav")

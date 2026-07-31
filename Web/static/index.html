@@ -113,6 +113,7 @@
       <button class="ghost" id="endbtn">현재 세션 종료</button>
     </div>
     <pre id="out" style="display:none"></pre>
+    <div class="pill bad" id="refwarn" style="display:none; margin-top:10px; padding:8px 12px; border-radius:6px"></div>
     <div class="hint" id="verify" style="display:none">
       아래는 <b>서버로 실제로 넘어간 참조 음성</b>입니다. 위에서 고른 것과 같은지 확인하세요.
       <audio id="sentplayer" controls style="width:100%; margin-top:8px"></audio>
@@ -338,6 +339,9 @@ $("#publish").onclick = async () => {
     if (r.ok && mode === "direct") {   // 실제로 넘어간 것을 되들려준다
       $("#verify").style.display = "";
       $("#sentplayer").src = "/last_ref.wav?t=" + Date.now();
+      const w = (jj.sent || {}).warning;
+      $("#refwarn").style.display = w ? "" : "none";
+      $("#refwarn").textContent = w || "";
     }
   } catch (e) { show(String(e), true); }
   $("#publish").disabled = false; status();
