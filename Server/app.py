@@ -122,6 +122,34 @@ def ref_text(voice):
         print(f"[참조전사] {time.time()-t0:.1f}초 — {REF_TEXT[voice]!r}", flush=True)
     return REF_TEXT[voice]
 
+def frame_targets():
+    """프레임 훅을 걸 대상. 래퍼와 실제 모델이 다를 수 있어 둘 다 건다."""
+    m = S["pipe"].model
+    g = getattr(m, "get_model", None)
+    return [m, g()] if callable(g) and g() is not m else [m]
+
+def generate(text, voice):
+    """오디오 생성. 반환 파형 대신 프레임 훅으로 생성 중에 직접 모은다.
+
+    tts_continuation 의 반환값은 프리필한 참조 프레임을 빼는 길이 계산이 어긋나
+    거의 비어 있다(같은 세션·같은 참조로 반환 0.3초 / 훅 4.5초). 훅으로 모으면
+    스트리밍과 비스트리밍이 같은 오디오를 보게 되고, 계측도 믿을 수 있다."""
+    chunks = []
+    ts = frame_targets()
+    for t in ts:
+        t._frame_callback = lambda w: chunks.append(w.detach().cpu().float().numpy())
+        t._frame_chunk = FRAME_CHUNK
+    try:
+        if CONT:
+            S["pipe"].tts_continuation(text, ref_audio=voice, ref_text=ref_text(voice))
+        else:
+            S["pipe"].tts(text, speaker_audio=voice)
+    finally:
+        for t in ts:
+            t._frame_callback = None
+    a = np.concatenate(chunks) if chunks else np.zeros(0, dtype="float32")
+    return torch.from_numpy(a), 24000
+
 def warm_pipe(voice):
     """첫 생성은 코드 경로가 처음 도느라 느리다. continuation 은 참조를 토큰화·프리필하는
     별도 경로라 tts() 로 예열해도 소용없다. 참조 전사도 여기서 캐시된다."""
@@ -137,12 +165,7 @@ def synth(text, voice, tries=2):
     pipe = S["pipe"]
     for i in range(tries):
         t0 = time.time()
-        if CONT:
-            # tts() 는 참조를 화자 임베딩 한 토큰으로만 넘겨 음색만 복제한다.
-            # tts_continuation 은 참조 오디오를 문맥에 깔아 억양·속도까지 잇는다.
-            res = pipe.tts_continuation(text, ref_audio=voice, ref_text=ref_text(voice))
-        else:
-            res = pipe.tts(text, speaker_audio=voice)
+        res = generate(text, voice)
         print(f"[합성] {res[0].numel()/res[1]:.1f}초 분량 / {time.time()-t0:.1f}초 소요"
               f"{' (continuation)' if CONT else ''}", flush=True)
         data = to_wav(res)
@@ -334,11 +357,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
             loop.call_soon_threadsafe(q.put_nowait, a.tobytes())
 
         def run():
-            m = S["pipe"].model
-            g = getattr(m, "get_model", None)
-            ts = [m]
-            if callable(g) and g() is not m:
-                ts.append(g())
+            ts = frame_targets()
             for t in ts:
                 t._frame_callback = cb
                 t._frame_chunk = FRAME_CHUNK
@@ -426,6 +445,16 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
     REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
+
+    # 서버는 한 번에 한 인물만 보관한다. 세션 ID 를 비우면 시각으로 자동 생성되므로
+    # 지우지 않으면 등록할 때마다 쌓인다. 원본은 웹에 있으니 언제든 다시 만들 수 있고,
+    # 실존 인물의 음성을 서버에 오래 두지 않는 편이 낫다.
+    for old in [s for s in SESS if s != sid]:
+        SESS.pop(old, None)
+        HIST.pop(old, None)
+        REF_TEXT.pop(_sess_path(old, "voice.wav"), None)
+        shutil.rmtree(_sess_path(old), ignore_errors=True)
+        print(f"[세션] {old} 정리", flush=True)
     async with LOCK:
         # 새 참조로 예열해 둔다. 등록은 지연에 민감하지 않고, 첫 대화는 민감하다.
         await asyncio.to_thread(warm_pipe, SESS[sid]["voice"])
