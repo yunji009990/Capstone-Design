@@ -463,7 +463,8 @@ public class RaonVoiceClient : MonoBehaviour
         _audio.Play();
         isWaiting = false;
 
-        Debug.Log($"[Raon] 첫 소리까지 {Time.realtimeSinceStartup - t0:F1}초 | 답변: {lastAnswer}");
+        string heardPart = string.IsNullOrEmpty(lastHeard) ? "" : $"들은 말: {lastHeard} | ";
+        Debug.Log($"[Raon] 첫 소리까지 {Time.realtimeSinceStartup - t0:F1}초 | {heardPart}답변: {lastAnswer}");
         OnAnswer?.Invoke(lastHeard, lastAnswer);
         return true;
     }

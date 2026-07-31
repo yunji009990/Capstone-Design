@@ -235,7 +235,7 @@ MonoBehaviour:
   followServerSession: 1
   sessionPollSec: 5
   checkHealthOnStart: 1
-  showHeardSubtitle: 0
+  showHeardSubtitle: 1
   useStreaming: 1
   streamPrebufferSec: 1.2
   streamTailSec: 0.6
