@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>다시, 봄 — 세션 등록</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141922; --line:#232a36; --fg:#e6e9ef; --dim:#8b93a3;
+          --accent:#4c8dff; --ok:#3fbf7f; --warn:#e8b339; --bad:#e0574f; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.6 "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:26px 20px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:20px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:18px; margin-bottom:16px; }
+  .card h2 { font-size:13px; margin:0 0 12px; color:var(--dim); font-weight:600; }
+  label { display:block; font-size:13px; color:var(--dim); margin:10px 0 4px; }
+  input[type=text], input[type=number], textarea { width:100%; background:#0e131b; color:var(--fg);
+      border:1px solid var(--line); border-radius:6px; padding:9px 11px; font:inherit; }
+  textarea { resize:vertical; font-size:14px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px;
+           padding:9px 16px; font:inherit; cursor:pointer; }
+  button.ghost { background:#252c39; }
+  button:disabled { opacity:.45; cursor:default; }
+  #drop { border:1.5px dashed var(--line); border-radius:8px; padding:24px;
+          text-align:center; color:var(--dim); cursor:pointer; }
+  #drop.on { border-color:var(--accent); color:var(--fg); }
+  canvas { width:100%; height:120px; display:block; background:#0e131b;
+           border:1px solid var(--line); border-radius:6px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1 1 auto; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:99px; background:#252c39; color:var(--dim); }
+  .pill.ok { background:rgba(63,191,127,.15); color:var(--ok); }
+  .pill.warn { background:rgba(232,179,57,.15); color:var(--warn); }
+  .pill.bad { background:rgba(224,87,79,.15); color:var(--bad); }
+  pre { background:#0e131b; border:1px solid var(--line); border-radius:6px;
+        padding:12px; overflow:auto; font-size:13px; margin:10px 0 0; white-space:pre-wrap; }
+  .hint { font-size:12px; color:var(--dim); margin-top:8px; }
+  .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:18px;
+         padding:9px 12px; background:var(--panel); border:1px solid var(--line);
+         border-radius:8px; flex-wrap:wrap; }
+  .spk { border:1.5px solid var(--line); border-radius:8px; padding:12px 14px;
+         margin-bottom:8px; cursor:pointer; background:#0e131b; }
+  .spk.sel { border-color:var(--accent); background:rgba(76,141,255,.08); }
+  .spk .top { display:flex; align-items:center; gap:10px; }
+  .dot { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+  .meta { font-size:12px; color:var(--dim); margin-top:5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>다시, 봄 — 세션 등록</h1>
+  <div class="sub">영상이나 음성에서 화자를 분리해 목소리를 고르고, 인물 설정과 함께 Raon 서버에 등록합니다.</div>
+
+  <div class="bar" id="bar">상태 확인 중…</div>
+
+  <div class="card">
+    <h2>1. 파일</h2>
+    <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
+    <div class="row" style="margin-top:12px">
+      <label style="margin:0">화자 수</label>
+      <input type="number" id="nspk" min="0" max="8" value="0" style="width:80px">
+      <span class="hint" style="margin:0">0이면 자동 판별</span>
+    </div>
+    <div class="hint" id="jobinfo"></div>
+  </div>
+
+  <div class="card" id="spkcard" style="display:none">
+    <h2>2. 화자 선택</h2>
+    <canvas id="wave" height="120"></canvas>
+    <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
+      복제 품질이 여기서 결정됩니다.</div>
+    <div id="spklist"></div>
+    <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
+  </div>
+
+  <div class="card">
+    <h2>3. 인물 설정</h2>
+    <label>세션 ID</label>
+    <input type="text" id="session" placeholder="비우면 서버가 시각으로 자동 생성">
+    <label>인물 (persona)</label>
+    <textarea id="persona" rows="18"></textarea>
+    <div class="hint"><b>대화 예시가 결정적입니다.</b> 규칙만 적으면 모델이 무시하고 존댓말 쓰는 일반 비서처럼 답합니다.
+      그 사람이 할 법한 말 3~5쌍을 반드시 넣으세요.</div>
+    <label>사전지식 (knowledge, 선택)</label>
+    <textarea id="knowledge" rows="4" placeholder="이름, 관계, 함께한 기억 등"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>4. 등록</h2>
+    <div class="row">
+      <button id="publish" disabled>세션 시작</button>
+      <button class="ghost" id="endbtn">현재 세션 종료</button>
+    </div>
+    <pre id="out" style="display:none"></pre>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const COLORS = ["#4c8dff", "#e8b339", "#3fbf7f", "#c778dd", "#e0574f", "#39c5cf"];
+let job = null, result = null, picked = null, timer = null;
+
+$("#persona").value = `[캐릭터] 당신은 사용자의 할머니입니다. 손주와 이야기하고 있습니다.
+[호칭] 손주를 이름이나 "우리 강아지"처럼 부르고, 자신은 "할미"라고 하세요.
+[성격] 다정하고 느긋합니다. 손주 끼니와 건강을 늘 먼저 챙깁니다.
+[말투] 반드시 반말로 말하세요. 존댓말(~요, ~습니다)은 절대 쓰지 마세요.
+
+[대화 예시]
+손주: 할머니 나 왔어
+할머니: 아이고 우리 강아지 왔구나. 밥은 먹었니?
+손주: 요즘 좀 힘들어
+할머니: 많이 힘들었겠다. 할미가 감자 쪄줄까?
+손주: 뭐 하고 있었어?
+할머니: 마당에 나가 있었지. 날이 좋더라.
+손주: 할머니 보고 싶었어
+할머니: 나도 우리 강아지 많이 보고 싶었어.`;
+
+async function status() {
+  try {
+    const r = await (await fetch("/status")).json();
+    let s = "";
+    if (r.error) s += `<span class="pill bad">서버 연결 실패</span>`;
+    else {
+      const h = r.health || {}, c = r.current || {};
+      s += `<span class="pill ${h.status === "ready" ? "ok" : "warn"}">${h.status || "?"}</span>`;
+      s += `<span>등록된 세션 ${h.registered ?? 0}개</span>`;
+      s += `<span>현재: ${c.session || "없음"}</span>`;
+    }
+    s += `<span class="pill ${r.engine ? "ok" : "bad"}">화자분리 ${r.engine ? "준비됨" : "없음"}</span>`;
+    s += `<span>${r.url}</span>`;
+    $("#bar").innerHTML = s;
+  } catch (e) { $("#bar").textContent = "상태 조회 실패: " + e; }
+}
+status(); setInterval(status, 5000);
+
+// ── 업로드 ──
+const drop = $("#drop");
+drop.onclick = () => { const i = document.createElement("input"); i.type = "file";
+  i.accept = "audio/*,video/*"; i.onchange = e => send(e.target.files[0]); i.click(); };
+["dragover","dragenter"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("on"); }));
+["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("on"); }));
+drop.addEventListener("drop", ev => send(ev.dataTransfer.files[0]));
+
+async function send(f) {
+  if (!f) return;
+  const fd = new FormData(); fd.append("file", f); fd.append("speakers", $("#nspk").value || 0);
+  drop.textContent = `${f.name} 업로드 중…`;
+  try {
+    const r = await fetch("/extract", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.status);
+    job = d.job; picked = null; $("#publish").disabled = true;
+    $("#spkcard").style.display = "none";
+    drop.textContent = "다른 파일로 바꾸려면 여기를 클릭";
+    if (timer) clearInterval(timer);
+    timer = setInterval(poll, 1200); poll();
+  } catch (e) { drop.textContent = "실패: " + e.message; }
+}
+
+async function poll() {
+  if (!job) return;
+  const d = await (await fetch(`/extract/${job}`)).json();
+  if (d.state === "running") {
+    $("#jobinfo").textContent = `화자 분리 중… ${d.stage || ""}  (CPU 처리라 몇 분 걸릴 수 있습니다)`;
+    return;
+  }
+  clearInterval(timer); timer = null;
+  if (d.state === "error") { $("#jobinfo").textContent = "실패: " + (d.error || ""); return; }
+  result = d.result;
+  $("#jobinfo").textContent =
+    `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
+  $("#spkcard").style.display = "";
+  renderSpeakers(); drawWave();
+}
+
+// ── 화자 목록 ──
+function renderSpeakers() {
+  const box = $("#spklist"); box.innerHTML = "";
+  result.speakers.forEach(s => {
+    const ci = result.viz.color_idx[s.cluster] ?? 0;
+    const ref = s.ref || {};
+    const snr = ref.snr_db ?? 0;
+    const snrCls = snr >= 15 ? "ok" : (snr >= 8 ? "warn" : "bad");
+    const durCls = (ref.dur >= 8 && ref.dur <= 30) ? "ok" : "warn";
+    const el = document.createElement("div");
+    el.className = "spk"; el.dataset.id = s.spk_id;
+    el.innerHTML =
+      `<div class="top">
+         <span class="dot" style="background:${COLORS[ci % COLORS.length]}"></span>
+         <b>${s.spk_id}</b>
+         <span class="pill ${durCls}">참조 ${ref.dur ?? "?"}초</span>
+         <span class="pill ${snrCls}">SNR ${snr}dB</span>
+         <span class="grow"></span>
+         <button class="ghost" data-play="${s.ref.file}">듣기</button>
+       </div>
+       <div class="meta">이 파일에서 총 ${s.total_speech_sec}초 발화 · 참조는 ${ref.n_pieces ?? 1}개 조각을 이어붙임</div>`;
+    el.onclick = ev => {
+      if (ev.target.dataset.play) return;
+      picked = s.spk_id;
+      document.querySelectorAll(".spk").forEach(x => x.classList.toggle("sel", x.dataset.id === picked));
+      $("#publish").disabled = false;
+      drawWave();
+    };
+    box.appendChild(el);
+  });
+  box.querySelectorAll("[data-play]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    const p = $("#player"); p.style.display = ""; p.src = `/file/${job}/${b.dataset.play}`; p.play();
+  });
+}
+
+// ── 파형 (화자별 색) ──
+function drawWave() {
+  const cv = $("#wave"), v = result.viz;
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = 120;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+
+  const pickedCluster = picked
+    ? (result.speakers.find(s => s.spk_id === picked) || {}).cluster : null;
+
+  (v.segments || []).forEach(sg => {
+    const ci = v.color_idx[sg.spk] ?? 0;
+    const x = sg.start / v.duration * w, ww = Math.max(1, (sg.end - sg.start) / v.duration * w);
+    const on = !pickedCluster || sg.spk === pickedCluster;
+    g.fillStyle = COLORS[ci % COLORS.length] + (on ? "44" : "14");
+    g.fillRect(x, 0, ww, h);
+  });
+
+  const mid = h / 2;
+  g.strokeStyle = "#5b6675";
+  for (let i = 0; i < v.peaks.length; i++) {
+    const x = i / v.peaks.length * w;
+    g.beginPath(); g.moveTo(x, mid - v.peaks[i] * mid * .9);
+    g.lineTo(x, mid + v.peaks[i] * mid * .9); g.stroke();
+  }
+  (v.overlaps || []).forEach(o => {
+    g.fillStyle = "rgba(224,87,79,.5)";
+    g.fillRect(o.start / v.duration * w, h - 5, Math.max(1, (o.end - o.start) / v.duration * w), 5);
+  });
+}
+addEventListener("resize", () => result && drawWave());
+
+// ── 등록 ──
+function show(o, bad) {
+  const el = $("#out"); el.style.display = "";
+  el.style.borderColor = bad ? "#e0574f" : "#232a36";
+  el.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
+}
+$("#publish").onclick = async () => {
+  const fd = new FormData();
+  fd.append("job", job); fd.append("spk_id", picked);
+  fd.append("session", $("#session").value.trim());
+  fd.append("persona", $("#persona").value);
+  fd.append("knowledge", $("#knowledge").value);
+  $("#publish").disabled = true;
+  try {
+    const r = await fetch("/publish", { method: "POST", body: fd });
+    const jj = await r.json();
+    show(r.ok ? jj : (jj.detail || jj), !r.ok);
+  } catch (e) { show(String(e), true); }
+  $("#publish").disabled = false; status();
+};
+$("#endbtn").onclick = async () => {
+  const r = await (await fetch("/status")).json();
+  const s = (r.current || {}).session;
+  if (!s) { show("종료할 세션이 없습니다"); return; }
+  if (!confirm(`세션 "${s}" 의 음성·모델·대화기록을 삭제합니다. 계속할까요?`)) return;
+  const fd = new FormData(); fd.append("session", s);
+  show(await (await fetch("/end", { method: "POST", body: fd })).json());
+  status();
+};
+</script>
+</body>
+</html>
