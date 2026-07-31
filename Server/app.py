@@ -1,4 +1,4 @@
-import os, io, re, time, asyncio, difflib, tempfile, warnings
+import os, io, re, time, asyncio, difflib, shutil, tempfile, warnings
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TQDM_DISABLE", "1")
 import torch, numpy as np, soundfile as sf
@@ -22,6 +22,13 @@ TOKEN = os.environ.get("RAON_TOKEN", "")
 S = {"pipe": None, "system": "", "loaded_at": 0.0}
 HIST, LOCK = {}, asyncio.Lock()
 
+# ── 세션 ────────────────────────────────────────────────────────────
+# 웹 백엔드가 인물마다 참조 음성과 페르소나를 등록한다. 세션을 모르면
+# 서버 루트의 voice.wav / persona.md 를 그대로 쓴다(기존 동작 유지).
+SESS_DIR = os.path.join(SRV, "sessions")
+SESS = {}                       # sid -> {"voice": path, "system": str}
+CURRENT = {"session": None}
+
 def build_system():
     parts = []
     for f in ("persona.md", "knowledge.md"):
@@ -29,6 +36,45 @@ def build_system():
         if os.path.exists(p):
             parts.append(open(p, encoding="utf-8").read().strip())
     return "\n\n".join(parts)
+
+def _sess_path(sid, *parts):
+    return os.path.join(SESS_DIR, sid, *parts)
+
+def _sess_system(sid):
+    parts = []
+    for f in ("persona.md", "knowledge.md"):
+        p = _sess_path(sid, f)
+        if os.path.exists(p):
+            parts.append(open(p, encoding="utf-8").read().strip())
+    return "\n\n".join([x for x in parts if x])
+
+def load_sessions():
+    """재시작해도 등록된 세션이 살아 있도록 디스크에서 복원한다."""
+    if not os.path.isdir(SESS_DIR):
+        return
+    for sid in sorted(os.listdir(SESS_DIR)):
+        v = _sess_path(sid, "voice.wav")
+        if os.path.exists(v):
+            SESS[sid] = {"voice": v, "system": _sess_system(sid)}
+            CURRENT["session"] = sid
+    if SESS:
+        print(f"[세션] {len(SESS)}개 복원, 현재={CURRENT['session']}", flush=True)
+
+def sess_voice(sid):
+    s = SESS.get(sid)
+    return s["voice"] if s else VOICE
+
+def sess_system(sid):
+    s = SESS.get(sid)
+    return s["system"] if s and s["system"] else S["system"]
+
+def _save_atomic(data, path):
+    """임시 파일에 쓴 뒤 rename. 합성 중 반쪽 파일을 읽는 사고를 막는다."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".part"
+    with open(tmp, "wb") as o:
+        o.write(data)
+    os.replace(tmp, path)
 
 def to_wav(res):
     wav, sr = res
@@ -42,11 +88,11 @@ def _sim(a, b):
     a, b = _norm(a), _norm(b)
     return difflib.SequenceMatcher(None, a, b).ratio() if a and b else 0.0
 
-def synth(text, tries=2):
+def synth(text, voice=None, tries=2):
     """음성 합성 + 검증 + 실패 시 재생성"""
     pipe = S["pipe"]
     for i in range(tries):
-        res = pipe.tts(text, speaker_audio=VOICE)
+        res = pipe.tts(text, speaker_audio=voice or VOICE)
         data = to_wav(res)
         if not VERIFY:
             return data, None
@@ -72,6 +118,7 @@ async def lifespan(app):
                                        revision=getattr(cfg, "_commit_hash", None))
     S["pipe"] = RP(MODEL, device="cuda", dtype="bfloat16")
     S["system"] = build_system()
+    load_sessions()
     if os.environ.get("RAON_COMPILE", "1") == "1":
         try:
             _m = S["pipe"].model
@@ -99,7 +146,8 @@ def health():
     return {"status": "ready" if S["pipe"] else "loading",
             "vram_gb": round(torch.cuda.memory_allocated()/1024**3, 1),
             "uptime_sec": round(time.time() - S["loaded_at"]) if S["loaded_at"] else 0,
-            "voice": os.path.basename(VOICE), "sessions": len(HIST)}
+            "voice": os.path.basename(VOICE), "sessions": len(HIST),
+            "registered": len(SESS), "current": CURRENT["session"]}
 
 @app.post("/reload")
 def reload_prompt(x_token: str = Header("")):
@@ -166,12 +214,12 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             pipe, t0 = S["pipe"], time.time()
             heard = pipe.stt(p) if want_heard else ""
             t1 = time.time()
-            msgs = [{"role": "system", "content": S["system"]}]
+            msgs = [{"role": "system", "content": sess_system(session)}]
             msgs += HIST.get(session, [])
             msgs.append({"role": "user", "content": [{"type": "audio", "audio": p}]})
             answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
             t2 = time.time()
-            data, _ = synth(answer)
+            data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
             if want_heard:
                 h = HIST.setdefault(session, [])
@@ -209,7 +257,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
         heard = pipe.stt(p) if want_heard else ""
-        msgs = [{"role": "system", "content": S["system"]}]
+        msgs = [{"role": "system", "content": sess_system(session)}]
         msgs += HIST.get(session, [])
         msgs.append({"role": "user", "content": [{"type": "audio", "audio": p}]})
         answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
@@ -241,7 +289,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
                 t._frame_callback = cb
                 t._frame_chunk = FRAME_CHUNK
             try:
-                S["pipe"].tts(answer, speaker_audio=VOICE)
+                S["pipe"].tts(answer, speaker_audio=sess_voice(session))
             except Exception as e:
                 print(f"[{session}] 합성 실패: {e}", flush=True)
             finally:
@@ -278,3 +326,85 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
         "X-Heard": quote(heard), "X-Answer": quote(answer),
         "X-Sample-Rate": "24000", "X-Channels": "1",
     })
+
+
+# ── 세션 등록 (웹 백엔드 → 서버) ────────────────────────────────────
+
+@app.post("/session/start")
+async def session_start(persona: str = Form(...), knowledge: str = Form(""),
+                        session: str = Form(""), voice: UploadFile = File(...),
+                        model: UploadFile = File(None), x_token: str = Header("")):
+    auth(x_token)
+    sid = (session or time.strftime("%Y%m%d_%H%M%S")).strip()
+    if "/" in sid or "\\" in sid or sid.startswith("."):
+        raise HTTPException(400, "잘못된 세션 ID")
+
+    raw = await voice.read()
+    try:
+        info = sf.info(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(400, f"참조 음성이 WAV가 아니거나 손상됨: {e}")
+    if info.duration < 3:
+        raise HTTPException(400, f"참조 음성이 너무 짧습니다({info.duration:.1f}초). 10~30초를 권장합니다")
+    if not (8 <= info.duration <= 40):
+        print(f"[세션] 경고: 참조 음성 {info.duration:.1f}초 (권장 10~30초)", flush=True)
+
+    _save_atomic(raw, _sess_path(sid, "voice.wav"))
+    _save_atomic(persona.strip().encode("utf-8"), _sess_path(sid, "persona.md"))
+    if knowledge.strip():
+        _save_atomic(knowledge.strip().encode("utf-8"), _sess_path(sid, "knowledge.md"))
+    has_model = model is not None and model.filename
+    if has_model:
+        _save_atomic(await model.read(), _sess_path(sid, "model.glb"))
+
+    SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), "system": _sess_system(sid)}
+    CURRENT["session"] = sid
+    HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
+    print(f"[세션] {sid} 등록 — 음성 {info.duration:.1f}초, "
+          f"페르소나 {len(persona)}자, 모델 {'있음' if has_model else '없음'}", flush=True)
+    return {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}
+
+
+@app.post("/session/{sid}/model")
+async def session_model_put(sid: str, model: UploadFile = File(...), x_token: str = Header("")):
+    """Meshy 생성이 늦게 끝나는 경우 모델만 나중에 올린다."""
+    auth(x_token)
+    if sid not in SESS:
+        raise HTTPException(404, "등록되지 않은 세션")
+    _save_atomic(await model.read(), _sess_path(sid, "model.glb"))
+    print(f"[세션] {sid} 모델 등록", flush=True)
+    return {"ok": True}
+
+
+@app.get("/session/current")
+def session_current(x_token: str = Header("")):
+    auth(x_token)
+    sid = CURRENT["session"]
+    if not sid:
+        return {"session": None}
+    return {"session": sid, "has_model": os.path.exists(_sess_path(sid, "model.glb"))}
+
+
+@app.get("/session/{sid}/model.glb")
+def session_model_get(sid: str, x_token: str = Header("")):
+    auth(x_token)
+    p = _sess_path(sid, "model.glb")
+    if not os.path.exists(p):
+        raise HTTPException(404, "모델이 아직 없습니다")
+    with open(p, "rb") as f:
+        return Response(f.read(), media_type="model/gltf-binary")
+
+
+@app.post("/session/end")
+def session_end(session: str = Form(...), x_token: str = Header("")):
+    """세션의 음성·모델·대화기록을 지운다. 실존 인물의 자료이므로 확실히 삭제한다."""
+    auth(x_token)
+    SESS.pop(session, None)
+    HIST.pop(session, None)
+    if CURRENT["session"] == session:
+        CURRENT["session"] = None
+    d = _sess_path(session)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
+    print(f"[세션] {session} 종료·삭제", flush=True)
+    return {"ok": True}

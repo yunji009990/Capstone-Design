@@ -2,6 +2,7 @@
 cd "$(dirname "$0")"
 source $RAON_BASE/venv/raon/bin/activate
 export RAON_VERIFY=0
+export RAON_TOKEN=23605a891e448b5aa46f82c8640b554c
 if [ -f server.pid ] && ps -p $(cat server.pid) >/dev/null 2>&1; then
   echo "이미 실행 중 (PID $(cat server.pid))"; exit 0
 fi
