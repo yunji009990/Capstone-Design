@@ -333,7 +333,84 @@ ph = (idx/sr) % per
 
 ---
 
-## 12. 다음에 파볼 것
+## 12. 학습 가능성 — 결론: 지원된다
+
+공개된 게 "가중치뿐"이라는 전제는 **틀렸다.** `modeling_raon.py` 에 학습 경로가
+살아 있다. 확인한 근거:
+
+```
+8918:  ) -> RaonModelOutput:
+8919:      """Run training forward pass: embed inputs, run text model,
+           compute text and audio loss."""          ← 독스트링이 명시
+5652:  # ── from utils/loss.py ──                    ← 학습 손실 모듈을 인라인
+5666:  Mixin providing loss computation methods for RaonModel
+5670:  audio_loss_weight, text_loss_weight, epad_loss_weight, code_predictor_grad_scale
+5680:  def unreduced_causal_lm_loss(logits, labels)
+5696:  def _compute_audio_loss(...)                   ← 코드 그룹별 교차 엔트로피
+2373:  self.gradient_checkpointing
+ 397:  손실 가중치를 환경변수로 조절 가능
+5872:  "keeps DDP from hanging"                       ← 분산 학습 인지 코드
+```
+
+`code_predictor_grad_scale` 이 있다는 건 RCP 로 흘러드는 그래디언트까지 설계에
+넣었다는 뜻이고, 손실 가중치를 환경변수로 뺀 건 **남이 튜닝할 것을 상정**한 것이다.
+
+### `forward()` 시그니처에서 중요한 인자
+
+| 인자 | 왜 중요한가 |
+|---|---|
+| `labels` | 학습 라벨. 손실이 여기서 나온다 |
+| **`use_speaker_embedding` / `speaker_embeds`** | **미리 계산한 화자 임베딩을 직접 주입**한다. ECAPA 를 우회하는 문 |
+| `audio_output_codes` / `_mask` | 코덱 타깃을 미리 계산해 넘긴다. 학습 중 코덱 forward 불필요 |
+| `speaker_encoder_audio` | 화자 참조가 `audio_output`(프리필)과 **별도 인자**다 |
+| `audio_output_segments` | 다중 구간 학습 지원 |
+
+**`speaker_embeds` 가 Prosody Encoder 의 진입점이다.** 모델을 개조해 인코더를 넣는
+게 아니라, **이 슬롯에 들어갈 벡터를 만드는 모듈**을 학습하면 된다. 구조 수술이
+필요 없다. 추가로 `is_pretrained_speaker_encoder` 플래그(5673, 5877)가 있어
+"화자 인코더가 동결이냐 학습 대상이냐"가 이미 매개변수화돼 있다.
+
+### 화자 인코더의 실체
+
+```
+1157:  a frozen SpeechBrain ECAPA model, and projects the pretrained embedding to ...
+1255:  Extract frozen ECAPA embeddings from 16kHz audio.
+```
+
+**동결 ECAPA-TDNN, 임베딩 하나를 투영**해 `SPEAKER_EMBEDDING_PLACEHOLDER` 자리에
+넣는다. 시간 축이 없으므로 **프로소디는 실릴 자리가 없다.** 억양을 얻으려면
+continuation 이 필요한 이유가 이것이다.
+
+기술 보고서의 "2~8초 무작위 청크"는 ECAPA 에 먹일 구간을 고르는 이야기이지
+시퀀스로 삽입한다는 뜻이 아니다.
+
+### 없는 것
+
+데이터셋·콜레이터, 옵티마이저·스케줄러, 분산 실행기, 체크포인트 저장.
+**전부 표준 부품이다.** 다중 코드북 손실을 역설계하는 것에 비하면 사소하다.
+
+### 제약
+
+- **VRAM** — 추론이 `RAON_MEM_FRACTION=0.60` 으로 40GB 를 쓰니 카드는 약 67GB 이상,
+  80GB 급으로 보인다. LoRA + gradient checkpointing 에 짧은 시퀀스면 한 장으로
+  가능한 범위지만 여유가 크지 않다.
+- **MoE** — 21B 중 활성 3.5B. 학습 시 라우팅·부하 균형이 얽히고 일부 전문가만
+  갱신되며 불안정해질 수 있다. 밀집 모델 LoRA보다 까다롭다.
+- **라이선스** — CC BY-NC 4.0. 파생 모델도 비상업 제약을 받는다.
+
+### 권장 순서
+
+**1단계 — 강건성 LoRA.** 깨끗한 녹음을 열화시켜(잡음 추가·무음 제거·대역 제한)
+입력으로 쓰고 정상 출력을 정답으로 둔다. 페어를 무한히 합성할 수 있고, 성공 판정
+지표가 이미 있다(§11 측정 코드, "0.13~0.20초/글자" 정상 범위, 고역 비율 0.04).
+목표가 명확하고 실패해도 원인이 보인다.
+
+**2단계 — Prosody Encoder.** 1단계로 학습 파이프라인을 검증한 뒤에 간다.
+첫 시도에 구조 변경까지 겹치면 실패했을 때 학습 문제인지 설계 문제인지 못 가린다.
+
+---
+
+## 13. 다음에 파볼 것
 
 **먹먹함의 정체.** 모든 출력이 6kHz 위로 비어 있다. Mimi 코덱의 대역폭 한계인지,
 디코딩 설정 문제인지, RVQ 코드 그룹 수(16)와 관련 있는지 확인할 것.
