@@ -174,7 +174,13 @@ async def lifespan(app):
         except Exception as e:
             print(f"[컴파일 실패] {e}", flush=True)
     print(f"[로딩] {time.time()-t0:.1f}초", flush=True)
-    S["pipe"].tts("준비 완료.", speaker_audio=VOICE)   # 첫 생성 불안정 방지 예열
+    # 첫 생성 불안정 방지 예열. continuation 은 참조를 토큰화·프리필하는 다른 코드
+    # 경로라 tts() 로 예열해도 소용없다. 현재 세션의 참조로 예열하면 전사까지 캐시된다.
+    warm = sess_voice(CURRENT["session"]) if CURRENT["session"] else VOICE
+    if CONT:
+        S["pipe"].tts_continuation("준비 완료.", ref_audio=warm, ref_text=ref_text(warm))
+    else:
+        S["pipe"].tts("준비 완료.", speaker_audio=VOICE)
     S["loaded_at"] = time.time()
     print(f"[준비완료] VRAM {torch.cuda.memory_allocated()/1024**3:.1f}GB", flush=True)
     yield
@@ -417,6 +423,10 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
     REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
+    if CONT:
+        # 새 참조의 전사를 지금 캐시해 둔다. 첫 대화가 STT 를 기다리지 않도록.
+        async with LOCK:
+            await asyncio.to_thread(ref_text, SESS[sid]["voice"])
     print(f"[세션] {sid} 등록 — 음성 {info.duration:.1f}초, "
           f"페르소나 {len(persona)}자, 모델 {'있음' if has_model else '없음'}", flush=True)
     out = {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}
