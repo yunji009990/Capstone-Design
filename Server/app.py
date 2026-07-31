@@ -16,7 +16,7 @@ TOKENS= int(os.environ.get("RAON_ANSWER_TOKENS", "200"))
 TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
-CONT  = os.environ.get("RAON_CONT", "0") == "1"
+CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 S["cont"]
 # 반복 억제 기본값은 실측으로 정했다. 창을 넓히는 게 임계값을 낮추는 것보다 낫다 —
 # 창 100(8초)이면 1.5초 쉼은 19%라 안 걸리고, 8초를 뒤덮는 루프는 70%가 넘어 걸린다.
 # 창 40 / 임계 0.2 는 루프를 잡긴 했지만 무음에서도 발동할 여지가 컸다.
@@ -26,7 +26,7 @@ RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.35"))
 CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 16초
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
-S = {"pipe": None, "loaded_at": 0.0}
+S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
 HIST, LOCK = {}, asyncio.Lock()
 
 # ── 세션 ────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ def generate(text, voice):
         t._frame_callback = lambda w: chunks.append(w.detach().cpu().float().numpy())
         t._frame_chunk = FRAME_CHUNK
     try:
-        if CONT:
+        if S["cont"]:
             S["pipe"].tts_continuation(text, ref_audio=voice, ref_text=ref_text(voice))
         else:
             S["pipe"].tts(text, speaker_audio=voice)
@@ -161,7 +161,7 @@ def warm_pipe(voice):
     """첫 생성은 코드 경로가 처음 도느라 느리다. continuation 은 참조를 토큰화·프리필하는
     별도 경로라 tts() 로 예열해도 소용없다. 참조 전사도 여기서 캐시된다."""
     t0 = time.time()
-    if CONT:
+    if S["cont"]:
         S["pipe"].tts_continuation("준비 완료.", ref_audio=voice, ref_text=ref_text(voice))
     else:
         S["pipe"].tts("준비 완료.", speaker_audio=voice)
@@ -174,7 +174,7 @@ def synth(text, voice, tries=2):
         t0 = time.time()
         res = generate(text, voice)
         print(f"[합성] {res[0].numel()/res[1]:.1f}초 분량 / {time.time()-t0:.1f}초 소요"
-              f"{' (continuation)' if CONT else ''}", flush=True)
+              f"{' (continuation)' if S['cont'] else ''}", flush=True)
         data = to_wav(res)
         if not VERIFY:
             return data, None
@@ -251,7 +251,24 @@ def health():
             "vram_gb": round(torch.cuda.memory_allocated()/1024**3, 1),
             "uptime_sec": round(time.time() - S["loaded_at"]) if S["loaded_at"] else 0,
             "sessions": len(HIST), "registered": len(SESS),
-            "current": CURRENT["session"], "ready_to_talk": bool(CURRENT["session"])}
+            "current": CURRENT["session"], "ready_to_talk": bool(CURRENT["session"]),
+            "cont": S["cont"]}
+
+@app.post("/mode")
+async def set_mode(cont: str = Form(...), x_token: str = Header("")):
+    """억양 복제(continuation)를 재시작 없이 켜고 끈다.
+
+    둘을 번갈아 들어보며 비교하려면 재시작이 25초씩 드는데, 그 사이 기억이
+    흐려져서 비교가 안 된다. 바꾼 뒤 현재 세션 참조로 예열까지 해 둔다."""
+    auth(x_token)
+    new = cont not in ("0", "false", "False", "")
+    if new != S["cont"]:
+        S["cont"] = new
+        print(f"[설정] CONT={'1 (억양 복제)' if new else '0 (음색만)'}", flush=True)
+        if CURRENT["session"]:
+            async with LOCK:
+                await asyncio.to_thread(warm_pipe, sess_voice(CURRENT["session"]))
+    return {"cont": S["cont"], "session": CURRENT["session"]}
 
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
@@ -388,7 +405,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
                 t._frame_chunk = FRAME_CHUNK
             try:
                 v = sess_voice(session)
-                if CONT:
+                if S["cont"]:
                     S["pipe"].tts_continuation(answer, ref_audio=v, ref_text=ref_text(v))
                 else:
                     S["pipe"].tts(answer, speaker_audio=v)
