@@ -17,6 +17,7 @@ TOKENS= int(os.environ.get("RAON_ANSWER_TOKENS", "200"))
 TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
+CONT  = os.environ.get("RAON_CONT", "0") == "1"
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
 S = {"pipe": None, "system": "", "loaded_at": 0.0}
@@ -112,11 +113,31 @@ def _sim(a, b):
     a, b = _norm(a), _norm(b)
     return difflib.SequenceMatcher(None, a, b).ratio() if a and b else 0.0
 
+REF_TEXT = {}                   # 참조음성 경로 -> 전사
+
+def ref_text(voice):
+    """tts_continuation 은 참조 전사가 필요한데, 없으면 합성마다 STT 를 다시 돈다.
+    참조 음성은 세션당 고정이므로 한 번만 전사해 둔다."""
+    if voice not in REF_TEXT:
+        t0 = time.time()
+        REF_TEXT[voice] = S["pipe"].stt(voice)
+        print(f"[참조전사] {time.time()-t0:.1f}초 — {REF_TEXT[voice]!r}", flush=True)
+    return REF_TEXT[voice]
+
 def synth(text, voice=None, tries=2):
     """음성 합성 + 검증 + 실패 시 재생성"""
     pipe = S["pipe"]
+    voice = voice or VOICE
     for i in range(tries):
-        res = pipe.tts(text, speaker_audio=voice or VOICE)
+        t0 = time.time()
+        if CONT:
+            # tts() 는 참조를 화자 임베딩 한 토큰으로만 넘겨 음색만 복제한다.
+            # tts_continuation 은 참조 오디오를 문맥에 깔아 억양·속도까지 잇는다.
+            res = pipe.tts_continuation(text, ref_audio=voice, ref_text=ref_text(voice))
+        else:
+            res = pipe.tts(text, speaker_audio=voice)
+        print(f"[합성] {res[0].numel()/res[1]:.1f}초 분량 / {time.time()-t0:.1f}초 소요"
+              f"{' (continuation)' if CONT else ''}", flush=True)
         data = to_wav(res)
         if not VERIFY:
             return data, None
@@ -313,7 +334,11 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
                 t._frame_callback = cb
                 t._frame_chunk = FRAME_CHUNK
             try:
-                S["pipe"].tts(answer, speaker_audio=sess_voice(session))
+                v = sess_voice(session)
+                if CONT:
+                    S["pipe"].tts_continuation(answer, ref_audio=v, ref_text=ref_text(v))
+                else:
+                    S["pipe"].tts(answer, speaker_audio=v)
             except Exception as e:
                 print(f"[{session}] 합성 실패: {e}", flush=True)
             finally:
@@ -391,6 +416,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), "system": _sess_system(sid)}
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
+    REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
     print(f"[세션] {sid} 등록 — 음성 {info.duration:.1f}초, "
           f"페르소나 {len(persona)}자, 모델 {'있음' if has_model else '없음'}", flush=True)
     out = {"session": sid, "voice_sec": round(info.duration, 1), "has_model": bool(has_model)}
@@ -433,7 +459,9 @@ def session_model_get(sid: str, x_token: str = Header("")):
 def session_end(session: str = Form(...), x_token: str = Header("")):
     """세션의 음성·모델·대화기록을 지운다. 실존 인물의 자료이므로 확실히 삭제한다."""
     auth(x_token)
-    SESS.pop(session, None)
+    s = SESS.pop(session, None)
+    if s:
+        REF_TEXT.pop(s["voice"], None)
     HIST.pop(session, None)
     if CURRENT["session"] == session:
         CURRENT["session"] = None

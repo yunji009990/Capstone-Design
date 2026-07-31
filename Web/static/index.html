@@ -23,9 +23,10 @@
            padding:9px 16px; font:inherit; cursor:pointer; }
   button.ghost { background:#252c39; }
   button:disabled { opacity:.45; cursor:default; }
-  #drop { border:1.5px dashed var(--line); border-radius:8px; padding:24px;
+  #drop, #dirdrop { border:1.5px dashed var(--line); border-radius:8px; padding:24px;
           text-align:center; color:var(--dim); cursor:pointer; }
-  #drop.on { border-color:var(--accent); color:var(--fg); }
+  #drop.on, #dirdrop.on { border-color:var(--accent); color:var(--fg); }
+  .tab.on { background:var(--accent); color:#fff; }
   canvas { width:100%; height:120px; display:block; background:#0e131b;
            border:1px solid var(--line); border-radius:6px; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -56,14 +57,30 @@
   <div class="bar" id="bar">상태 확인 중…</div>
 
   <div class="card">
-    <h2>1. 파일</h2>
-    <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
-    <div class="row" style="margin-top:12px">
-      <label style="margin:0">화자 수</label>
-      <input type="number" id="nspk" min="0" max="8" value="0" style="width:80px">
-      <span class="hint" style="margin:0">0이면 자동 판별</span>
+    <h2>1. 참조 음성</h2>
+    <div class="row" style="margin-bottom:14px">
+      <button class="ghost tab on" id="tabex">영상·음성에서 화자 분리</button>
+      <button class="ghost tab" id="tabdir">오디오 직접 지정</button>
     </div>
-    <div class="hint" id="jobinfo"></div>
+
+    <div id="paneex">
+      <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
+      <div class="row" style="margin-top:12px">
+        <label style="margin:0">화자 수</label>
+        <input type="number" id="nspk" min="0" max="8" value="0" style="width:80px">
+        <span class="hint" style="margin:0">0이면 자동 판별</span>
+      </div>
+      <div class="hint" id="jobinfo"></div>
+    </div>
+
+    <div id="panedir" style="display:none">
+      <div id="dirdrop">참조로 쓸 오디오를 끌어다 놓거나 클릭해서 선택</div>
+      <audio id="dirplayer" controls style="width:100%; margin-top:10px; display:none"></audio>
+      <div class="hint" id="dirinfo"></div>
+      <div class="hint">화자 분리를 건너뛰고 <b>이 파일을 그대로</b> 참조로 씁니다. 24kHz 모노로만 변환되고
+        구간을 자르거나 이어붙이지 않습니다. <b>한 사람이 10~30초 자연스럽게 말하는 음성</b>이어야 하고,
+        원하는 말투가 이 음성 안에 있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.</div>
+    </div>
   </div>
 
   <div class="card" id="spkcard" style="display:none">
@@ -89,11 +106,16 @@
 
   <div class="card">
     <h2>4. 등록</h2>
+    <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
       <button id="publish" disabled>세션 시작</button>
       <button class="ghost" id="endbtn">현재 세션 종료</button>
     </div>
     <pre id="out" style="display:none"></pre>
+    <div class="hint" id="verify" style="display:none">
+      아래는 <b>서버로 실제로 넘어간 참조 음성</b>입니다. 위에서 고른 것과 같은지 확인하세요.
+      <audio id="sentplayer" controls style="width:100%; margin-top:8px"></audio>
+    </div>
   </div>
 </div>
 
@@ -101,6 +123,7 @@
 const $ = s => document.querySelector(s);
 const COLORS = ["#4c8dff", "#e8b339", "#3fbf7f", "#c778dd", "#e0574f", "#39c5cf"];
 let job = null, result = null, picked = null, timer = null;
+let mode = "extract", dirFile = null;
 
 $("#persona").value = `[캐릭터] 당신은 사용자의 할머니입니다. 손주와 이야기하고 있습니다.
 [호칭] 손주를 이름이나 "우리 강아지"처럼 부르고, 자신은 "할미"라고 하세요.
@@ -133,7 +156,52 @@ async function status() {
     $("#bar").innerHTML = s;
   } catch (e) { $("#bar").textContent = "상태 조회 실패: " + e; }
 }
-status(); setInterval(status, 5000);
+status(); setInterval(status, 5000); refresh();
+
+// ── 참조 음성 방식 전환 ──
+// 어느 쪽을 골랐든 "무엇이 서버로 가는가"를 항상 4번 카드에 적는다.
+function refresh() {
+  const ok = mode === "extract" ? !!picked : !!dirFile;
+  $("#publish").disabled = !ok;
+  $("#refnow").innerHTML = !ok ? "참조 음성이 선택되지 않았습니다."
+    : mode === "extract"
+      ? `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`
+      : `참조: <b>${dirFile.name}</b> — 파일 그대로`;
+}
+function setMode(m) {
+  mode = m;
+  $("#tabex").classList.toggle("on", m === "extract");
+  $("#tabdir").classList.toggle("on", m === "direct");
+  $("#paneex").style.display = m === "extract" ? "" : "none";
+  $("#panedir").style.display = m === "direct" ? "" : "none";
+  $("#spkcard").style.display = (m === "extract" && result) ? "" : "none";
+  refresh();
+}
+$("#tabex").onclick = () => setMode("extract");
+$("#tabdir").onclick = () => setMode("direct");
+
+// ── 직접 지정 ──
+const dd = $("#dirdrop");
+function takeDirect(f) {
+  if (!f) return;
+  dirFile = f;
+  dd.textContent = `${f.name} — 바꾸려면 클릭`;
+  const p = $("#dirplayer"); p.style.display = ""; p.src = URL.createObjectURL(f);
+  p.onloadedmetadata = () => {
+    const d = p.duration;
+    const cls = (d >= 10 && d <= 30) ? "ok" : "warn";
+    $("#dirinfo").innerHTML =
+      `<span class="pill ${cls}">${d.toFixed(1)}초</span> ` +
+      (d < 10 ? "짧습니다. 10초 미만은 억양 복제가 불안정합니다."
+              : d > 30 ? "깁니다. 30초를 넘으면 합성이 느려집니다." : "권장 범위입니다.");
+  };
+  refresh();
+}
+dd.onclick = () => { const i = document.createElement("input"); i.type = "file";
+  i.accept = "audio/*,video/*"; i.onchange = e => takeDirect(e.target.files[0]); i.click(); };
+["dragover","dragenter"].forEach(e => dd.addEventListener(e, ev => { ev.preventDefault(); dd.classList.add("on"); }));
+["dragleave","drop"].forEach(e => dd.addEventListener(e, ev => { ev.preventDefault(); dd.classList.remove("on"); }));
+dd.addEventListener("drop", ev => takeDirect(ev.dataTransfer.files[0]));
 
 // ── 업로드 ──
 const drop = $("#drop");
@@ -151,7 +219,7 @@ async function send(f) {
     const r = await fetch("/extract", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
-    job = d.job; picked = null; $("#publish").disabled = true;
+    job = d.job; picked = null; refresh();
     $("#spkcard").style.display = "none";
     drop.textContent = "다른 파일로 바꾸려면 여기를 클릭";
     if (timer) clearInterval(timer);
@@ -172,7 +240,7 @@ async function poll() {
   $("#jobinfo").textContent =
     `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
   $("#spkcard").style.display = "";
-  renderSpeakers(); drawWave();
+  renderSpeakers(); drawWave(); refresh();
 }
 
 // ── 화자 목록 ──
@@ -200,7 +268,7 @@ function renderSpeakers() {
       if (ev.target.dataset.play) return;
       picked = s.spk_id;
       document.querySelectorAll(".spk").forEach(x => x.classList.toggle("sel", x.dataset.id === picked));
-      $("#publish").disabled = false;
+      refresh();
       drawWave();
     };
     box.appendChild(el);
@@ -252,15 +320,24 @@ function show(o, bad) {
 }
 $("#publish").onclick = async () => {
   const fd = new FormData();
-  fd.append("job", job); fd.append("spk_id", picked);
   fd.append("session", $("#session").value.trim());
   fd.append("persona", $("#persona").value);
   fd.append("knowledge", $("#knowledge").value);
+  let url;
+  if (mode === "extract") {
+    url = "/publish"; fd.append("job", job); fd.append("spk_id", picked);
+  } else {
+    url = "/publish_direct"; fd.append("voice", dirFile, dirFile.name);
+  }
   $("#publish").disabled = true;
   try {
-    const r = await fetch("/publish", { method: "POST", body: fd });
+    const r = await fetch(url, { method: "POST", body: fd });
     const jj = await r.json();
     show(r.ok ? jj : (jj.detail || jj), !r.ok);
+    if (r.ok && mode === "direct") {   // 실제로 넘어간 것을 되들려준다
+      $("#verify").style.display = "";
+      $("#sentplayer").src = "/last_ref.wav?t=" + Date.now();
+    }
   } catch (e) { show(String(e), true); }
   $("#publish").disabled = false; status();
 };

@@ -6,6 +6,7 @@
 
 실행:  python -m uvicorn app:app --port 8500
 """
+import io
 import json
 import os
 import shutil
@@ -16,6 +17,8 @@ import time
 import uuid
 
 import httpx
+import librosa
+import soundfile as sf
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -144,6 +147,56 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     return r.json()
+
+
+LAST_REF = os.path.join(WORK, "last_ref.wav")
+
+
+def _to_wav24(raw, name):
+    """무엇이 올라오든 24kHz 모노 wav 로 맞춘다. 서버가 참조로 쓰는 형식이다."""
+    tmp = os.path.join(WORK, "_upload" + os.path.splitext(name)[1].lower())
+    with open(tmp, "wb") as o:
+        o.write(raw)
+    try:
+        y, _ = librosa.load(tmp, sr=24000, mono=True)
+    finally:
+        os.remove(tmp)
+    if len(y) == 0:
+        raise HTTPException(400, "오디오를 읽지 못했습니다")
+    buf = io.BytesIO()
+    sf.write(buf, y, 24000, format="WAV", subtype="PCM_16")
+    return buf.getvalue(), len(y) / 24000
+
+
+@app.post("/publish_direct")
+async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...),
+                         knowledge: str = Form(""), session: str = Form("")):
+    """화자 분리를 건너뛰고 올린 오디오를 그대로 참조로 등록한다.
+    분리기가 만든 참조는 조각을 이어붙인 것이라 무엇이 넘어갔는지 알기 어렵다.
+    직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다."""
+    ext = os.path.splitext(voice.filename)[1].lower()
+    if ext not in ALLOWED:
+        raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
+    wav, dur = _to_wav24(await voice.read(), voice.filename)
+    with open(LAST_REF, "wb") as o:      # 보낸 것을 그대로 들어볼 수 있게 남긴다
+        o.write(wav)
+    try:
+        r = httpx.post(f"{RAON_URL}/session/start", headers=_headers(),
+                       data={"persona": persona, "knowledge": knowledge, "session": session},
+                       files={"voice": ("voice.wav", wav, "audio/wav")}, timeout=180)
+    except Exception as e:
+        raise HTTPException(502, f"Raon 서버에 연결할 수 없습니다: {e}")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, f"등록 실패: {r.text}")
+    return {**r.json(), "sent": {"file": voice.filename, "sec": round(dur, 2)}}
+
+
+@app.get("/last_ref.wav")
+def last_ref():
+    """직전에 등록한 참조 음성. 서버로 넘어간 것과 바이트 단위로 같다."""
+    if not os.path.exists(LAST_REF):
+        raise HTTPException(404, "아직 직접 등록한 참조가 없습니다")
+    return FileResponse(LAST_REF, media_type="audio/wav")
 
 
 @app.post("/end")
