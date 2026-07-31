@@ -1,0 +1,50 @@
+--- /home/crc_unity/models/AX-K2-Raon-Speech/modeling_raon.py.bak	2026-07-31 23:07:32.975094395 +0900
++++ /home/crc_unity/models/AX-K2-Raon-Speech/modeling_raon.py	2026-07-31 23:07:32.982978432 +0900
+@@ -7983,6 +7983,36 @@
+             if generated_audio_frame_count <= continuation_silence_frames:
+                 audio_codes[:, -1] = silence_codes
+ 
++        # ── 프레임 단위 스트리밍 훅 ──
++        # self._frame_callback 이 설정된 경우에만 동작한다. 없으면 완전히 무해.
++        _raon_cb = getattr(self, "_frame_callback", None)
++        _raon_chunk = int(getattr(self, "_frame_chunk", 8))
++        _raon_state = [None, None, None]
++        _raon_sent = [0]
++
++        def _raon_flush(force=False):
++            if _raon_cb is None:
++                return
++            mask = audio_codes_mask[0]
++            valid = int(mask.sum().item())
++            pending = valid - _raon_sent[0]
++            if pending <= 0 or (pending < _raon_chunk and not force):
++                return
++            codes = audio_codes[0][mask][_raon_sent[0]:valid].unsqueeze(0).transpose(1, 2)
++            out = self.audio_tokenizer.decode(
++                codes,
++                use_streaming=True,
++                decoder_past_key_values=_raon_state[0],
++                conv1d_padding_cache=_raon_state[1],
++                convtranspose1d_padding_cache=_raon_state[2],
++                return_dict=True,
++            )
++            _raon_state[0] = out.decoder_past_key_values
++            _raon_state[1] = out.conv1d_padding_cache
++            _raon_state[2] = out.convtranspose1d_padding_cache
++            _raon_sent[0] = valid
++            _raon_cb(out.audio_values.reshape(-1))
++
+         for _ in trange(max_new_tokens - 1, disable=disable_tqdm):
+             if is_complete.all():
+                 break
+@@ -8012,6 +8042,10 @@
+                 if generated_audio_frame_count <= continuation_silence_frames:
+                     audio_codes[audio_codes_mask[:, -1], -1] = silence_codes
+ 
++            _raon_flush()
++
++        _raon_flush(force=True)
++
+         audio = None
+         audio_lengths = None
+         if not force_text_output and audio_codes_mask.any():

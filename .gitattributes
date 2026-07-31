@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Server/ 는 Linux 서버로 복사되는 파일이라 줄바꿈을 LF로 고정한다.
+# CRLF로 체크아웃되면 .sh 는 bad interpreter, .patch 는 적용 실패가 난다.
+Server/** text eol=lf
+Server/*.wav binary
