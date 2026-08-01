@@ -114,7 +114,7 @@ def _measure_speakers(job):
     SNR 은 길이 폭주와는 관계있지만 **지지직과는 무관**하다는 것이 실측으로 확인됐다
     (35dB 가 통과하며 실패하고, 59dB 로 올려도 그대로였다).
 
-    지지직을 가르는 것은 **저역 비율**이고, 꼬리 무음을 가르는 것은 **쉼 비율**이다.
+    지지직을 가르는 것은 **1~4kHz 비율**이고, 꼬리 무음을 가르는 것은 **쉼 비율**이다.
     `_to_wav24` 를 그대로 통과시키므로 여기 나온 값이 실제로 서버에 갈 음성의 값이다."""
     j = JOBS[job]
     for s in (j.get("result") or {}).get("speakers", []):
@@ -283,12 +283,12 @@ def _to_wav24(raw, name):
     peak = float(np.abs(y).max())
     gain = min(10.0, 0.8 / peak) if peak > 1e-6 else 1.0   # 과증폭은 10배로 제한
     y = y * gain
-    snr, quiet, low, warn = _quality(y)
+    snr, quiet, mid, warn = _quality(y)
     buf = io.BytesIO()
     sf.write(buf, y, 24000, format="WAV", subtype="PCM_16")
     return buf.getvalue(), len(y) / 24000, {
         "level": round(_level(y), 3), "gain": round(gain, 1),
-        "snr_db": snr, "quiet_ratio": quiet, "low_ratio": low, "warning": warn,
+        "snr_db": snr, "quiet_ratio": quiet, "mid_ratio": mid, "warning": warn,
         "silence_cut": cut, "quiet_before": quiet_before,
         "cut_from_sec": round(before, 2) if cut else None}
 
@@ -302,9 +302,9 @@ def _level(y):
     return float(np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)).max())
 
 
-LOW_SAFE = 0.30      # 0~300Hz 비율이 이보다 낮으면 경고
+MID_SAFE = 0.25      # 1~4kHz 비율이 이보다 높으면 경고
 
-def _warn_text(snr, low=None):
+def _warn_text(snr, mid=None):
     """참조 품질 경고. **두 기준의 성격이 다르다는 점을 알고 쓸 것.**
 
     SNR 은 **길이 폭주**에만 유효하다. 통제 실험(같은 화자·내용에 핑크 잡음만
@@ -312,16 +312,25 @@ def _warn_text(snr, low=None):
     **지지직에 대해서는 무의미하다** — 35dB 짜리가 심한 지지직을 냈고, 잡음 제거로
     59dB 까지 올려도 그대로였다(오히려 악화).
 
-    저역 비율은 **지지직**을 가른다. 참조 8개를 오차 없이 갈라낸 유일한 지표다 —
-    38.2~82.9% 는 전부 깨끗했고, 5.8% 짜리 하나만 실패했다. 스펙트럼을 서로
-    맞바꾸는 실험으로 인과도 확인했다(깨끗한 참조를 5.5% 로 만들면 지지직이 생긴다).
+    1~4kHz(명료도 대역) 비율이 **지지직**을 가른다. 방송·영상용 후처리가 이 대역을
+    밀어올리는데, 모델이 그런 스펙트럼을 받으면 망가진다.
 
-    **경계는 모른다.** 5.8% 와 38.2% 사이에 표본이 없다. 그래서 보수적으로 30%
-    미만에서만 경고한다. 아는 척해서 기준을 좁게 잡으면 SNR 25dB 때 한 실수를
-    반복하게 된다."""
+    **전에는 저역(0~300Hz) 30% 미만으로 경고했는데 그건 틀렸다.** 성인·근접 녹음
+    12개에만 맞춘 기준이었다. 교실 원거리 녹음(아동 검사 세션)에서 저역 26.7% 짜리가
+    가장 좋게 나왔고, 저역 7.1% 가 멀쩡한 반면 저역 5.8% 짜리는 심한 지지직을 냈다 —
+    저역이 같은데 결과가 갈렸다. 그때까지 두 대역은 늘 같이 움직여서 못 갈랐던
+    것이다(교실 녹음은 저역만 깎이고 1~4kHz 부스트는 없다).
+
+    가림 청취 9조건으로 전향적 검증을 했다. 두 군의 저역 범위를 겹치게(A 3.7~21.6%,
+    B 3.2~17.9%) 잡아 저역으로는 갈릴 수 없게 해두고 1~4kHz 로만 갈랐더니,
+    판정 가능한 8개 중 새 기준 7개 · 옛 기준 3개 적중이었다.
+
+    **경계는 넉넉히 잡는다.** 24.3% 이상 7개 중 6개가 문제였고(예외는 화자 분리가
+    안 돼 여러 명이 섞인 참조 하나), 14.3% 는 깨끗 · 17.3% 는 약간이라 그 사이는
+    표본이 붙어 있다. 좁게 잡으면 SNR 25dB · 저역 30% 때 한 실수를 되풀이한다."""
     out = []
-    if low is not None and low < LOW_SAFE:
-        out.append(f"저음이 지나치게 적습니다 (0~300Hz {low*100:.0f}%, 30% 이상 권장). "
+    if mid is not None and mid >= MID_SAFE:
+        out.append(f"명료도 대역이 지나치게 셉니다 (1~4kHz {mid*100:.0f}%, 25% 미만 권장). "
                    f"합성 결과에 지지직이 낄 수 있습니다. 방송·영상용으로 후처리된 "
                    f"소리에서 나타납니다 — 직접 녹음한 음성을 쓰는 편이 안전합니다.")
     if snr is not None and snr < 25:
@@ -341,7 +350,11 @@ def _quality(y, sr=24000):
     쉬는 구간 비율은 **20% 를 넘으면 잘라낸다**(`_cut_silence`). 참조가 많이 쉬면
     합성 결과도 많이 쉰다. 판정에는 안 쓰고 처리 여부만 정한다.
 
-    저역 비율(0~300Hz)은 **지지직**을 가른다. 여기서 같이 재서 경고에 쓴다."""
+    1~4kHz 비율은 **지지직**을 가른다. 여기서 같이 재서 경고에 쓴다.
+
+    이 SNR 은 시간축 하위 분위수를 잡음 바닥으로 본다. 그래서 **계속 변하는
+    배경음은 못 잡는다** — 사용자가 "목소리가 묻힐 정도"라고 한 참조가 30.0dB 로
+    나왔다. 일정한 잡음에만 쓸 것."""
     if len(y) < sr // 2:
         return None, None, None, ""
     S = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
@@ -351,13 +364,13 @@ def _quality(y, sr=24000):
     sig = float(np.percentile(S, 90, axis=1)[b].mean())
     snr = float(20 * np.log10(max(sig, 1e-9) / max(floor, 1e-9)))
     P = S ** 2
-    low = float(P[f < 300].sum() / max(P.sum(), 1e-12))
+    mid = float(P[(f >= 1000) & (f < 4000)].sum() / max(P.sum(), 1e-12))
     w = 2400
     n = len(y) // w
     r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)) if n >= 2 else np.array([0.0])
     quiet = float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
     # 파이썬 float 이어야 JSON 직렬화된다
-    return round(snr, 1), round(quiet, 3), round(low, 3), _warn_text(snr, low)
+    return round(snr, 1), round(quiet, 3), round(mid, 3), _warn_text(snr, mid)
 
 
 @app.post("/publish_direct")

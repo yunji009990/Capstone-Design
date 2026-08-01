@@ -89,7 +89,7 @@
     <canvas id="wave" height="120"></canvas>
     <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
       복제 품질이 여기서 결정됩니다.<br>
-      <b>저음</b>은 30% 이상이어야 합니다. 낮으면 합성 결과에 지지직거리는 소리가 낍니다
+      <b>명료도</b>는 25% 미만이어야 합니다. 높으면 합성 결과에 지지직거리는 소리가 낍니다
       (방송·영상용으로 후처리된 소리가 그렇습니다). <b>쉼</b>이 20%를 넘으면 등록할 때 자동으로 줄입니다.</div>
     <div id="spklist"></div>
     <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
@@ -268,12 +268,13 @@ function renderSpeakers() {
     const ref = s.ref || {};
     const q = s.quality || {};
     // 실측으로 검증된 것만 배지로 올린다.
-    //   저역(0~300Hz) — 지지직을 가른다. 30% 미만이 위험. 참조 12개 오차 0.
+    //   명료도(1~4kHz) — 지지직을 가른다. 25% 이상이 위험. 가림 청취 8개 중 7개 적중.
     //   쉼 — 꼬리 무음을 가른다. 20% 초과면 등록 때 자동으로 잘라낸다.
     // 예전에는 SNR 과 참조 길이를 배지로 썼는데 둘 다 지지직과 무관하다.
-    const low = q.low_ratio, quiet = q.quiet_before ?? q.quiet_ratio;
-    const lowPct = low == null ? null : Math.round(low * 100);
-    const lowCls = lowPct == null ? "warn" : (lowPct >= 30 ? "ok" : "bad");
+    // 저역(0~300Hz)도 썼었는데 성인·근접 녹음에만 맞는 기준이라 버렸다 — `_warn_text` 참고.
+    const mid = q.mid_ratio, quiet = q.quiet_before ?? q.quiet_ratio;
+    const midPct = mid == null ? null : Math.round(mid * 100);
+    const midCls = midPct == null ? "warn" : (midPct < 25 ? "ok" : "bad");
     const quietPct = quiet == null ? null : Math.round(quiet * 100);
     const el = document.createElement("div");
     el.className = "spk"; el.dataset.id = s.spk_id;
@@ -282,7 +283,7 @@ function renderSpeakers() {
          <span class="dot" style="background:${COLORS[ci % COLORS.length]}"></span>
          <b>${s.spk_id}</b>
          <span class="pill">${q.sec ?? ref.dur ?? "?"}초</span>
-         <span class="pill ${lowCls}">저음 ${lowPct == null ? "?" : lowPct + "%"}</span>
+         <span class="pill ${midCls}">명료도 ${midPct == null ? "?" : midPct + "%"}</span>
          ${quietPct == null ? "" :
            `<span class="pill ${q.silence_cut ? "warn" : "ok"}">쉼 ${quietPct}%${q.silence_cut ? " → 자동 제거" : ""}</span>`}
          <span class="grow"></span>
