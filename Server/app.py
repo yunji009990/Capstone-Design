@@ -14,6 +14,11 @@ SRV   = os.path.join(BASE, "server")
 MEMFR = float(os.environ.get("RAON_MEM_FRACTION", "0.60"))
 TOKENS= int(os.environ.get("RAON_ANSWER_TOKENS", "200"))
 TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
+# 대화가 길어지면 앞쪽을 요약으로 접는다(RAON_KEEP_TURNS 턴만 원문으로 남긴다).
+# 원문 6턴을 그대로 넘기면 뒤로 갈수록 시스템 프롬프트가 대화에 묻혀 말투 규칙이 풀리고,
+# 이미 한 질문을 또 한다. 요약은 시스템 프롬프트 안에 붙어 절대 밀려나지 않는다.
+KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
+SUMM  = os.environ.get("RAON_SUMMARY", "1") == "1"
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 S["cont"]
@@ -33,6 +38,7 @@ TOKEN = os.environ.get("RAON_TOKEN", "")
 
 S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
 HIST, LOCK = {}, asyncio.Lock()
+SUMM_TEXT = {}                  # session -> 접어둔 앞부분의 요약
 
 # ── 세션 ────────────────────────────────────────────────────────────
 # 인물은 반드시 웹에서 등록한다. 서버에 기본 음성·기본 인물을 두지 않는다.
@@ -278,7 +284,7 @@ async def set_mode(cont: str = Form(...), x_token: str = Header("")):
 
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
-    auth(x_token); HIST.pop(session, None)
+    auth(x_token); HIST.pop(session, None); SUMM_TEXT.pop(session, None)
     return {"ok": True}
 
 @app.post("/tts")
@@ -302,15 +308,89 @@ async def stt_ep(file: UploadFile = File(...), x_token: str = Header("")):
     finally:
         os.unlink(p)
 
+# ── 대화 기록 ───────────────────────────────────────────────────────
+SUMM_PROMPT = """다음은 두 사람이 나눈 대화다. 이어서 대화하는 데 필요한 것만 남겨
+세 줄 이내로 간추려라. 본 대로만 적는다.
+
+남길 것: 서로 부른 이름, 상대가 처한 상황과 감정, 이미 나온 화제, 약속한 것.
+
+{log}
+
+간추린 내용:"""
+
+def build_msgs(session, user_content):
+    """시스템(+요약) + 최근 원문 + 이번 발화.
+
+    요약을 시스템 프롬프트 안에 넣는 이유는, 대화가 길어져도 밀려나지 않게 하려는 것이다.
+    별도 메시지로 앞에 두면 원문 턴들에 파묻혀 말투 규칙과 함께 무시된다.
+    세 경로(/chat·/talk·/talk_stream)가 같은 것을 보도록 한 곳에 둔다."""
+    sysmsg = sess_system(session)
+    if SUMM_TEXT.get(session):
+        sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
+    return [{"role": "system", "content": sysmsg}] + list(HIST.get(session, [])) + [user_content]
+
+def record(session, heard, answer):
+    """대화를 기록하고, 길어지면 앞쪽을 요약으로 접는다.
+
+    호출자가 LOCK 을 쥐고 있어야 한다 — 접을 때 모델을 한 번 더 쓴다.
+    6턴을 넘기면 오래된 것을 접어 3턴만 원문으로 남긴다. 세 턴에 한 번 꼴로 돈다."""
+    h = HIST.setdefault(session, [])
+    h += [{"role": "user", "content": heard},
+          {"role": "assistant", "content": answer}]
+    if not SUMM or len(h) <= TURNS * 2:
+        del h[:-TURNS*2]                 # 요약을 끄면 예전처럼 자르기만 한다
+        return
+    old, keep = h[:-KEEP*2], h[-KEEP*2:]
+    log = "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}" for m in old)
+    if SUMM_TEXT.get(session):
+        log = f"(앞서 간추린 것)\n{SUMM_TEXT[session]}\n\n{log}"
+    try:
+        t0 = time.time()
+        out = S["pipe"].chat([{"role": "user", "content": SUMM_PROMPT.format(log=log)}],
+                             max_new_tokens=200, temperature=0.3).strip()
+        SUMM_TEXT[session], h[:] = out, keep
+        print(f"[{session}] 요약 {len(old)}개 접음 ({time.time()-t0:.1f}초) — {out!r}", flush=True)
+    except Exception as e:
+        # 요약이 실패해도 대화는 이어져야 한다. 예전처럼 자르기로 물러선다.
+        print(f"[{session}] 요약 실패, 자르기로 대체: {e}", flush=True)
+        del h[:-TURNS*2]
+
+
+@app.post("/chat")
+async def chat_ep(text: str = Form(...), session: str = Form("default"),
+                  x_token: str = Header("")):
+    """텍스트로 묻고 텍스트로 답한다. 페르소나 프롬프트를 재보기 위한 것이다.
+
+    /talk 은 오디오만 받는다. 그래서 프롬프트 한 줄을 고칠 때마다 인식과 합성까지 도는데,
+    둘 다 답변 글의 품질과 상관이 없으면서 턴당 몇 초를 더 쓰고 오차를 섞는다. 실제로
+    질문을 합성했더니 "회사에서 계속 깨지는 것 같아"가 "어."로 나온 적이 있다.
+
+    시스템 프롬프트와 히스토리는 /talk 과 같은 것을 쓴다. 여기서 좋아진 프롬프트는
+    /talk 에서도 그대로 좋아진다. 유니티는 이 경로를 쓰지 않는다."""
+    auth(x_token)
+    if not S["pipe"]:
+        raise HTTPException(503, "model not ready")
+    need_session(session)
+    async with LOCK:
+        t0 = time.time()
+        msgs = build_msgs(session, {"role": "user", "content": text})
+        answer = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
+        record(session, text, answer)
+        el = time.time() - t0
+    print(f"[{session}] (글) {text!r} -> {answer!r} ({el:.1f}초)", flush=True)
+    # 요약과 남은 턴 수를 같이 돌려준다. 로그를 못 보는 자리에서도 접기가 제대로
+    # 도는지 확인할 수 있어야 한다.
+    return {"answer": answer, "elapsed": round(el, 2),
+            "turns": len(HIST.get(session, [])) // 2,
+            "summary": SUMM_TEXT.get(session, "")}
+
+
 async def _record_history(session: str, path: str, answer: str):
     """응답을 보낸 뒤 사용자 발화를 받아적어 히스토리를 채운다."""
     try:
         async with LOCK:
             heard = S["pipe"].stt(path)
-        h = HIST.setdefault(session, [])
-        h += [{"role": "user", "content": heard},
-              {"role": "assistant", "content": answer}]
-        del h[:-TURNS*2]
+            record(session, heard, answer)
         print(f"[{session}] (후처리) {heard!r}", flush=True)
     except Exception as e:
         print(f"[후처리 실패] {e}", flush=True)
@@ -338,18 +418,14 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             pipe, t0 = S["pipe"], time.time()
             heard = pipe.stt(p) if want_heard else ""
             t1 = time.time()
-            msgs = [{"role": "system", "content": sess_system(session)}]
-            msgs += HIST.get(session, [])
-            msgs.append({"role": "user", "content": [{"type": "audio", "audio": p}]})
+            msgs = build_msgs(session, {"role": "user",
+                                        "content": [{"type": "audio", "audio": p}]})
             answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
             if want_heard:
-                h = HIST.setdefault(session, [])
-                h += [{"role": "user", "content": heard},
-                      {"role": "assistant", "content": answer}]
-                del h[:-TURNS*2]
+                record(session, heard, answer)
             print(f"[{session}] {heard!r} -> {answer!r} "
                   f"(인식{t1-t0:.1f} 생성{t2-t1:.1f} 합성{t3-t2:.1f} 총{t3-t0:.1f}초)", flush=True)
 
@@ -382,15 +458,11 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
         heard = pipe.stt(p) if want_heard else ""
-        msgs = [{"role": "system", "content": sess_system(session)}]
-        msgs += HIST.get(session, [])
-        msgs.append({"role": "user", "content": [{"type": "audio", "audio": p}]})
+        msgs = build_msgs(session, {"role": "user",
+                                    "content": [{"type": "audio", "audio": p}]})
         answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
         if want_heard:
-            h = HIST.setdefault(session, [])
-            h += [{"role": "user", "content": heard},
-                  {"role": "assistant", "content": answer}]
-            del h[:-TURNS*2]
+            record(session, heard, answer)
         t1 = time.time()
 
     print(f"[{session}] {heard!r} -> {answer!r} (텍스트 {t1-t0:.1f}초)", flush=True)
@@ -492,6 +564,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), "system": _sess_system(sid)}
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
+    SUMM_TEXT.pop(sid, None)
     REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
 
     # 서버는 한 번에 한 인물만 보관한다. 세션 ID 를 비우면 시각으로 자동 생성되므로
@@ -500,6 +573,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     for old in [s for s in SESS if s != sid]:
         SESS.pop(old, None)
         HIST.pop(old, None)
+        SUMM_TEXT.pop(old, None)
         REF_TEXT.pop(_sess_path(old, "voice.wav"), None)
         shutil.rmtree(_sess_path(old), ignore_errors=True)
         print(f"[세션] {old} 정리", flush=True)
@@ -552,6 +626,7 @@ def session_end(session: str = Form(...), x_token: str = Header("")):
     if s:
         REF_TEXT.pop(s["voice"], None)
     HIST.pop(session, None)
+    SUMM_TEXT.pop(session, None)
     if CURRENT["session"] == session:
         CURRENT["session"] = None
     d = _sess_path(session)
