@@ -77,9 +77,10 @@
       <div id="dirdrop">참조로 쓸 오디오를 끌어다 놓거나 클릭해서 선택</div>
       <audio id="dirplayer" controls style="width:100%; margin-top:10px; display:none"></audio>
       <div class="hint" id="dirinfo"></div>
-      <div class="hint">화자 분리를 건너뛰고 <b>이 파일을 그대로</b> 참조로 씁니다. 24kHz 모노로만 변환되고
-        구간을 자르거나 이어붙이지 않습니다. <b>한 사람이 10~30초 자연스럽게 말하는 음성</b>이어야 하고,
-        원하는 말투가 이 음성 안에 있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.</div>
+      <div class="hint">화자 분리를 건너뛰고 이 파일을 참조로 씁니다. 24kHz 모노로 맞추고 음량을 정규화하며,
+        <b>쉬는 구간이 20%를 넘으면 줄여서 이어붙입니다</b>(그대로 두면 합성된 목소리도 중간에 멈춥니다).
+        <b>한 사람이 10~30초 끊지 말고 이어서 말하는 음성</b>이어야 하고, 원하는 말투가 이 음성 안에
+        있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.</div>
     </div>
   </div>
 
@@ -87,7 +88,9 @@
     <h2>2. 화자 선택</h2>
     <canvas id="wave" height="120"></canvas>
     <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
-      복제 품질이 여기서 결정됩니다.</div>
+      복제 품질이 여기서 결정됩니다.<br>
+      <b>저음</b>은 30% 이상이어야 합니다. 낮으면 합성 결과에 지지직거리는 소리가 낍니다
+      (방송·영상용으로 후처리된 소리가 그렇습니다). <b>쉼</b>이 20%를 넘으면 등록할 때 자동으로 줄입니다.</div>
     <div id="spklist"></div>
     <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
   </div>
@@ -263,21 +266,30 @@ function renderSpeakers() {
   result.speakers.forEach(s => {
     const ci = result.viz.color_idx[s.cluster] ?? 0;
     const ref = s.ref || {};
-    const snr = ref.snr_db ?? 0;
-    const snrCls = snr >= 15 ? "ok" : (snr >= 8 ? "warn" : "bad");
-    const durCls = (ref.dur >= 8 && ref.dur <= 30) ? "ok" : "warn";
+    const q = s.quality || {};
+    // 실측으로 검증된 것만 배지로 올린다.
+    //   저역(0~300Hz) — 지지직을 가른다. 30% 미만이 위험. 참조 12개 오차 0.
+    //   쉼 — 꼬리 무음을 가른다. 20% 초과면 등록 때 자동으로 잘라낸다.
+    // 예전에는 SNR 과 참조 길이를 배지로 썼는데 둘 다 지지직과 무관하다.
+    const low = q.low_ratio, quiet = q.quiet_before ?? q.quiet_ratio;
+    const lowPct = low == null ? null : Math.round(low * 100);
+    const lowCls = lowPct == null ? "warn" : (lowPct >= 30 ? "ok" : "bad");
+    const quietPct = quiet == null ? null : Math.round(quiet * 100);
     const el = document.createElement("div");
     el.className = "spk"; el.dataset.id = s.spk_id;
     el.innerHTML =
       `<div class="top">
          <span class="dot" style="background:${COLORS[ci % COLORS.length]}"></span>
          <b>${s.spk_id}</b>
-         <span class="pill ${durCls}">참조 ${ref.dur ?? "?"}초</span>
-         <span class="pill ${snrCls}">SNR ${snr}dB</span>
+         <span class="pill">${q.sec ?? ref.dur ?? "?"}초</span>
+         <span class="pill ${lowCls}">저음 ${lowPct == null ? "?" : lowPct + "%"}</span>
+         ${quietPct == null ? "" :
+           `<span class="pill ${q.silence_cut ? "warn" : "ok"}">쉼 ${quietPct}%${q.silence_cut ? " → 자동 제거" : ""}</span>`}
          <span class="grow"></span>
          <button class="ghost" data-play="${s.ref.file}">듣기</button>
        </div>
-       <div class="meta">이 파일에서 총 ${s.total_speech_sec}초 발화 · 참조는 ${ref.n_pieces ?? 1}개 조각을 이어붙임</div>`;
+       <div class="meta">이 파일에서 총 ${s.total_speech_sec}초 발화 · 참조는 ${ref.n_pieces ?? 1}개 조각을 이어붙임</div>
+       ${q.warning ? `<div class="meta" style="color:var(--bad)">${q.warning}</div>` : ""}`;
     el.onclick = ev => {
       if (ev.target.dataset.play) return;
       picked = s.spk_id;
@@ -348,7 +360,7 @@ $("#publish").onclick = async () => {
     const r = await fetch(url, { method: "POST", body: fd });
     const jj = await r.json();
     show(r.ok ? jj : (jj.detail || jj), !r.ok);
-    if (r.ok && mode === "direct") {   // 실제로 넘어간 것을 되들려준다
+    if (r.ok) {   // 실제로 넘어간 것을 되들려준다. 두 경로 모두 같은 처리를 받는다
       $("#verify").style.display = "";
       $("#sentplayer").src = "/last_ref.wav?t=" + Date.now();
       const w = (jj.sent || {}).warning;

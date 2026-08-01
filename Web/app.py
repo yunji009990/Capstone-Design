@@ -100,9 +100,30 @@ def _run_extract(job, src, n_speakers):
             j["state"], j["error"] = "error", "\n".join(j["messages"][-8:]) or "추출 실패"
             return
         j["result"] = json.load(open(rp, encoding="utf-8"))
+        j["stage"] = "품질 측정"
+        _measure_speakers(job)
         j["state"], j["stage"] = "done", "완료"
     except Exception as e:
         j["state"], j["error"] = "error", str(e)
+
+
+def _measure_speakers(job):
+    """화자별 참조를 **실제 등록 경로에 태워** 품질을 미리 재둔다.
+
+    사용자가 화자를 고를 때 근거가 필요하다. 분리기가 주는 SNR 만으로는 못 고른다 —
+    SNR 은 길이 폭주와는 관계있지만 **지지직과는 무관**하다는 것이 실측으로 확인됐다
+    (35dB 가 통과하며 실패하고, 59dB 로 올려도 그대로였다).
+
+    지지직을 가르는 것은 **저역 비율**이고, 꼬리 무음을 가르는 것은 **쉼 비율**이다.
+    `_to_wav24` 를 그대로 통과시키므로 여기 나온 값이 실제로 서버에 갈 음성의 값이다."""
+    j = JOBS[job]
+    for s in (j.get("result") or {}).get("speakers", []):
+        p = os.path.join(job_dir(job), "extract", s["ref"]["file"].replace("/", os.sep))
+        try:
+            _, dur, q = _to_wav24(open(p, "rb").read(), "ref.wav")
+            s["quality"] = {**q, "sec": round(dur, 1)}
+        except Exception as e:
+            s["quality"] = {"error": str(e)}
 
 
 @app.post("/extract")
@@ -157,8 +178,9 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
     if not os.path.exists(ref):
         raise HTTPException(400, "참조 음성 파일이 없습니다")
 
-    with open(ref, "rb") as f:
-        wav = f.read()
+    # 분리기가 만든 참조도 직접 지정과 **같은 처리**를 받아야 한다. 예전에는 이 경로만
+    # 파일을 그대로 보내서, 음량 정규화도 쉼 제거도 품질 경고도 안 걸렸다.
+    wav, dur, qual = _to_wav24(open(ref, "rb").read(), "ref.wav")
     with open(LAST_REF, "wb") as o:      # 보낸 것을 그대로 들어볼 수 있게 남긴다
         o.write(wav)
     try:
@@ -169,7 +191,7 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
         raise HTTPException(502, f"Raon 서버에 연결할 수 없습니다: {e}")
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
-    return r.json()
+    return {**r.json(), "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
 
 
 CUT_BIN, CUT_KEEP, CUT_XF = 0.02, 0.12, 0.01
