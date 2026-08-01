@@ -172,12 +172,71 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
     return r.json()
 
 
+CUT_BIN, CUT_KEEP, CUT_XF = 0.02, 0.12, 0.01
+# 쉼이 이 비율을 넘을 때만 잘라낸다. 실측 경계 —
+#   18%, 19% -> 손대지 않아도 5/5 정상.  22% -> 1/5,  27.6% -> 0/5.
+CUT_THRESHOLD = 0.20
+
+def _cut_silence(y, sr=24000):
+    """참조에서 쉬는 구간을 줄인다. 합성 결과의 꼬리 무음을 없애는 처리다.
+
+    참조가 많이 쉬면 합성된 목소리도 많이 쉰다. 문장을 다 말하고도 3~8초를 더
+    생성하다 상한에 걸려 끝나고, 반이중 구조라 그동안 사용자가 말을 못 한다.
+
+    같은 참조에서 쉼만 잘라 확인했다 —
+      유튜버 클립  쉼 22%   -> 0%   꼬리 1.4~7.4초 -> 0.26~0.54초, 정상 1/5 -> 5/5
+      직접 녹음    쉼 27.6% -> 6%   꼬리 0.0~8.4초 -> 0.22~0.64초, 정상 0/5 -> 5/5
+    두 참조 모두 전사가 원본과 같았다. 말을 자르는 게 아니라 사이의 침묵만 줄인다.
+
+    KEEP 만큼은 남긴다 — 0 으로 만들면 말이 붙어 숨 가쁘게 들린다.
+    이어붙이는 자리마다 크로스페이드를 넣지 않으면 딸깍 소리가 난다."""
+    from scipy.signal import butter, sosfiltfilt
+    v = sosfiltfilt(butter(4, [300, 4000], btype="band", fs=sr, output="sos"), y)
+    w = int(sr * CUT_BIN)
+    n = len(v) // w
+    if n < 2:
+        return y
+    r = np.sqrt((v[:n * w].reshape(n, w) ** 2).mean(axis=1))
+    sp = r > np.percentile(r, 95) * 0.06
+
+    runs, i = [], 0
+    while i < len(sp):
+        if sp[i]:
+            j = i
+            while j < len(sp) and sp[j]:
+                j += 1
+            runs.append([i, j]); i = j
+        else:
+            i += 1
+    if not runs:
+        return y
+    keep = int(CUT_KEEP / CUT_BIN)
+    merged = [runs[0]]
+    for s, e in runs[1:]:
+        if s - merged[-1][1] <= keep:      # 짧은 쉼은 그대로 둔다
+            merged[-1][1] = e
+        else:
+            merged.append([s, e])
+
+    pad, xf = int(CUT_KEEP / 2 / CUT_BIN), int(sr * CUT_XF)
+    fade = np.linspace(0, 1, xf)
+    parts = [y[max(0, s - pad) * w: min(len(y), (e + pad) * w)] for s, e in merged]
+    out = parts[0]
+    for p in parts[1:]:
+        if len(out) >= xf and len(p) >= xf:
+            out = np.concatenate([out[:-xf],
+                                  out[-xf:] * fade[::-1] + p[:xf] * fade, p[xf:]])
+        else:
+            out = np.concatenate([out, p])
+    return out
+
+
 def _to_wav24(raw, name):
     """무엇이 올라오든 24kHz 모노 wav 로 맞춘다. 서버가 참조로 쓰는 형식이다.
 
-    음량도 맞춘다. 영상에서 딴 소리는 작게 녹음된 경우가 많은데, 참조가 작으면
-    합성 결과가 눌리고 억양도 제대로 안 따라온다. 실측으로 잘 됐던 참조가
-    peak RMS 0.14~0.20 이었고 실패한 것이 0.05 였다."""
+    쉬는 구간을 줄이고(`_cut_silence`) 음량을 맞춘다. 참조가 작으면 합성 결과가
+    눌리고 억양도 제대로 안 따라온다 — 실측으로 잘 됐던 참조가 peak RMS
+    0.14~0.20 이었고 실패한 것이 0.05 였다."""
     tmp = os.path.join(WORK, "_upload" + os.path.splitext(name)[1].lower())
     with open(tmp, "wb") as o:
         o.write(raw)
@@ -188,15 +247,28 @@ def _to_wav24(raw, name):
     if len(y) == 0:
         raise HTTPException(400, "오디오를 읽지 못했습니다")
 
+    before = len(y) / 24000
+    quiet_before = _quality(y)[1]
+    # 필요할 때만 자른다. 쉼이 적은 참조는 이미 잘 나오고, 굳이 자르면
+    # 오히려 나빠진다 — 쉼 18% 짜리를 0% 로 만들었더니 꼬리는 그대로 좋은데
+    # 지지직 지표가 0.07~0.39 에서 0.46~1.36 으로 올랐다.
+    cut = quiet_before is not None and quiet_before >= CUT_THRESHOLD
+    if cut:
+        y = _cut_silence(y)
+        if len(y) == 0:
+            raise HTTPException(400, "말소리를 찾지 못했습니다")
+
     peak = float(np.abs(y).max())
     gain = min(10.0, 0.8 / peak) if peak > 1e-6 else 1.0   # 과증폭은 10배로 제한
     y = y * gain
-    snr, quiet, warn = _quality(y)
+    snr, quiet, low, warn = _quality(y)
     buf = io.BytesIO()
     sf.write(buf, y, 24000, format="WAV", subtype="PCM_16")
     return buf.getvalue(), len(y) / 24000, {
         "level": round(_level(y), 3), "gain": round(gain, 1),
-        "snr_db": snr, "quiet_ratio": quiet, "warning": warn}
+        "snr_db": snr, "quiet_ratio": quiet, "low_ratio": low, "warning": warn,
+        "silence_cut": cut, "quiet_before": quiet_before,
+        "cut_from_sec": round(before, 2) if cut else None}
 
 
 def _level(y):
@@ -208,22 +280,32 @@ def _level(y):
     return float(np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)).max())
 
 
-def _warn_text(snr, quiet=None):
-    """참조 품질 경고. **기준이 확정적이지 않다는 점을 알고 쓸 것.**
+LOW_SAFE = 0.30      # 0~300Hz 비율이 이보다 낮으면 경고
 
-    통제 실험(같은 화자·같은 내용에 핑크 잡음만 추가)으로 확인한 것은 이렇다 —
-    40dB 정상 / 26dB 정상 / 21dB 부터 길이 폭주 / 16dB 는 상한까지 반복.
-    그래서 25dB 아래는 확실히 위험하다.
+def _warn_text(snr, low=None):
+    """참조 품질 경고. **두 기준의 성격이 다르다는 점을 알고 쓸 것.**
 
-    다만 이 지표가 모든 실패를 잡지는 못한다. 배경 음악과 다른 목소리가 섞인
-    실제 녹화본은 31dB 로 측정되면서도 루프와 지지직이 났다. 대역별 하위 분위수는
-    **정상 잡음**을 가정하는데 음악은 비정상 신호이기 때문이다.
+    SNR 은 **길이 폭주**에만 유효하다. 통제 실험(같은 화자·내용에 핑크 잡음만
+    추가)에서 40/26dB 는 정상, 21dB 부터 길이 폭주, 16dB 는 상한까지 반복이었다.
+    **지지직에 대해서는 무의미하다** — 35dB 짜리가 심한 지지직을 냈고, 잡음 제거로
+    59dB 까지 올려도 그대로였다(오히려 악화).
 
-    쉬는 구간 비율은 기준에서 뺐다 — 쉼 0% 인 깨끗한 참조가 정상 동작했다."""
-    if snr is None or snr >= 25:
-        return ""
-    return (f"참조 잡음이 많습니다 (SNR {snr:.0f}dB, 25dB 이상 권장). "
-            f"오디오가 늘어지거나 같은 소리를 반복할 수 있습니다.")
+    저역 비율은 **지지직**을 가른다. 참조 8개를 오차 없이 갈라낸 유일한 지표다 —
+    38.2~82.9% 는 전부 깨끗했고, 5.8% 짜리 하나만 실패했다. 스펙트럼을 서로
+    맞바꾸는 실험으로 인과도 확인했다(깨끗한 참조를 5.5% 로 만들면 지지직이 생긴다).
+
+    **경계는 모른다.** 5.8% 와 38.2% 사이에 표본이 없다. 그래서 보수적으로 30%
+    미만에서만 경고한다. 아는 척해서 기준을 좁게 잡으면 SNR 25dB 때 한 실수를
+    반복하게 된다."""
+    out = []
+    if low is not None and low < LOW_SAFE:
+        out.append(f"저음이 지나치게 적습니다 (0~300Hz {low*100:.0f}%, 30% 이상 권장). "
+                   f"합성 결과에 지지직이 낄 수 있습니다. 방송·영상용으로 후처리된 "
+                   f"소리에서 나타납니다 — 직접 녹음한 음성을 쓰는 편이 안전합니다.")
+    if snr is not None and snr < 25:
+        out.append(f"참조 잡음이 많습니다 (SNR {snr:.0f}dB, 25dB 이상 권장). "
+                   f"오디오가 길게 늘어질 수 있습니다.")
+    return " ".join(out)
 
 
 def _quality(y, sr=24000):
@@ -234,21 +316,26 @@ def _quality(y, sr=24000):
     14.9dB 로 나왔다(실제로는 잡음이 없고 정상 동작한다). 대역마다 시간축 하위
     분위수를 잡음 바닥으로 보면 쉼이 없어도 추정된다.
 
-    쉬는 구간 비율도 같이 돌려주지만 품질 판정에는 쓰지 않는다 — 쉼 0% 인
-    깨끗한 참조가 정상 동작해서 기준에서 뺐다. 화면 표시용이다."""
+    쉬는 구간 비율은 **20% 를 넘으면 잘라낸다**(`_cut_silence`). 참조가 많이 쉬면
+    합성 결과도 많이 쉰다. 판정에는 안 쓰고 처리 여부만 정한다.
+
+    저역 비율(0~300Hz)은 **지지직**을 가른다. 여기서 같이 재서 경고에 쓴다."""
     if len(y) < sr // 2:
-        return None, None, ""
+        return None, None, None, ""
     S = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
     f = np.fft.rfftfreq(1024, 1 / sr)
     b = (f >= 200) & (f <= 6000)                 # 음성 대역만 본다
     floor = float(np.percentile(S, 10, axis=1)[b].mean())
     sig = float(np.percentile(S, 90, axis=1)[b].mean())
     snr = float(20 * np.log10(max(sig, 1e-9) / max(floor, 1e-9)))
+    P = S ** 2
+    low = float(P[f < 300].sum() / max(P.sum(), 1e-12))
     w = 2400
     n = len(y) // w
     r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)) if n >= 2 else np.array([0.0])
     quiet = float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
-    return round(snr, 1), round(quiet, 3), _warn_text(snr)   # 파이썬 float 이어야 JSON 직렬화된다
+    # 파이썬 float 이어야 JSON 직렬화된다
+    return round(snr, 1), round(quiet, 3), round(low, 3), _warn_text(snr, low)
 
 
 @app.post("/publish_direct")
