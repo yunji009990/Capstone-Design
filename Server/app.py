@@ -68,8 +68,16 @@ def _sess_path(sid, *parts):
     return os.path.join(SESS_DIR, sid, *parts)
 
 def _sess_system(sid):
-    """공통 규칙 + 인물 설명 + 사전지식. 웹은 인물만 보내면 된다."""
+    """공통 규칙 + 인물 설명 + 사전지식. 웹은 인물만 보내면 된다.
+
+    규칙은 등록할 때 rules 로 덮어쓸 수 있다. 기본값을 서버가 갖고 있는 이유는
+    위와 같지만, 이 규칙 자체가 답변 품질을 좌우해서 재배포 없이 바꿔가며 재볼 수
+    있어야 한다. 안 보내면 BASE_RULES 가 그대로 쓰인다."""
     persona = knowledge = ""
+    rules = BASE_RULES
+    r = _sess_path(sid, "rules.md")
+    if os.path.exists(r):
+        rules = open(r, encoding="utf-8").read().strip() or BASE_RULES
     p = _sess_path(sid, "persona.md")
     if os.path.exists(p):
         persona = open(p, encoding="utf-8").read().strip()
@@ -78,7 +86,7 @@ def _sess_system(sid):
         knowledge = open(k, encoding="utf-8").read().strip()
     if not persona:
         return ""
-    out = f"{BASE_RULES}\n\n[인물]\n{persona}"
+    out = f"{rules}\n\n[인물]\n{persona}"
     if knowledge:
         out += f"\n\n[사전지식]\n{knowledge}"
     return out
@@ -542,7 +550,8 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
 
 @app.post("/session/start")
 async def session_start(persona: str = Form(...), knowledge: str = Form(""),
-                        session: str = Form(""), voice: UploadFile = File(...),
+                        rules: str = Form(""), session: str = Form(""),
+                        voice: UploadFile = File(...),
                         model: UploadFile = File(None), x_token: str = Header("")):
     auth(x_token)
     sid = (session or time.strftime("%Y%m%d_%H%M%S")).strip()
@@ -570,6 +579,13 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     _save_atomic(persona.strip().encode("utf-8"), _sess_path(sid, "persona.md"))
     if knowledge.strip():
         _save_atomic(knowledge.strip().encode("utf-8"), _sess_path(sid, "knowledge.md"))
+    # 같은 세션 ID 로 다시 등록하면서 규칙을 안 보내면 기본값으로 돌아가야 한다.
+    # 지우지 않으면 예전에 보낸 규칙이 남아 무엇이 쓰이는지 알 수 없게 된다.
+    rp = _sess_path(sid, "rules.md")
+    if rules.strip():
+        _save_atomic(rules.strip().encode("utf-8"), rp)
+    elif os.path.exists(rp):
+        os.remove(rp)
     has_model = model is not None and model.filename
     if has_model:
         _save_atomic(await model.read(), _sess_path(sid, "model.glb"))
