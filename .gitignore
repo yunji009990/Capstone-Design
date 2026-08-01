@@ -85,3 +85,7 @@ crashlytics-build.properties
 
 # 3. (혹시 모르니) 스크립트 파일은 절대 무시하지 마라
 !*.cs
+
+# 프롬프트 시험 산출물 (질문 음성·답변 기록)
+/tools/_work/
+tools/__pycache__/
