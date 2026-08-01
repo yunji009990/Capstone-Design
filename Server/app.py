@@ -309,14 +309,26 @@ async def stt_ep(file: UploadFile = File(...), x_token: str = Header("")):
         os.unlink(p)
 
 # ── 대화 기록 ───────────────────────────────────────────────────────
-SUMM_PROMPT = """다음은 두 사람이 나눈 대화다. 이어서 대화하는 데 필요한 것만 남겨
-세 줄 이내로 간추려라. 본 대로만 적는다.
+SUMM_PROMPT = """아래는 당신("나")과 상대가 나눈 대화다.
+뒤에 이어 말할 때 필요한 사실만 뽑아 세 줄로 적어라.
 
-남길 것: 서로 부른 이름, 상대가 처한 상황과 감정, 이미 나온 화제, 약속한 것.
+지키는 것
+- 이름, 숫자, 날짜, 고유명사는 대화에 나온 그대로 옮긴다.
+- 한 줄에 한 가지씩, 평서문으로 적는다.
+- 글자와 쉼표, 마침표만 쓴다.
 
+대화
 {log}
 
-간추린 내용:"""
+세 줄:"""
+
+def clean_summary(s):
+    """요약은 시스템 프롬프트로 되돌아간다. 목록기호나 굵은 글씨가 섞이면 그 서식이
+    답변에 옮아붙고, 그대로 음성으로 읽힌다. 프롬프트로만 막으면 새므로 한 번 걸러낸다."""
+    s = re.sub(r"[*#`_]", "", s)
+    s = re.sub(r"^\s*[-•·]\s*", "", s, flags=re.M)
+    s = re.sub(r"^\s*(남길 것|간추린 내용|세 줄|요약)\s*:\s*", "", s, flags=re.M)
+    return "\n".join(l.strip() for l in s.splitlines() if l.strip())[:400]
 
 def build_msgs(session, user_content):
     """시스템(+요약) + 최근 원문 + 이번 발화.
@@ -346,8 +358,9 @@ def record(session, heard, answer):
         log = f"(앞서 간추린 것)\n{SUMM_TEXT[session]}\n\n{log}"
     try:
         t0 = time.time()
-        out = S["pipe"].chat([{"role": "user", "content": SUMM_PROMPT.format(log=log)}],
-                             max_new_tokens=200, temperature=0.3).strip()
+        out = clean_summary(S["pipe"].chat(
+            [{"role": "user", "content": SUMM_PROMPT.format(log=log)}],
+            max_new_tokens=200, temperature=0.3))
         SUMM_TEXT[session], h[:] = out, keep
         print(f"[{session}] 요약 {len(old)}개 접음 ({time.time()-t0:.1f}초) — {out!r}", flush=True)
     except Exception as e:
