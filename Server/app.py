@@ -23,6 +23,11 @@ CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 
 RAS   = os.environ.get("RAON_RAS", "1") == "1"
 RAS_WIN  = int(os.environ.get("RAON_RAS_WINDOW", "100"))
 RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.35"))
+# 샘플링 파라미터. 기본값은 모델이 쓰던 값 그대로다 — 지정하지 않으면 동작이 안 바뀐다.
+# temperature 는 모델 task_params 가 1.2 로 덮고 있었다(함수 기본값은 1.0).
+TEMP  = float(os.environ.get("RAON_TEMP", "1.2"))
+TOPK  = int(os.environ.get("RAON_TOP_K", "20"))
+TOPP  = float(os.environ.get("RAON_TOP_P", "0.8"))
 CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 16초
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
@@ -213,6 +218,7 @@ async def lifespan(app):
     cont = dict(tp.get("tts_continuation", tp.get("tts", {})))
     cont.update({"ras_enabled": RAS, "ras_window_size": RAS_WIN,
                  "ras_repetition_threshold": RAS_THR,
+                 "temperature": TEMP, "top_k": TOPK, "top_p": TOPP,
                  "max_new_tokens": CONT_FRAMES})
     tp["tts_continuation"] = cont
     print(f"[설정] tts_continuation — {cont}", flush=True)
