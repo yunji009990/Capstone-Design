@@ -2,11 +2,11 @@
 
 설계
 ────
-- Streamlit 프로세스 안에서 threading.Thread로 띄움. 별도 큐 서버 없이 단순.
+- 웹 백엔드 프로세스 안에서 threading.Thread로 띄움. 별도 큐 서버 없이 단순.
 - 진행 상황은 SQLite의 model_status 컬럼으로만 추적 → UI는 DB만 읽으면 됨.
 - API 키 없으면 stub 모드로 즉시 종료 (네트워크 X).
 - 같은 세션을 중복 디스패치하지 않도록 in-memory 가드.
-- Streamlit이 죽으면 진행 중 작업도 같이 끝남 (재시도는 관리자 페이지에서).
+- 백엔드가 죽으면 진행 중 작업도 같이 끝남 (재시도는 /admin 에서).
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def dispatch_model_job(session_id: str) -> str:
         if client.is_stub:
             database.set_model_status(
                 session_id, "stub",
-                model_error="tripo_api_key 미설정 — secrets.toml에 추가하고 Streamlit 재시작 시 자동 처리됨",
+                model_error="TRIPO_API_KEY 미설정 — 환경변수에 넣고 백엔드를 다시 띄우면 처리됨",
             )
             return "stub"
 

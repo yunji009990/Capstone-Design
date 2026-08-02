@@ -1,55 +1,41 @@
-# 다시, 봄 — 설문 데이터베이스 시스템
+# Survey — 설문 저장·3D 모델 라이브러리
 
-VR 체험 "다시, 봄"의 사전 설문지·이미지·음성을 수집하고, 생성형 AI 파이프라인이 사용할 수 있는 페르소나 JSON으로 저장하는 로컬 웹 앱.
+**앱이 아니라 라이브러리다.** 웹 백엔드(`Web/app.py`)가 `core/` 를 그대로 가져다 쓴다.
 
-## 실행 (Windows)
+원래는 Streamlit 설문 앱이었고 `app.py` 와 `pages/` 가 화면을 그렸다. 지금은
+`Web/` 이 그 일을 전부 하므로 화면 쪽은 지웠다. 남은 것은 화면이 없는 부분 —
+DB 스키마, 파일 보관, 3D 모델 작업 추적 — 뿐이다. 다시 필요하면 git 이력에 있다.
 
-```powershell
-cd "C:\Users\user\Desktop\다시봄_설문시스템"
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-streamlit run app.py --server.address=0.0.0.0 --server.port=8501
+## 구성
+
+| | |
+|---|---|
+| `core/database.py` | SQLite. 세션 메타 + 설문 JSON, 소프트/하드 삭제 |
+| `core/storage.py` | `data/sessions/<id>/` 에 사진·음성 보관, 폐기 |
+| `core/jobs.py` | 사진 → 3D 모델 작업을 스레드로 띄우고 상태를 DB 에 쓴다 |
+| `core/tripo.py` | Tripo image-to-3D 호출. **키가 없으면 stub** |
+| `data/sessions.db` | 자동 생성 |
+
+`data/` 는 참여자 자료라 저장소에 올라가지 않는다(`.gitignore`).
+
+## 3D 모델 키
+
+없으면 등록은 되고 모델만 `stub` 으로 끝난다. 대화는 정상이고 인물만 안 보인다.
+
+```bash
+TRIPO_API_KEY=tsk_... python -m uvicorn app:app --port 8500
 ```
 
-다른 PC에서 접속: `http://<이 PC의 IP>:8501`
-(같은 와이파이/내부망 안에서만)
+## 쓰는 쪽
 
-관리자 페이지는 사이드바의 `🔐 관리자`. 기본 비밀번호는 `.streamlit/secrets.toml`에서 변경.
-
-## 폴더
-
-- `app.py` — 단계형 설문 메인 앱
-- `pages/` — 관리자, 체험 후 안내 (Streamlit 멀티페이지 자동 인식)
-- `core/` — DB·스토리지·프롬프트 빌더·스타일링
-- `data/sessions.db` — SQLite (자동 생성)
-- `data/sessions/<session_id>/` — 업로드 자산 (이미지·음성)
-
-## 데이터 흐름
-
-```
-사용자 입력 (브라우저)
-   ↓
-세션 ID 발급 (yyyymmdd-NNN)
-   ↓
-SQLite: sessions 테이블 (메타 + JSON 페이로드)
-파일시스템: data/sessions/<id>/front.jpg, voice.wav
-   ↓
-core/prompt_builder.build_persona_prompt(session_id)
-   ↓
-LLM 시스템 프롬프트로 주입 → VR 클라이언트가 사용
-```
+- 등록·조회·폐기 화면 — `Web/static/index.html`, `after.html`, `admin.html`
+- 인물 글 만들기 — `Web/persona.py` (예전 `core/prompt_builder.py` 를 대체했다)
 
 ## 윤리 안전장치
 
-- 사전 심리 안내 + 사별 시점 체크 (4주 이내 → 전문 상담 권유 후 진행 의사 재확인)
-- 동의 3종 (이미지 사용 · 음성 사용 · "실제 고인 아님" 이해)
-- 세션 ID로 본인이 직접 삭제 가능 (체험 후 페이지)
-- 관리자에서 일괄 조회·다운로드·삭제
+화면이 `Web/` 으로 옮겨갔을 뿐 그대로다.
 
-## 관리자 비밀번호 설정
-
-`.streamlit/secrets.toml`:
-```toml
-admin_password = "change_me"
-```
+- 사별 시점 확인 (4주 이내 → 전문 상담 권유)
+- 동의 3종 (사진 사용 · 음성 사용 · "실제 고인 아님" 이해)
+- 세션 코드로 본인이 직접 폐기 (`/after`)
+- 관리자에서 일괄 조회·내려받기·삭제 (`/admin`)

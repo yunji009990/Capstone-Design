@@ -17,8 +17,8 @@
 
 실제 API 키 채울 때
 ───────────────────
-    .streamlit/secrets.toml 에 한 줄만 추가:
-        tripo_api_key = "tsk_..."
+    환경변수 TRIPO_API_KEY 에 넣고 웹 백엔드를 다시 띄운다:
+        $env:TRIPO_API_KEY = "tsk_..."
 
 참고 (Tripo 공식 API): https://platform.tripo3d.ai/docs/
 """
@@ -74,15 +74,7 @@ class TripoClient:
 
     @classmethod
     def from_secrets(cls) -> "TripoClient":
-        # 환경변수를 먼저 본다. Streamlit 밖(FastAPI 등)에서도 쓰기 위해서다.
-        api_key: str | None = os.environ.get("TRIPO_API_KEY") or None
-        if not api_key:
-            try:
-                import streamlit as st
-                api_key = st.secrets.get("tripo_api_key", None)
-            except Exception:
-                pass
-        return cls(api_key)
+        return cls(os.environ.get("TRIPO_API_KEY") or None)
 
     @property
     def is_stub(self) -> bool:
