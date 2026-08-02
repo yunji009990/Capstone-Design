@@ -47,7 +47,7 @@
   <div class="bar" id="bar">상태 확인 중…</div>
 
   <div class="steptop">
-    <span class="badge" id="steplabel">단계 1 / 8 · 시작</span>
+    <span class="badge" id="steplabel">단계 1 / 9 · 시작</span>
     <div class="prog"><div id="progbar"></div></div>
   </div>
 
@@ -73,7 +73,31 @@
 
   </div>
 
+  <!-- 목소리를 맨 앞에서 받는다. 화자 분리는 CPU 로 1분 남짓 걸리는데, 그동안
+       나머지 질문에 답하게 두면 기다리는 시간이 통째로 사라진다. 고르는 것은
+       7단계에서 한다 — 그때쯤이면 결과가 나와 있다. -->
   <div class="card step" data-step="2" style="display:none">
+    <h2>목소리</h2>
+    <div class="note">목소리부터 받습니다. <b>다음</b>을 누르면 뒤에서 화자를 갈라내기 시작하고,
+      그동안 나머지 질문에 답하시면 됩니다. 고르는 것은 뒤에서 합니다.</div>
+    <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
+    <div class="row" style="margin-top:12px">
+      <label style="margin:0">화자 수</label>
+      <select id="nspk" style="width:auto">
+        <option value="" selected>자동 판별</option>
+        <option value="1">한 명 (분리 안 함)</option>
+        <option value="2">2명</option>
+        <option value="3">3명</option>
+        <option value="4">4명</option>
+        <option value="5">5명</option>
+      </select>
+    </div>
+    <div class="hint"><b>한 사람이 10~30초 끊지 말고 이어서 말하는 대목</b>이 들어 있어야 합니다.
+      원하는 말투도 그 안에 있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.<br>
+      한 명뿐인 녹음이면 <b>한 명 (분리 안 함)</b>을 고르세요. 가르지 않고 그대로 씁니다.</div>
+  </div>
+
+  <div class="card step" data-step="3" style="display:none">
     <h2>기본 정보</h2>
     <div class="note">그분을 떠올릴 때 먼저 생각나는 것들을 적어 주세요.</div>
     <div class="row" style="align-items:flex-start; gap:16px">
@@ -116,7 +140,7 @@
 
   </div>
 
-  <div class="card step" data-step="3" style="display:none">
+  <div class="card step" data-step="4" style="display:none">
     <h2>추억</h2>
     <div class="note">떠오르는 장면 두세 가지면 충분합니다. 대화 중에 그분이 먼저 꺼낼 이야기가 됩니다.</div>
     <label>함께한 추억</label>
@@ -134,7 +158,7 @@
 
   </div>
 
-  <div class="card step" data-step="4" style="display:none">
+  <div class="card step" data-step="5" style="display:none">
     <h2>마음</h2>
     <div class="note">지금 어렵게 느껴진다면 한 칸만 채워도 괜찮아요. 어려운 칸은 비워 두셔도 됩니다.</div>
     <label>그분이 가장 그리운 순간은 언제인가요?</label>
@@ -147,27 +171,14 @@
       사용자가 스스로 말을 꺼낼 때 자연스럽게 받도록 해 두었습니다.</div>
   </div>
 
-  <div class="card step" data-step="5" style="display:none">
+  <div class="card step" data-step="6" style="display:none">
     <h2>대화 톤</h2>
     <div class="note">체험 중 인물이 어떤 어조로 응답하길 원하는지 골라 주세요.</div>
     <div id="tones"></div>
   </div>
 
-  <div class="card step" data-step="6" style="display:none">
-    <h2>목소리</h2>
-    <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
-    <div class="row" style="margin-top:12px">
-      <label style="margin:0">화자 수</label>
-      <select id="nspk" style="width:auto">
-        <option value="" selected>자동 판별</option>
-        <option value="1">한 명 (분리 안 함)</option>
-        <option value="2">2명</option>
-        <option value="3">3명</option>
-        <option value="4">4명</option>
-        <option value="5">5명</option>
-      </select>
-      <button id="go" disabled>화자 분리 시작</button>
-    </div>
+  <div class="card step" data-step="7" style="display:none">
+    <h2>목소리 고르기</h2>
     <div class="hint" id="jobinfo"></div>
 
     <!-- 한 명일 때. 분리기를 거치지 않으므로 보낸 것과 서버가 쓰는 것이 같다. -->
@@ -175,12 +186,10 @@
       <audio id="dirplayer" controls style="width:100%; margin-top:12px"></audio>
       <div class="hint" id="dirinfo"></div>
       <div class="hint">화자 분리를 건너뛰고 이 파일을 그대로 참조로 씁니다. 24kHz 모노로 맞추고 음량을 정규화하며,
-        <b>쉬는 구간이 20%를 넘으면 줄여서 이어붙입니다</b>(그대로 두면 합성된 목소리도 중간에 멈춥니다).
-        <b>한 사람이 10~30초 끊지 말고 이어서 말하는 음성</b>이어야 하고, 원하는 말투가 이 음성 안에
-        있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.</div>
+        <b>쉬는 구간이 20%를 넘으면 줄여서 이어붙입니다</b>(그대로 두면 합성된 목소리도 중간에 멈춥니다).</div>
     </div>
 
-    <!-- 여러 명일 때. 분리가 끝나면 여기서 바로 고른다 — 다음 장으로 넘기지 않는다. -->
+    <!-- 여러 명일 때. 앞에서 띄워 둔 분리 결과가 여기 도착한다. -->
     <div id="spkbox" style="display:none">
       <div class="hint" style="margin:16px 0 12px">사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
         복제 품질이 여기서 결정됩니다.<br>
@@ -191,7 +200,7 @@
     </div>
   </div>
 
-  <div class="card step" data-step="7" style="display:none">
+  <div class="card step" data-step="8" style="display:none">
     <h2>인물 확인</h2>
     <div class="note">설문으로 만든 것입니다. <b>어색한 곳은 직접 고치세요.</b>
       특히 대화 예시가 그 사람답게 들리는지 보세요.</div>
@@ -209,7 +218,7 @@
       실제 인물의 것으로 바꾸세요.</b> 구체적인 장면 한 줄이 성격 설명 열 줄보다 낫습니다.</div>
   </div>
 
-  <div class="card step" data-step="8" style="display:none">
+  <div class="card step" data-step="9" style="display:none">
     <h2>등록</h2>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
@@ -323,9 +332,9 @@ $("#testfill").onclick = () => {
 
 // ── 단계 이동 ──
 // 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
-const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"마음", 5:"대화 톤",
-                 6:"목소리", 7:"인물 확인", 8:"등록" };
-const LAST = 8;
+const LABELS = { 1:"시작", 2:"목소리", 3:"기본 정보", 4:"추억", 5:"마음",
+                 6:"대화 톤", 7:"목소리 고르기", 8:"인물 확인", 9:"등록" };
+const LAST = 9;
 let step = 1, personaEdited = false;
 
 $("#persona").oninput = $("#knowledge").oninput = () => { personaEdited = true; };
@@ -350,12 +359,14 @@ function showStep(n) {
 function blockedReason(n) {
   if (n === 1 && !($("#c1").checked && $("#c2").checked && $("#c3").checked))
     return "동의 세 가지를 모두 확인해 주세요.";
-  if (n === 2 && !$("#s_rel").value.trim())
+  if (n === 2 && !pending) return "영상이나 음성을 올려 주세요.";
+  if (n === 3 && !$("#s_rel").value.trim())
     return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
-  if (n === 6 && mode === "direct")
-    return dirFile ? null : "오디오를 고르고 확인을 눌러 주세요.";
-  if (n === 6 && !result) return "영상이나 음성을 올리고 화자 분리를 끝내 주세요.";
-  if (n === 6 && !picked) return "쓸 목소리를 골라 주세요.";
+  if (n === 7 && mode === "direct") return null;      // 고를 것이 없다
+  if (n === 7 && !result)
+    return jobErr ? "화자 분리에 실패했습니다. 2단계로 돌아가 다시 올려 주세요."
+                  : "화자를 갈라내는 중입니다. 조금만 기다려 주세요.";
+  if (n === 7 && !picked) return "쓸 목소리를 골라 주세요.";
   return null;
 }
 
@@ -374,8 +385,9 @@ async function makePersona() {
 $("#next").onclick = async () => {
   const why = blockedReason(step);
   if (why) { $("#navinfo").textContent = why; return; }
+  if (step === 2) start();          // 여기서 띄워 두고, 답하는 동안 뒤에서 돈다
   const n = step + 1;
-  if (n === 7 && !personaEdited) await makePersona();
+  if (n === 8 && !personaEdited) await makePersona();
   showStep(n);
 };
 $("#prev").onclick = () => showStep(step - 1);
@@ -450,18 +462,17 @@ function refresh() {
     : mode === "direct"
       ? `참조: <b>${dirFile.name}</b> — 파일 그대로`
       : `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`;
-  // 목소리를 고르기 전에는 다음을 잠근다. 열어 두면 등록 직전에야 막혀서
-  // 무엇이 모자란지 알기 어렵다.
-  const why = step === 6 ? blockedReason(6) : null;
+  // 목소리 장에서는 준비가 될 때까지 다음을 잠근다. 열어 두면 등록 직전에야
+  // 막혀서 무엇이 모자란지 알기 어렵다.
+  const why = (step === 2 || step === 7) ? blockedReason(step) : null;
   $("#next").disabled = !!why;
   $("#navinfo").textContent = why || "";
 }
 
 // ── 파일 고르기 ──
-// 고른다고 바로 시작하지 않는다. CPU 로 몇 분씩 도는 일이라 화자 수를 정하고
-// 확인을 누른 뒤에 시작해야, 잘못 골라도 되돌릴 수 있다.
-const drop = $("#drop"), go = $("#go");
-let pending = null;
+// 고른다고 바로 시작하지 않는다. 화자 수를 정하고 다음을 눌러야 시작한다.
+const drop = $("#drop");
+let pending = null, jobErr = null;
 
 function pick(f) {
   if (!f) return;
@@ -480,18 +491,21 @@ $("#nspk").onchange = reset;
 
 function reset() {
   mode = $("#nspk").value === "1" ? "direct" : "extract";
-  job = null; result = null; picked = null; dirFile = null;
+  job = null; result = null; picked = null; dirFile = null; jobErr = null;
   if (timer) { clearInterval(timer); timer = null; }
   $("#spkbox").style.display = $("#direct").style.display = "none";
   $("#spklist").innerHTML = "";
   $("#player").style.display = "none";
   $("#jobinfo").textContent = "";
-  go.textContent = mode === "direct" ? "이 음성으로 확정" : "화자 분리 시작";
-  go.disabled = !pending;
   refresh();
 }
 
-go.onclick = () => mode === "direct" ? confirmDirect() : send();
+// 2단계에서 다음을 누른 순간 시작한다. 이미 돌고 있으면 그냥 넘어간다 —
+// 뒤로 갔다 다시 오는 것만으로 1분짜리 일을 다시 시키면 안 된다.
+function start() {
+  if (mode === "direct") { if (!dirFile) confirmDirect(); }
+  else if (!job) send();
+}
 
 function confirmDirect() {
   dirFile = pending;
@@ -512,7 +526,6 @@ function confirmDirect() {
 async function send() {
   const fd = new FormData();
   fd.append("file", pending); fd.append("speakers", $("#nspk").value || 0);
-  go.disabled = true;
   $("#jobinfo").textContent = `${pending.name} 업로드 중…`;
   try {
     const r = await fetch("/extract", { method: "POST", body: fd });
@@ -522,8 +535,9 @@ async function send() {
     if (timer) clearInterval(timer);
     timer = setInterval(poll, 1200); poll();
   } catch (e) {
+    jobErr = e.message;
     $("#jobinfo").textContent = "실패: " + e.message;
-    go.disabled = false;
+    refresh();
   }
 }
 
@@ -531,12 +545,16 @@ async function poll() {
   if (!job) return;
   const d = await (await fetch(`/extract/${job}`)).json();
   if (d.state === "running") {
-    $("#jobinfo").textContent = `화자 분리 중… ${d.stage || ""}  (CPU 처리라 몇 분 걸릴 수 있습니다)`;
+    // 실측 63~99초(3~10MB). CPU 로 도는 것이라 오디오가 길수록 오래 걸린다.
+    $("#jobinfo").textContent = `화자 분리 중… ${d.stage || ""}  (보통 1분쯤 걸립니다)`;
     return;
   }
   clearInterval(timer); timer = null;
-  go.disabled = false;
-  if (d.state === "error") { $("#jobinfo").textContent = "실패: " + (d.error || ""); return; }
+  if (d.state === "error") {
+    jobErr = d.error || "알 수 없는 오류";
+    $("#jobinfo").textContent = "실패: " + jobErr;
+    refresh(); return;
+  }
   result = d.result;
   $("#jobinfo").textContent =
     `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
