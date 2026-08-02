@@ -74,25 +74,44 @@ def sim(a, b):
     a, b = norm(a), norm(b)
     return difflib.SequenceMatcher(None, a, b).ratio() if a and b else 0.0
 
+def sentences(text):
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+
 def questions(text):
     """답변 안의 물음 문장들. 같은 걸 또 묻는지 보려면 물음만 따로 봐야 한다."""
-    return [s.strip() for s in re.split(r"(?<=[?])\s*", text) if s.strip().endswith("?")]
+    return [s for s in sentences(text) if s.endswith("?")]
+
+def tail(text):
+    """마지막 문장. 13턴부터 같은 꼬리가 끝까지 붙는 것을 잡으려면 여기를 봐야 한다."""
+    ss = sentences(text)
+    return ss[-1] if ss else ""
+
+def wrong_name(answer):
+    """사용자를 AI 쪽 이름(준호)으로 부르는 것만 센다.
+
+    "나? 준호야." 는 이름을 묻는 말에 제대로 답한 것이라 오류가 아니다.
+    호격으로 부를 때만 쉼표가 붙는다 — "준호야, 힘들었겠다"."""
+    return len(re.findall(r"준호야\s*,", answer))
 
 def examples(persona):
     """페르소나의 대화 예시 줄. 이걸 그대로 베끼는지 본다."""
     return [l.split(":", 1)[1].strip() for l in persona.splitlines()
             if re.match(r"^\s*(친구|나|상대)\s*:", l)]
 
-def score(answer, prev_answers, prev_questions, exs, want):
-    qs = questions(answer)
+def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
+    qs, ss = questions(answer), sentences(answer)
     return {
         "글자수":   len(answer),
-        "문장수":   len([s for s in re.split(r"[.!?\n]", answer) if s.strip()]),
+        "문장수":   len(ss),
         "존댓말":   len(POLITE.findall(answer)),
         "상담원":   len(AGENT.findall(answer)),
         "정체노출": len(AI.findall(answer)),
         "기호":     len(JUNK.findall(answer)),
-        "호칭오류": answer.count("준호야"),   # 준호는 AI 쪽 이름. 사용자를 이렇게 부르면 안 된다
+        "호칭오류": wrong_name(answer),
+        # 규칙은 "한 문장, 길어도 두 문장. 40자 안팎"이다. 셋을 넘으면 어긴 것으로 센다.
+        "길이초과": int(len(ss) > 2),
+        # 13턴부터 같은 꼬리가 끝까지 붙던 것. 앞선 어느 답변의 꼬리와도 닮으면 잡힌다.
+        "꼬리고착": int(max([sim(tail(answer), t) for t in prev_tails] or [0]) >= 0.6),
         "예시베낌": round(max([sim(answer, e) for e in exs] or [0]), 2),
         "답변반복": round(max([sim(answer, a) for a in prev_answers] or [0]), 2),
         "질문반복": round(max([sim(q, p) for q in qs for p in prev_questions] or [0]), 2),
@@ -101,7 +120,7 @@ def score(answer, prev_answers, prev_questions, exs, want):
         "기억":     None if not want else int(any(w in answer for w in want)),
     }
 
-VIOLATIONS = ["존댓말", "상담원", "정체노출", "기호", "호칭오류"]
+VIOLATIONS = ["존댓말", "상담원", "정체노출", "기호", "호칭오류", "길이초과", "꼬리고착"]
 
 # ── 서버 ────────────────────────────────────────────────────────────
 def post(path, data=None, files=None, timeout=300):
@@ -110,44 +129,53 @@ def post(path, data=None, files=None, timeout=300):
         raise RuntimeError(f"{path} {r.status_code}: {r.text[:300]}")
     return r
 
-def register(persona, knowledge):
+def register(persona, knowledge, rules):
+    data = {"persona": persona, "knowledge": knowledge, "session": SID}
+    if rules:
+        data["rules"] = rules          # 없으면 서버의 BASE_RULES 가 그대로 쓰인다
     with open(VOICE, "rb") as f:
-        out = post("/session/start",
-                   data={"persona": persona, "knowledge": knowledge, "session": SID},
+        out = post("/session/start", data=data,
                    files={"voice": ("voice.wav", f, "audio/wav")}).json()
     if out.get("warning"):
         print(f"  [경고] {out['warning']}")
 
-def run_once(name, persona, knowledge, rep):
-    exs = examples(persona)
+def run_once(name, exs, rep):
     post("/reset", data={"session": SID})
-    rows, prev_a, prev_q, summary = [], [], [], ""
+    rows, prev_a, prev_q, prev_t, summary = [], [], [], [], ""
     for i, (say, want) in enumerate(SCRIPT, 1):
         r = post("/chat", data={"text": say, "session": SID}).json()
         ans = r["answer"]
         row = {"변형": name, "회차": rep, "턴": i, "질문": say, "답변": ans,
                "초": r["elapsed"], "남은턴": r["turns"]}
-        row.update(score(ans, prev_a, prev_q, exs, want))
+        row.update(score(ans, prev_a, prev_q, prev_t, exs, want))
         rows.append(row)
         mark = "" if row["기억"] is None else ("  기억 O" if row["기억"] else "  기억 X")
         flags = "".join(f" [{k}]" for k in VIOLATIONS if row[k])
         print(f"  {i:2d}. {ans}{flags}{mark}")
         if r["summary"] != summary:
             summary = r["summary"]
-            print(f"      ── 요약 갱신 ──\n      " + summary.replace("\n", "\n      "))
+            print(f"      ── 요약 ──\n      " + summary.replace("\n", "\n      "))
         prev_a.append(ans)
         prev_q += questions(ans)
+        prev_t.append(tail(ans))
     return rows
 
+def read(name, kind):
+    p = PROMPT / f"{name}.{kind}.md"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
 def run_variant(name, reps):
-    persona   = (PROMPT / f"{name}.persona.md").read_text(encoding="utf-8")
-    knowledge = (PROMPT / f"{name}.knowledge.md").read_text(encoding="utf-8")
-    print(f"\n{'='*70}\n{name} — 페르소나 {len(persona)}자 / 사전지식 {len(knowledge)}자\n{'='*70}")
-    register(persona, knowledge)
+    persona   = read(name, "persona")
+    knowledge = read(name, "knowledge")
+    rules     = read(name, "rules")
+    exs = examples(persona)
+    print(f"\n{'='*70}\n{name} — 페르소나 {len(persona)}자 / 사전지식 {len(knowledge)}자"
+          f" / 규칙 {len(rules) or '서버 기본값'}\n{'='*70}")
+    register(persona, knowledge, rules)
     rows = []
     for rep in range(1, reps + 1):
         print(f"\n-- {rep}회차 --")
-        rows += run_once(name, persona, knowledge, rep)
+        rows += run_once(name, exs, rep)
     return rows
 
 # ── 정리 ────────────────────────────────────────────────────────────
