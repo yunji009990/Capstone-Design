@@ -19,6 +19,8 @@ TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
 # 이미 한 질문을 또 한다. 요약은 시스템 프롬프트 안에 붙어 절대 밀려나지 않는다.
 KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
 SUMM  = os.environ.get("RAON_SUMMARY", "1") == "1"
+# 앞선 답변과 마지막 문장이 이만큼 닮으면 다시 뽑는다. 0 이면 끈다.
+REGEN = float(os.environ.get("RAON_REGEN_SIM", "0.6"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 S["cont"]
@@ -349,6 +351,32 @@ def build_msgs(session, user_content):
         sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
     return [{"role": "system", "content": sysmsg}] + list(HIST.get(session, [])) + [user_content]
 
+def _tail(text):
+    ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
+    return ss[-1] if ss else ""
+
+def answer_for(session, msgs, tries=2):
+    """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
+
+    실측에서 16턴부터 20턴까지 "면접 끝나면 연락해."가 다섯 턴 연속 붙었다. 모델이
+    히스토리에 있는 제 답변을 베끼는 것이라, 금지형("반복하지 마세요")으로도
+    지시형("마지막 문장은 다르게 끝냅니다")으로도 막히지 않았다. 그래서 합성 검증과
+    같은 방식으로, 뽑은 다음 재보고 걸리면 다시 뽑는다.
+
+    "너는?" 같은 짧은 되물음은 반복이 아니라 자연스러운 대화라서 여덟 자를 넘을
+    때만 본다. 다시 뽑을 때는 온도를 올려야 같은 것이 또 나오지 않는다."""
+    prev = [_tail(m["content"]) for m in HIST.get(session, []) if m["role"] == "assistant"]
+    a = ""
+    for i in range(tries):
+        a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7 + 0.3 * i)
+        t = _tail(a)
+        if not REGEN or not prev or len(t) < 8:
+            return a
+        if max((_sim(t, p) for p in prev), default=0.0) < REGEN:
+            return a
+        print(f"[{session}] 꼬리 반복, 다시 뽑는다 — {t!r}", flush=True)
+    return a
+
 def record(session, heard, answer):
     """대화를 기록하고, 길어지면 앞쪽을 요약으로 접는다.
 
@@ -395,7 +423,7 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
     async with LOCK:
         t0 = time.time()
         msgs = build_msgs(session, {"role": "user", "content": text})
-        answer = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
+        answer = answer_for(session, msgs)
         record(session, text, answer)
         el = time.time() - t0
     print(f"[{session}] (글) {text!r} -> {answer!r} ({el:.1f}초)", flush=True)
@@ -441,7 +469,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             t1 = time.time()
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]})
-            answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
+            answer = answer_for(session, msgs)
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
@@ -481,7 +509,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
         heard = pipe.stt(p) if want_heard else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]})
-        answer = pipe.chat(msgs, max_new_tokens=TOKENS, temperature=0.7)
+        answer = answer_for(session, msgs)
         if want_heard:
             record(session, heard, answer)
         t1 = time.time()

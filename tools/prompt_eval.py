@@ -110,8 +110,10 @@ def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
         "호칭오류": wrong_name(answer),
         # 규칙은 "한 문장, 길어도 두 문장. 40자 안팎"이다. 셋을 넘으면 어긴 것으로 센다.
         "길이초과": int(len(ss) > 2),
-        # 13턴부터 같은 꼬리가 끝까지 붙던 것. 앞선 어느 답변의 꼬리와도 닮으면 잡힌다.
-        "꼬리고착": int(max([sim(tail(answer), t) for t in prev_tails] or [0]) >= 0.6),
+        # 같은 꼬리가 끝까지 붙던 것. "너는?" 같은 짧은 되물음은 반복이 아니라
+        # 자연스러운 대화라서 뺀다 — 여덟 자 넘는 꼬리가 겹칠 때만 붕괴로 센다.
+        "꼬리고착": int(len(tail(answer)) >= 8
+                     and max([sim(tail(answer), t) for t in prev_tails] or [0]) >= 0.6),
         "예시베낌": round(max([sim(answer, e) for e in exs] or [0]), 2),
         "답변반복": round(max([sim(answer, a) for a in prev_answers] or [0]), 2),
         "질문반복": round(max([sim(q, p) for q in qs for p in prev_questions] or [0]), 2),
