@@ -6,9 +6,9 @@ export RAON_VERIFY=0
 export RAON_CONT=${RAON_CONT:-1}      # 1=억양까지 복제(tts_continuation), 0=음색만(tts)
 # GPU 95.6GB 중 이 프로세스가 쓸 수 있는 비율. 0.60 이면 57.4GB 인데, 20턴쯤 대화하면
 # 51GB 까지 올라가 여유가 없다. 실제로 56.5GB 에서 /chat 이 500 을 내기 시작했다.
-# 0.85 면 81GB 라 지금 최대치의 1.6배 여유가 생긴다. 상한을 아예 없애지는 않는다 —
+# 0.70 이면 66.9GB 라 지금 최대치의 1.3배 여유가 생긴다. 상한을 아예 없애지는 않는다 —
 # 폭주할 때 다른 프로세스까지 끌고 죽는 것을 막아준다.
-export RAON_MEM_FRACTION=${RAON_MEM_FRACTION:-0.85}
+export RAON_MEM_FRACTION=${RAON_MEM_FRACTION:-0.70}
 export RAON_TOKEN=23605a891e448b5aa46f82c8640b554c
 if [ -f server.pid ] && ps -p $(cat server.pid) >/dev/null 2>&1; then
   echo "이미 실행 중 (PID $(cat server.pid))"; exit 0
