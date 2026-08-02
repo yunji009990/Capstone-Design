@@ -66,6 +66,15 @@
   .spk .top { display:flex; align-items:center; gap:10px; }
   .dot { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
   .meta { font-size:12px; color:var(--dim); margin-top:6px; }
+  /* 단계 진행 — 설문 앱의 배지 + 진행 막대 */
+  .steptop { margin-bottom:16px; }
+  .badge { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
+           letter-spacing:.04em; padding:4px 12px; border-radius:999px; margin-bottom:10px; }
+  .prog { height:6px; background:#EFE3D6; border-radius:999px; overflow:hidden; }
+  #progbar { height:100%; width:0; border-radius:999px;
+             background:linear-gradient(90deg,var(--rose2),var(--rose)); transition:width 220ms ease; }
+  .nav { display:flex; align-items:center; gap:10px; margin-top:22px; }
+  .card.step h2 { margin-bottom:14px; }
 </style>
 </head>
 <body>
@@ -75,10 +84,15 @@
 
   <div class="bar" id="bar">상태 확인 중…</div>
 
-  <div class="card">
-    <h2>1. 사전 정보</h2>
-    <div class="note">여기 적으신 내용으로 <b>인물 설정을 자동으로 만듭니다.</b>
-      만든 뒤 아래 3번에서 직접 고칠 수 있습니다.</div>
+  <div class="steptop">
+    <span class="badge" id="steplabel">단계 1 / 7 · 시작</span>
+    <div class="prog"><div id="progbar"></div></div>
+  </div>
+
+  <div class="card step" data-step="1">
+    <h2>시작</h2>
+    <div class="note">그리운 분에 대해 몇 가지 여쭙겠습니다. 여기 적으신 내용으로
+      <b>대화할 인물을 만듭니다.</b> 짧아도 괜찮고, 나중에 고칠 수 있습니다.</div>
 
     <div id="ethics" style="background:#FFFDFB; border:1px solid #EFE3D6; border-radius:12px; padding:16px 18px; margin-bottom:18px">
       <label style="margin-top:0">사별 후 얼마나 지났나요?</label>
@@ -94,6 +108,11 @@
         재현임을 이해합니다</label></div>
     </div>
 
+  </div>
+
+  <div class="card step" data-step="2" style="display:none">
+    <h2>기본 정보</h2>
+    <div class="note">그분을 떠올릴 때 먼저 생각나는 것들을 적어 주세요.</div>
     <div class="row" style="align-items:flex-start; gap:16px">
       <div style="flex:1">
         <label>관계 <span style="color:#C4614F">*</span></label>
@@ -132,6 +151,11 @@
     <input type="text" class="s_quirk" placeholder="예: 밥은 먹었니">
     <input type="text" class="s_quirk" placeholder="">
 
+  </div>
+
+  <div class="card step" data-step="3" style="display:none">
+    <h2>추억</h2>
+    <div class="note">떠오르는 장면 두세 가지면 충분합니다. 대화 중에 그분이 먼저 꺼낼 이야기가 됩니다.</div>
     <label>함께한 추억</label>
     <div class="hint" style="margin-top:-4px">숫자·이름·장소가 들어간 구체적인 장면이 좋습니다.
       "예전에 여행 갔다"보다 "스무 살 여름에 강릉 갔다가 첫차를 놓쳐 세 시간 기다렸다".</div>
@@ -148,14 +172,10 @@
     <input type="file" id="s_img" accept="image/jpeg,image/png" style="margin-top:4px">
     <img id="s_imgprev" style="display:none; max-height:180px; border-radius:6px; margin-top:8px">
 
-    <div class="row" style="margin-top:16px">
-      <button id="mkpersona">이 내용으로 인물 만들기</button>
-      <span class="hint" id="mkinfo" style="margin:0"></span>
-    </div>
   </div>
 
-  <div class="card">
-    <h2>2. 참조 음성</h2>
+  <div class="card step" data-step="4" style="display:none">
+    <h2>목소리</h2>
     <div class="row" style="margin-bottom:14px">
       <button class="ghost tab on" id="tabex">영상·음성에서 화자 분리</button>
       <button class="ghost tab" id="tabdir">오디오 직접 지정</button>
@@ -182,8 +202,8 @@
     </div>
   </div>
 
-  <div class="card" id="spkcard" style="display:none">
-    <h2>3. 화자 선택</h2>
+  <div class="card step" id="spkcard" data-step="5" style="display:none">
+    <h2>화자 선택</h2>
     <canvas id="wave" height="120"></canvas>
     <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
       복제 품질이 여기서 결정됩니다.<br>
@@ -193,8 +213,11 @@
     <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
   </div>
 
-  <div class="card">
-    <h2>4. 인물 설정</h2>
+  <div class="card step" data-step="6" style="display:none">
+    <h2>인물 확인</h2>
+    <div class="note">설문으로 만든 것입니다. <b>어색한 곳은 직접 고치세요.</b>
+      특히 대화 예시가 그 사람답게 들리는지 보세요.</div>
+    <span class="hint" id="mkinfo"></span>
     <label>세션 ID</label>
     <input type="text" id="session" placeholder="비우면 서버가 시각으로 자동 생성">
     <div class="hint">등록하면 <b>서버의 이전 인물은 삭제됩니다.</b> 서버는 한 번에 한 사람만 보관합니다.</div>
@@ -208,8 +231,8 @@
       실제 인물의 것으로 바꾸세요.</b> 구체적인 장면 한 줄이 성격 설명 열 줄보다 낫습니다.</div>
   </div>
 
-  <div class="card">
-    <h2>5. 등록</h2>
+  <div class="card step" data-step="7" style="display:none">
+    <h2>등록</h2>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
       <button id="publish" disabled>세션 시작</button>
@@ -222,6 +245,12 @@
       아래는 <b>서버로 실제로 넘어간 참조 음성</b>입니다. 위에서 고른 것과 같은지 확인하세요.
       <audio id="sentplayer" controls style="width:100%; margin-top:8px"></audio>
     </div>
+  </div>
+  <div class="nav">
+    <button class="ghost" id="prev" style="display:none">이전</button>
+    <div class="grow"></div>
+    <span class="hint" id="navinfo" style="margin:0"></span>
+    <button id="next">다음</button>
   </div>
 </div>
 
@@ -287,37 +316,67 @@ $("#bweeks").oninput = () => {
 
 const vals = sel => [...document.querySelectorAll(sel)].map(e => e.value.trim()).filter(Boolean);
 
-$("#mkpersona").onclick = async () => {
-  const rel = $("#s_rel").value.trim();
-  if (!rel) { $("#mkinfo").textContent = "관계를 적어 주세요. 말투 전체가 여기서 정해집니다."; return; }
-  if (!($("#c1").checked && $("#c2").checked && $("#c3").checked)) {
-    $("#mkinfo").textContent = "동의 세 가지를 모두 확인해 주세요."; return;
-  }
-  const survey = {
-    relation: rel,
-    sex: $("#s_sex").value,
-    honorific: $("#s_hon").value.trim(),
-    calls_user: $("#s_calls").value.trim(),
-    user_name: $("#s_name").value.trim(),
-    personality_traits: [...document.querySelectorAll(".s_tr:checked")].map(e => e.value)
-        .concat(vals("#s_trait_other")),
-    speech_quirks: vals(".s_quirk"),
-    shared_memories: vals(".s_mem"),
-    missed_moment: $("#s_missed").value.trim(),
-    bereavement_weeks: $("#bweeks").value === "" ? null : parseInt($("#bweeks").value, 10),
-  };
-  $("#mkinfo").textContent = "만드는 중…";
-  const fd = new FormData(); fd.append("survey", JSON.stringify(survey));
+// ── 단계 이동 ──
+// 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
+const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"목소리", 5:"화자 선택",
+                 6:"인물 확인", 7:"등록" };
+const LAST = 7;
+let step = 1, personaEdited = false;
+
+$("#persona").oninput = $("#knowledge").oninput = () => { personaEdited = true; };
+
+function showStep(n) {
+  step = Math.min(LAST, Math.max(1, n));   // 범위를 벗어나면 화면이 통째로 비어 버린다
+  n = step;
+  document.querySelectorAll(".card.step").forEach(el => {
+    el.style.display = (+el.dataset.step === n) ? "" : "none";
+  });
+  $("#steplabel").textContent = `단계 ${n} / ${LAST} · ${LABELS[n]}`;
+  $("#progbar").style.width = (n / LAST * 100) + "%";
+  $("#prev").style.display = n > 1 ? "" : "none";
+  $("#next").textContent = n === LAST ? "" : "다음";
+  $("#next").style.display = n === LAST ? "none" : "";
+  $("#navinfo").textContent = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// 각 단계에서 넘어가려면 무엇이 있어야 하는가. 못 넘어가면 이유를 말해 준다.
+function blockedReason(n) {
+  if (n === 1 && !($("#c1").checked && $("#c2").checked && $("#c3").checked))
+    return "동의 세 가지를 모두 확인해 주세요.";
+  if (n === 2 && !$("#s_rel").value.trim())
+    return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
+  if (n === 4 && mode === "extract" && !result)
+    return "영상이나 음성을 올리고 화자 분리가 끝나야 넘어갈 수 있습니다.";
+  if (n === 4 && mode === "direct" && !dirFile)
+    return "참조로 쓸 오디오를 지정해 주세요.";
+  if (n === 5 && !picked) return "쓸 목소리를 골라 주세요.";
+  return null;
+}
+
+async function makePersona() {
+  $("#mkinfo").textContent = "설문으로 인물을 만드는 중…";
+  const fd = new FormData(); fd.append("survey", JSON.stringify(surveyPayload()));
   try {
     const r = await fetch("/persona", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
-    $("#persona").value = d.persona;
-    $("#knowledge").value = d.knowledge;
-    $("#mkinfo").innerHTML = "아래 <b>4. 인물 설정</b>에 넣었습니다. 확인하고 고치세요.";
-    $("#persona").scrollIntoView({ behavior: "smooth", block: "center" });
-  } catch (e) { $("#mkinfo").textContent = "실패: " + e; }
+    $("#persona").value = d.persona; $("#knowledge").value = d.knowledge;
+    $("#mkinfo").textContent = "";
+  } catch (e) { $("#mkinfo").textContent = "인물 생성 실패: " + e; }
+}
+
+$("#next").onclick = async () => {
+  const why = blockedReason(step);
+  if (why) { $("#navinfo").textContent = why; return; }
+  let n = step + 1;
+  // 오디오를 직접 지정했으면 고를 화자가 없다
+  if (n === 5 && mode !== "extract") n = 6;
+  if (n === 6 && !personaEdited) await makePersona();
+  showStep(n);
 };
+$("#prev").onclick = () => showStep(step === 6 && mode !== "extract" ? 4 : step - 1);
+showStep(1);
 
 async function status() {
   try {
@@ -365,7 +424,6 @@ function setMode(m) {
   $("#tabdir").classList.toggle("on", m === "direct");
   $("#paneex").style.display = m === "extract" ? "" : "none";
   $("#panedir").style.display = m === "direct" ? "" : "none";
-  $("#spkcard").style.display = (m === "extract" && result) ? "" : "none";
   refresh();
 }
 $("#tabex").onclick = () => setMode("extract");
@@ -411,7 +469,6 @@ async function send(f) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
     job = d.job; picked = null; refresh();
-    $("#spkcard").style.display = "none";
     drop.textContent = "다른 파일로 바꾸려면 여기를 클릭";
     if (timer) clearInterval(timer);
     timer = setInterval(poll, 1200); poll();
@@ -430,7 +487,6 @@ async function poll() {
   result = d.result;
   $("#jobinfo").textContent =
     `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
-  $("#spkcard").style.display = "";
   renderSpeakers(); drawWave(); refresh();
 }
 
