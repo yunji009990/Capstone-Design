@@ -89,3 +89,7 @@ crashlytics-build.properties
 # 프롬프트 시험 산출물 (질문 음성·답변 기록)
 /tools/_work/
 tools/__pycache__/
+
+# 설문 앱 — 실제 참가자 자료와 API 키는 저장소에 넣지 않는다
+/Survey/data/
+/Survey/.streamlit/
