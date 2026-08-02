@@ -79,7 +79,6 @@ if "data" not in st.session_state:
         },
         "emotion": {"missed_moment": "", "unsaid_words": "", "wished_to_hear": ""},
         "tone_setting": "warm_comfort",
-        "voice_mode": "real",     # real | similar
         "image_uploaded": None,   # UploadedFile (메모리)
         "voice_uploaded": None,
     }
@@ -334,41 +333,25 @@ def render_image():
 def render_voice():
     st.title("음성")
     styling.gentle_note(
-        "그 사람의 목소리를 들을 수 있도록, 짧은 녹음 파일(5초~수분)을 올려 주세요. "
-        "녹음이 없다면 아래에서 '유사 음성 매칭'을 선택해 주세요."
+        "그 사람의 목소리가 담긴 녹음 파일을 올려 주세요. "
+        "한 사람이 10~30초 끊지 않고 이어서 말하는 음성이 가장 좋습니다."
     )
 
-    mode = st.radio(
-        "음성 구성 방식",
-        ["real", "similar"],
-        index=0 if st.session_state.data["voice_mode"] == "real" else 1,
-        format_func=lambda x: "실제 음성 복원 (녹음 파일 업로드)" if x == "real" else "유사 음성 매칭 (성별·연령·말투로 자동)",
+    uploaded = st.file_uploader(
+        "WAV / MP3 / M4A / OGG / FLAC, 최대 50MB",
+        type=["wav", "mp3", "m4a", "ogg", "flac"],
+        accept_multiple_files=False,
+        key="voice_uploader",
     )
-    st.session_state.data["voice_mode"] = mode
+    if uploaded is not None:
+        st.session_state.data["voice_uploaded"] = uploaded
 
-    if mode == "real":
-        uploaded = st.file_uploader(
-            "WAV / MP3 / M4A / OGG / FLAC, 최대 50MB",
-            type=["wav", "mp3", "m4a", "ogg", "flac"],
-            accept_multiple_files=False,
-            key="voice_uploader",
-        )
-        if uploaded is not None:
-            st.session_state.data["voice_uploaded"] = uploaded
-
-        v = st.session_state.data["voice_uploaded"]
-        if v is not None:
-            st.audio(v)
-        can_proceed = v is not None
-        if not can_proceed:
-            st.caption("⚠ 녹음 파일 한 개가 필요합니다. (또는 위에서 '유사 음성 매칭'을 선택)")
-    else:
-        st.session_state.data["voice_uploaded"] = None
-        styling.gentle_warning(
-            "유사 음성 매칭을 선택하셨습니다. 실제 목소리가 아닌 비슷한 음색이 사용되며, "
-            "체험 시작 시 사용자에게 다시 안내됩니다."
-        )
-        can_proceed = True
+    v = st.session_state.data["voice_uploaded"]
+    if v is not None:
+        st.audio(v)
+    can_proceed = v is not None
+    if not can_proceed:
+        st.caption("⚠ 녹음 파일 한 개가 필요합니다.")
 
     nav_buttons(can_proceed)
 
@@ -401,10 +384,7 @@ def render_confirm():
         tone_label = TONE_OPTIONS[d["tone_setting"]][0]
         st.markdown(f"**대화 톤** — {tone_label}")
         st.markdown(f"**이미지** — {'업로드됨 (' + d['image_uploaded'].name + ')' if d['image_uploaded'] else '없음'}")
-        if d["voice_mode"] == "real":
-            st.markdown(f"**음성** — 실제 음성 복원 (" + (d['voice_uploaded'].name if d['voice_uploaded'] else '없음') + ")")
-        else:
-            st.markdown("**음성** — 유사 음성 매칭")
+        st.markdown("**음성** — " + (d['voice_uploaded'].name if d['voice_uploaded'] else '없음'))
 
     nav_buttons(can_proceed=True, last=True)
 
@@ -425,7 +405,6 @@ def submit():
         },
         "emotion": {k: v.strip() for k, v in d["emotion"].items()},
         "tone_setting": d["tone_setting"],
-        "voice_mode": d["voice_mode"],
     }
 
     session_id = database.next_session_id()
@@ -436,7 +415,7 @@ def submit():
         has_image = True
 
     has_voice = False
-    if d["voice_mode"] == "real" and d["voice_uploaded"] is not None:
+    if d["voice_uploaded"] is not None:
         storage.save_voice(session_id, d["voice_uploaded"])
         has_voice = True
 
