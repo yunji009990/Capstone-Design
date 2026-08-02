@@ -64,6 +64,10 @@ POLITE = re.compile(r"(습니다|입니다|세요|셔요|해요|예요|이에요
                     r"더라고요|잖아요|군요|나요|가요|시죠|죠)(?=[\s.,!?)\"']|$)")
 AGENT  = re.compile(r"도와드릴|말씀해|무엇을 도와|안녕하세요|죄송합니다|도움이 되|필요하시")
 AI     = re.compile(r"\bAI\b|인공지능|언어\s*모델|어시스턴트|챗봇")
+# 상대를 평가하고 격려하는 상담사 말투. 친구는 이렇게 말하지 않는다.
+CHEER  = re.compile(r"잘할 (거|수)|잘 할 (거|수)|충분히|넌 항상|너 원래|원래 잘|믿어|"
+                    r"힘내|응원할게|괜찮아질|넌 충분|성장하고|자신감을 가지|넌 잘")
+USER_NAME = "민수"
 # 음성으로 읽히므로 이모지·목록기호·굵은글씨는 그대로 사고가 된다.
 JUNK   = re.compile(r"[^가-힣ㄱ-ㆎa-zA-Z0-9\s.,?!~'\"·…\-()]")
 
@@ -108,6 +112,10 @@ def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
         "정체노출": len(AI.findall(answer)),
         "기호":     len(JUNK.findall(answer)),
         "호칭오류": wrong_name(answer),
+        # 실측에서 15턴 중 10턴이 "민수야"로 시작했다. 친구는 매번 이름을 안 부른다.
+        "호명":     answer.count(USER_NAME),
+        # "충분히 잘할 수 있을 거야" 류. 네 턴 연속 나오면 친구가 아니라 상담사다.
+        "격려":     len(CHEER.findall(answer)),
         # 규칙은 "한 문장, 길어도 두 문장. 40자 안팎"이다. 셋을 넘으면 어긴 것으로 센다.
         "길이초과": int(len(ss) > 2),
         # 같은 꼬리가 끝까지 붙던 것. "너는?" 같은 짧은 되물음은 반복이 아니라
@@ -187,7 +195,7 @@ def summarize(rows):
         rs = [r for r in rows if r["변형"] == name]
         mem = [r for r in rs if r["기억"] is not None]
         d = {"턴": len(rs)}
-        for k in ["글자수", "문장수", "예시베낌", "답변반복", "질문반복", "되묻기"]:
+        for k in ["글자수", "문장수", "예시베낌", "답변반복", "질문반복", "되묻기", "호명", "격려"]:
             d[k] = round(statistics.mean(r[k] for r in rs), 2)
         for k in VIOLATIONS:
             d[k] = sum(1 for r in rs if r[k])
@@ -202,7 +210,8 @@ def summarize(rows):
     return out
 
 def table(summary):
-    cols = ["턴", "글자수", "문장수", "되묻기", "기억", "예시베낌", "답변반복", "질문반복"] \
+    cols = ["턴", "글자수", "문장수", "되묻기", "호명", "격려", "기억",
+            "예시베낌", "답변반복", "질문반복"] \
            + VIOLATIONS + ["앞10턴위반", "뒤10턴위반", "앞10턴글자", "뒤10턴글자"]
     w = max(max(len(n) for n in summary) + 2, 10)
     print("\n" + "항목".ljust(12) + "".join(n.rjust(w) for n in summary))
