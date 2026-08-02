@@ -47,7 +47,7 @@
   <div class="bar" id="bar">상태 확인 중…</div>
 
   <div class="steptop">
-    <span class="badge" id="steplabel">단계 1 / 7 · 시작</span>
+    <span class="badge" id="steplabel">단계 1 / 8 · 시작</span>
     <div class="prog"><div id="progbar"></div></div>
   </div>
 
@@ -155,44 +155,43 @@
 
   <div class="card step" data-step="6" style="display:none">
     <h2>목소리</h2>
-    <div class="row" style="margin-bottom:14px">
-      <button class="ghost tab on" id="tabex">영상·음성에서 화자 분리</button>
-      <button class="ghost tab" id="tabdir">오디오 직접 지정</button>
+    <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
+    <div class="row" style="margin-top:12px">
+      <label style="margin:0">화자 수</label>
+      <select id="nspk" style="width:auto">
+        <option value="" selected>자동 판별</option>
+        <option value="1">한 명 (분리 안 함)</option>
+        <option value="2">2명</option>
+        <option value="3">3명</option>
+        <option value="4">4명</option>
+        <option value="5">5명</option>
+      </select>
+      <button id="go" disabled>화자 분리 시작</button>
     </div>
+    <div class="hint" id="jobinfo"></div>
 
-    <div id="paneex">
-      <div id="drop">오디오·영상을 끌어다 놓거나 클릭해서 선택 (mp3, wav, m4a, mp4, mov …)</div>
-      <div class="row" style="margin-top:12px">
-        <label style="margin:0">화자 수</label>
-        <input type="number" id="nspk" min="0" max="8" value="0" style="width:80px">
-        <span class="hint" style="margin:0">0이면 자동 판별</span>
-      </div>
-      <div class="hint" id="jobinfo"></div>
-    </div>
-
-    <div id="panedir" style="display:none">
-      <div id="dirdrop">참조로 쓸 오디오를 끌어다 놓거나 클릭해서 선택</div>
-      <audio id="dirplayer" controls style="width:100%; margin-top:10px; display:none"></audio>
+    <!-- 한 명일 때. 분리기를 거치지 않으므로 보낸 것과 서버가 쓰는 것이 같다. -->
+    <div id="direct" style="display:none">
+      <audio id="dirplayer" controls style="width:100%; margin-top:12px"></audio>
       <div class="hint" id="dirinfo"></div>
-      <div class="hint">화자 분리를 건너뛰고 이 파일을 참조로 씁니다. 24kHz 모노로 맞추고 음량을 정규화하며,
+      <div class="hint">화자 분리를 건너뛰고 이 파일을 그대로 참조로 씁니다. 24kHz 모노로 맞추고 음량을 정규화하며,
         <b>쉬는 구간이 20%를 넘으면 줄여서 이어붙입니다</b>(그대로 두면 합성된 목소리도 중간에 멈춥니다).
         <b>한 사람이 10~30초 끊지 말고 이어서 말하는 음성</b>이어야 하고, 원하는 말투가 이 음성 안에
         있어야 합니다 — 참조에 없는 억양은 복제되지 않습니다.</div>
     </div>
+
+    <!-- 여러 명일 때. 분리가 끝나면 여기서 바로 고른다 — 다음 장으로 넘기지 않는다. -->
+    <div id="spkbox" style="display:none">
+      <div class="hint" style="margin:16px 0 12px">사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
+        복제 품질이 여기서 결정됩니다.<br>
+        <b>명료도</b>는 25% 미만이어야 합니다. 높으면 합성 결과에 지지직거리는 소리가 낍니다
+        (방송·영상용으로 후처리된 소리가 그렇습니다). <b>쉼</b>이 20%를 넘으면 등록할 때 자동으로 줄입니다.</div>
+      <div id="spklist"></div>
+      <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
+    </div>
   </div>
 
-  <div class="card step" id="spkcard" data-step="7" style="display:none">
-    <h2>화자 선택</h2>
-    <canvas id="wave" height="120"></canvas>
-    <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
-      복제 품질이 여기서 결정됩니다.<br>
-      <b>명료도</b>는 25% 미만이어야 합니다. 높으면 합성 결과에 지지직거리는 소리가 낍니다
-      (방송·영상용으로 후처리된 소리가 그렇습니다). <b>쉼</b>이 20%를 넘으면 등록할 때 자동으로 줄입니다.</div>
-    <div id="spklist"></div>
-    <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
-  </div>
-
-  <div class="card step" data-step="8" style="display:none">
+  <div class="card step" data-step="7" style="display:none">
     <h2>인물 확인</h2>
     <div class="note">설문으로 만든 것입니다. <b>어색한 곳은 직접 고치세요.</b>
       특히 대화 예시가 그 사람답게 들리는지 보세요.</div>
@@ -210,7 +209,7 @@
       실제 인물의 것으로 바꾸세요.</b> 구체적인 장면 한 줄이 성격 설명 열 줄보다 낫습니다.</div>
   </div>
 
-  <div class="card step" data-step="9" style="display:none">
+  <div class="card step" data-step="8" style="display:none">
     <h2>등록</h2>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
@@ -325,8 +324,8 @@ $("#testfill").onclick = () => {
 // ── 단계 이동 ──
 // 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
 const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"마음", 5:"대화 톤",
-                 6:"목소리", 7:"화자 선택", 8:"인물 확인", 9:"등록" };
-const LAST = 9;
+                 6:"목소리", 7:"인물 확인", 8:"등록" };
+const LAST = 8;
 let step = 1, personaEdited = false;
 
 $("#persona").oninput = $("#knowledge").oninput = () => { personaEdited = true; };
@@ -343,6 +342,7 @@ function showStep(n) {
   $("#next").textContent = n === LAST ? "" : "다음";
   $("#next").style.display = n === LAST ? "none" : "";
   $("#navinfo").textContent = "";
+  refresh();                               // 목소리 장에서는 다음을 잠가야 한다
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -352,11 +352,10 @@ function blockedReason(n) {
     return "동의 세 가지를 모두 확인해 주세요.";
   if (n === 2 && !$("#s_rel").value.trim())
     return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
-  if (n === 6 && mode === "extract" && !result)
-    return "영상이나 음성을 올리고 화자 분리가 끝나야 넘어갈 수 있습니다.";
-  if (n === 6 && mode === "direct" && !dirFile)
-    return "참조로 쓸 오디오를 지정해 주세요.";
-  if (n === 7 && !picked) return "쓸 목소리를 골라 주세요.";
+  if (n === 6 && mode === "direct")
+    return dirFile ? null : "오디오를 고르고 확인을 눌러 주세요.";
+  if (n === 6 && !result) return "영상이나 음성을 올리고 화자 분리를 끝내 주세요.";
+  if (n === 6 && !picked) return "쓸 목소리를 골라 주세요.";
   return null;
 }
 
@@ -375,13 +374,11 @@ async function makePersona() {
 $("#next").onclick = async () => {
   const why = blockedReason(step);
   if (why) { $("#navinfo").textContent = why; return; }
-  let n = step + 1;
-  // 오디오를 직접 지정했으면 고를 화자가 없다
-  if (n === 7 && mode !== "extract") n = 8;   // 고를 화자가 없다
-  if (n === 8 && !personaEdited) await makePersona();
+  const n = step + 1;
+  if (n === 7 && !personaEdited) await makePersona();
   showStep(n);
 };
-$("#prev").onclick = () => showStep(step === 8 && mode !== "extract" ? 6 : step - 1);
+$("#prev").onclick = () => showStep(step - 1);
 
 // 대화 톤 — 고른 것이 인물 설명의 한 줄이 된다
 const TONES = {
@@ -444,34 +441,63 @@ async function status() {
 }
 status(); setInterval(status, 5000); refresh();
 
-// ── 참조 음성 방식 전환 ──
-// 어느 쪽을 골랐든 "무엇이 서버로 가는가"를 항상 4번 카드에 적는다.
+// ── 참조 음성 ──
+// 어느 쪽을 골랐든 "무엇이 서버로 가는가"를 항상 등록 카드에 적는다.
 function refresh() {
-  const ok = mode === "extract" ? !!picked : !!dirFile;
+  const ok = mode === "direct" ? !!dirFile : !!picked;
   $("#publish").disabled = !ok;
   $("#refnow").innerHTML = !ok ? "참조 음성이 선택되지 않았습니다."
-    : mode === "extract"
-      ? `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`
-      : `참조: <b>${dirFile.name}</b> — 파일 그대로`;
+    : mode === "direct"
+      ? `참조: <b>${dirFile.name}</b> — 파일 그대로`
+      : `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`;
+  // 목소리를 고르기 전에는 다음을 잠근다. 열어 두면 등록 직전에야 막혀서
+  // 무엇이 모자란지 알기 어렵다.
+  const why = step === 6 ? blockedReason(6) : null;
+  $("#next").disabled = !!why;
+  $("#navinfo").textContent = why || "";
 }
-function setMode(m) {
-  mode = m;
-  $("#tabex").classList.toggle("on", m === "extract");
-  $("#tabdir").classList.toggle("on", m === "direct");
-  $("#paneex").style.display = m === "extract" ? "" : "none";
-  $("#panedir").style.display = m === "direct" ? "" : "none";
+
+// ── 파일 고르기 ──
+// 고른다고 바로 시작하지 않는다. CPU 로 몇 분씩 도는 일이라 화자 수를 정하고
+// 확인을 누른 뒤에 시작해야, 잘못 골라도 되돌릴 수 있다.
+const drop = $("#drop"), go = $("#go");
+let pending = null;
+
+function pick(f) {
+  if (!f) return;
+  pending = f;
+  drop.textContent = `${f.name} — 바꾸려면 클릭`;
+  reset();
+}
+drop.onclick = () => { const i = document.createElement("input"); i.type = "file";
+  i.accept = "audio/*,video/*"; i.onchange = e => pick(e.target.files[0]); i.click(); };
+["dragover","dragenter"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("on"); }));
+["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("on"); }));
+drop.addEventListener("drop", ev => pick(ev.dataTransfer.files[0]));
+
+// 화자 수를 바꾸면 앞의 결과는 의미가 없다.
+$("#nspk").onchange = reset;
+
+function reset() {
+  mode = $("#nspk").value === "1" ? "direct" : "extract";
+  job = null; result = null; picked = null; dirFile = null;
+  if (timer) { clearInterval(timer); timer = null; }
+  $("#spkbox").style.display = $("#direct").style.display = "none";
+  $("#spklist").innerHTML = "";
+  $("#player").style.display = "none";
+  $("#jobinfo").textContent = "";
+  go.textContent = mode === "direct" ? "이 음성으로 확정" : "화자 분리 시작";
+  go.disabled = !pending;
   refresh();
 }
-$("#tabex").onclick = () => setMode("extract");
-$("#tabdir").onclick = () => setMode("direct");
 
-// ── 직접 지정 ──
-const dd = $("#dirdrop");
-function takeDirect(f) {
-  if (!f) return;
-  dirFile = f;
-  dd.textContent = `${f.name} — 바꾸려면 클릭`;
-  const p = $("#dirplayer"); p.style.display = ""; p.src = URL.createObjectURL(f);
+go.onclick = () => mode === "direct" ? confirmDirect() : send();
+
+function confirmDirect() {
+  dirFile = pending;
+  const p = $("#dirplayer");
+  $("#direct").style.display = "";
+  p.src = URL.createObjectURL(dirFile);
   p.onloadedmetadata = () => {
     const d = p.duration;
     const cls = (d >= 10 && d <= 30) ? "ok" : "warn";
@@ -482,33 +508,23 @@ function takeDirect(f) {
   };
   refresh();
 }
-dd.onclick = () => { const i = document.createElement("input"); i.type = "file";
-  i.accept = "audio/*,video/*"; i.onchange = e => takeDirect(e.target.files[0]); i.click(); };
-["dragover","dragenter"].forEach(e => dd.addEventListener(e, ev => { ev.preventDefault(); dd.classList.add("on"); }));
-["dragleave","drop"].forEach(e => dd.addEventListener(e, ev => { ev.preventDefault(); dd.classList.remove("on"); }));
-dd.addEventListener("drop", ev => takeDirect(ev.dataTransfer.files[0]));
 
-// ── 업로드 ──
-const drop = $("#drop");
-drop.onclick = () => { const i = document.createElement("input"); i.type = "file";
-  i.accept = "audio/*,video/*"; i.onchange = e => send(e.target.files[0]); i.click(); };
-["dragover","dragenter"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("on"); }));
-["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("on"); }));
-drop.addEventListener("drop", ev => send(ev.dataTransfer.files[0]));
-
-async function send(f) {
-  if (!f) return;
-  const fd = new FormData(); fd.append("file", f); fd.append("speakers", $("#nspk").value || 0);
-  drop.textContent = `${f.name} 업로드 중…`;
+async function send() {
+  const fd = new FormData();
+  fd.append("file", pending); fd.append("speakers", $("#nspk").value || 0);
+  go.disabled = true;
+  $("#jobinfo").textContent = `${pending.name} 업로드 중…`;
   try {
     const r = await fetch("/extract", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
-    job = d.job; picked = null; refresh();
-    drop.textContent = "다른 파일로 바꾸려면 여기를 클릭";
+    job = d.job;
     if (timer) clearInterval(timer);
     timer = setInterval(poll, 1200); poll();
-  } catch (e) { drop.textContent = "실패: " + e.message; }
+  } catch (e) {
+    $("#jobinfo").textContent = "실패: " + e.message;
+    go.disabled = false;
+  }
 }
 
 async function poll() {
@@ -519,11 +535,13 @@ async function poll() {
     return;
   }
   clearInterval(timer); timer = null;
+  go.disabled = false;
   if (d.state === "error") { $("#jobinfo").textContent = "실패: " + (d.error || ""); return; }
   result = d.result;
   $("#jobinfo").textContent =
     `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
-  renderSpeakers(); drawWave(); refresh();
+  $("#spkbox").style.display = "";
+  renderSpeakers(); refresh();
 }
 
 // ── 화자 목록 ──
@@ -562,7 +580,6 @@ function renderSpeakers() {
       picked = s.spk_id;
       document.querySelectorAll(".spk").forEach(x => x.classList.toggle("sel", x.dataset.id === picked));
       refresh();
-      drawWave();
     };
     box.appendChild(el);
   });
@@ -571,39 +588,6 @@ function renderSpeakers() {
     const p = $("#player"); p.style.display = ""; p.src = `/file/${job}/${b.dataset.play}`; p.play();
   });
 }
-
-// ── 파형 (화자별 색) ──
-function drawWave() {
-  const cv = $("#wave"), v = result.viz;
-  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = 120;
-  cv.width = w * dpr; cv.height = h * dpr;
-  const g = cv.getContext("2d"); g.scale(dpr, dpr);
-  g.clearRect(0, 0, w, h);
-
-  const pickedCluster = picked
-    ? (result.speakers.find(s => s.spk_id === picked) || {}).cluster : null;
-
-  (v.segments || []).forEach(sg => {
-    const ci = v.color_idx[sg.spk] ?? 0;
-    const x = sg.start / v.duration * w, ww = Math.max(1, (sg.end - sg.start) / v.duration * w);
-    const on = !pickedCluster || sg.spk === pickedCluster;
-    g.fillStyle = COLORS[ci % COLORS.length] + (on ? "44" : "14");
-    g.fillRect(x, 0, ww, h);
-  });
-
-  const mid = h / 2;
-  g.strokeStyle = "#C9B6A4";
-  for (let i = 0; i < v.peaks.length; i++) {
-    const x = i / v.peaks.length * w;
-    g.beginPath(); g.moveTo(x, mid - v.peaks[i] * mid * .9);
-    g.lineTo(x, mid + v.peaks[i] * mid * .9); g.stroke();
-  }
-  (v.overlaps || []).forEach(o => {
-    g.fillStyle = "rgba(196,97,79,.45)";
-    g.fillRect(o.start / v.duration * w, h - 5, Math.max(1, (o.end - o.start) / v.duration * w), 5);
-  });
-}
-addEventListener("resize", () => result && drawWave());
 
 // ── 등록 ──
 function show(o, bad) {
