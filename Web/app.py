@@ -20,6 +20,8 @@ import httpx
 import librosa
 import numpy as np
 import soundfile as sf
+
+import persona as persona_builder
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -124,6 +126,21 @@ def _measure_speakers(job):
             s["quality"] = {**q, "sec": round(dur, 1)}
         except Exception as e:
             s["quality"] = {"error": str(e)}
+
+
+@app.post("/persona")
+async def persona_from_survey(survey: str = Form(...)):
+    """설문 응답을 인물·사전지식으로 바꾼다.
+
+    자동 생성이 끝이 아니라 시작이다 — 웹은 이 결과를 편집 가능한 상자에 채워 넣고,
+    운영자가 확인하고 고친 뒤에 등록한다. 설문 답이 부실할 때 손쓸 데가 있어야 한다."""
+    try:
+        d = json.loads(survey)
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"설문 형식이 잘못됐습니다: {e}")
+    if not (d.get("relation") or "").strip():
+        raise HTTPException(400, "관계는 반드시 있어야 합니다. 말투 전체가 여기서 정해집니다.")
+    return persona_builder.build(d)
 
 
 @app.post("/extract")
