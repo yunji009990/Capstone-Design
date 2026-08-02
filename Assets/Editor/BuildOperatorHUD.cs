@@ -97,32 +97,32 @@ public static class BuildOperatorHUD
         var stateLabel = Label(dotRow, "StatusLabel", "…", 20, Text,
                                TextAlignmentOptions.Left, 0, 0, 1, 1, 50);
 
-        // 서버·인물·대화는 OperatorHUD 가 글로 채운다
-        var info = Label(root, "InfoText", "", 21, Text, TextAlignmentOptions.TopLeft,
-                         0, 0.10f, 1, 0.90f, 20);
+        // 서버·인물 요약. 대화는 아래 기록 창이 맡으므로 짧게 둔다.
+        var info = Label(root, "InfoText", "", 20, Text, TextAlignmentOptions.TopLeft,
+                         0, 0.62f, 1, 0.895f, 20);
 
-        // 마이크 — 옆에서 보는 사람에게는 막대가 제일 빠르다
-        Label(root, "MicTitle", "마이크 입력", 18, Dim, TextAlignmentOptions.Left,
-              0, 0.055f, 1, 0.095f, 20);
-        var bar = Panel(root, "LevelBar", Line, 0, 0.02f, 1, 0.05f, 20);
-        var fill = Panel(bar, "Fill", Accent, 0, 0, 1, 1, 0);
-        var fillImg = fill.GetComponent<Image>();
-        fillImg.type = Image.Type.Filled;
-        fillImg.fillMethod = Image.FillMethod.Horizontal;
-        fillImg.fillAmount = 0f;
-        var marker = Panel(bar, "ThresholdMarker", Text, 0.1f, 0, 0.1f, 1, 0);
-        marker.sizeDelta = new Vector2(2, 0);
+        // 대화 기록 — 마지막 한 마디만 보이면 흐름을 못 따라간다
+        Label(root, "LogTitle", "대화 기록", 20, Text, TextAlignmentOptions.Left,
+              0, 0.565f, 1, 0.615f, 20);
+        var logBody = ScrollBox(root, "ConversationLog", 0, 0.02f, 1, 0.56f);
 
         var ui = root.GetComponentInParent<RaonVoiceUI>();
         Wire(ui, "client", voice);
         Wire(ui, "statusDot", dot.GetComponent<Image>());
         Wire(ui, "statusLabel", stateLabel);
-        Wire(ui, "levelFill", fillImg);
-        Wire(ui, "thresholdMarker", marker);
         Wire(ui, "messageLabel", null);      // 상태 줄과 겹친다
-        Wire(ui, "heardLabel", null);        // 대화는 InfoText 가 보여준다
+        Wire(ui, "heardLabel", null);        // 대화는 기록 창이 보여준다
         Wire(ui, "answerLabel", null);
         Wire(ui, "healthButton", null);      // 상태가 실시간이라 눌러 볼 이유가 없다
+
+        // 기록 창을 굴리는 부품
+        var owner = root.GetComponentInParent<OperatorHUD>().gameObject;
+        var log = owner.GetComponent<ConversationLog>() ?? owner.AddComponent<ConversationLog>();
+        var so = new SerializedObject(log);
+        so.FindProperty("voice").objectReferenceValue = voice;
+        so.FindProperty("body").objectReferenceValue = logBody.body;
+        so.FindProperty("scroll").objectReferenceValue = logBody.scroll;
+        so.ApplyModifiedPropertiesWithoutUndo();
         return info;
     }
 
@@ -133,14 +133,28 @@ public static class BuildOperatorHUD
         Label(root, "Title", "설정", 26, Text, TextAlignmentOptions.TopLeft,
               0, 0.80f, 0.3f, 1, 20);
 
-        // ① 마이크 고르기
-        Label(root, "MicLabel", "마이크", 18, Dim, TextAlignmentOptions.Left,
-              0.02f, 0.60f, 0.32f, 0.78f, 12);
-        var drop = Dropdown(root, "MicDropdown", 0.02f, 0.33f, 0.32f, 0.58f);
+        // ① 마이크 고르기 — 고르고 나면 잘 안 건드리니 작게 둔다
+        Label(root, "MicLabel", "마이크", 17, Dim, TextAlignmentOptions.Left,
+              0.02f, 0.66f, 0.30f, 0.80f, 12);
+        var drop = Dropdown(root, "MicDropdown", 0.02f, 0.50f, 0.30f, 0.645f);
 
-        // ② 대화 조작
-        var talk = Button(root, "TalkButton", "말하기", Accent, 0.35f, 0.56f, 0.60f, 0.80f);
-        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.35f, 0.26f, 0.60f, 0.50f);
+        // 마이크가 살아 있는지는 말해 보면 안다. 막대가 움직이면 들어오고 있는 것이다.
+        Label(root, "MicMeterLabel", "입력 세기", 15, Dim, TextAlignmentOptions.Left,
+              0.02f, 0.38f, 0.30f, 0.47f, 12);
+        var bar = Panel(root, "LevelBar", Line, 0.02f, 0.27f, 0.30f, 0.36f, 0);
+        bar.offsetMin = new Vector2(12, 0); bar.offsetMax = new Vector2(-12, 0);
+        var fill = Panel(bar, "Fill", Accent, 0, 0, 1, 1, 0);
+        var fillImg = fill.GetComponent<Image>();
+        fillImg.type = Image.Type.Filled;
+        fillImg.fillMethod = Image.FillMethod.Horizontal;
+        fillImg.fillAmount = 0f;
+        // 이 선을 넘어야 말로 인식된다
+        var marker = Panel(bar, "ThresholdMarker", Text, 0.1f, 0, 0.1f, 1, 0);
+        marker.sizeDelta = new Vector2(2, 0);
+
+        // ② 체험 조작
+        var start = Button(root, "StartButton", "체험 시작", Accent, 0.34f, 0.55f, 0.58f, 0.72f);
+        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.34f, 0.33f, 0.58f, 0.50f);
 
         // ③ 자리 옮기기 — 가운데가 처음 자리로 되돌리기다
         Label(root, "MoveLabel", "체험자 자리 옮기기", 18, Dim, TextAlignmentOptions.Left,
@@ -149,22 +163,33 @@ public static class BuildOperatorHUD
         var owner = root.GetComponentInParent<OperatorHUD>().gameObject;
         var move = owner.GetComponent<VRMoveControl>() ?? owner.AddComponent<VRMoveControl>();
 
-        var pad = Panel(root, "MovePad", new Color(0, 0, 0, 0), 0.63f, 0.08f, 0.85f, 0.78f, 0);
+        var pad = Panel(root, "MovePad", new Color(0, 0, 0, 0), 0.63f, 0.10f, 0.83f, 0.76f, 0);
         PadButton(pad, "Forward",  "앞",   0.34f, 0.68f, 0.66f, 1.00f, move.MoveForward);
         PadButton(pad, "Left",     "좌",   0.00f, 0.34f, 0.32f, 0.66f, move.MoveLeft);
         PadButton(pad, "Recenter", "처음", 0.34f, 0.34f, 0.66f, 0.66f, move.Recenter);
         PadButton(pad, "Right",    "우",   0.68f, 0.34f, 1.00f, 0.66f, move.MoveRight);
         PadButton(pad, "Backward", "뒤",   0.34f, 0.00f, 0.66f, 0.32f, move.MoveBackward);
 
-        var col = Panel(root, "HeightPad", new Color(0, 0, 0, 0), 0.87f, 0.08f, 0.99f, 0.78f, 0);
+        var col = Panel(root, "HeightPad", new Color(0, 0, 0, 0), 0.855f, 0.22f, 0.96f, 0.76f, 0);
         PadButton(col, "Up",   "위로",   0, 0.53f, 1, 1.00f, move.MoveUp);
         PadButton(col, "Down", "아래로", 0, 0.00f, 1, 0.47f, move.MoveDown);
 
         var ui = root.GetComponentInParent<RaonVoiceUI>();
         Wire(ui, "micDropdown", drop);
-        Wire(ui, "talkButton", talk.button);
-        Wire(ui, "talkButtonLabel", talk.label);
+        Wire(ui, "levelFill", fillImg);
+        Wire(ui, "thresholdMarker", marker);
         Wire(ui, "resetButton", reset.button);
+        Wire(ui, "talkButton", null);        // 자동 감지라 누를 일이 없다
+        Wire(ui, "talkButtonLabel", null);
+
+        // 체험 시작 — 이 프로젝트에 원래 "게임 시작" 코드가 없어서 새로 만들었다
+        var exp = owner.GetComponent<ExperienceControl>() ?? owner.AddComponent<ExperienceControl>();
+        var so = new SerializedObject(exp);
+        so.FindProperty("voice").objectReferenceValue = voice;
+        so.FindProperty("log").objectReferenceValue = owner.GetComponent<ConversationLog>();
+        so.FindProperty("startButton").objectReferenceValue = start.button;
+        so.FindProperty("startLabel").objectReferenceValue = start.label;
+        so.ApplyModifiedPropertiesWithoutUndo();
     }
 
     // ── 만들기 도구 ───────────────────────────────────────────────
@@ -200,6 +225,57 @@ public static class BuildOperatorHUD
         return t;
     }
 
+    struct Box { public TMP_Text body; public ScrollRect scroll; }
+
+    /// <summary>글이 쌓이면 스크롤로 되짚어 볼 수 있는 칸.</summary>
+    static Box ScrollBox(Transform parent, string name, float ax, float ay, float bx, float by)
+    {
+        var clear = new Color(0, 0, 0, 0);
+        var root = Panel(parent, name, new Color(0, 0, 0, 0.22f), ax, ay, bx, by, 0);
+        root.offsetMin = new Vector2(20, 0); root.offsetMax = new Vector2(-20, 0);
+
+        var sr = root.gameObject.AddComponent<ScrollRect>();
+        sr.horizontal = false;
+        sr.movementType = ScrollRect.MovementType.Clamped;
+        sr.scrollSensitivity = 30f;
+
+        var vp = Panel(root, "Viewport", clear, 0, 0, 1, 1, 0);
+        vp.offsetMax = new Vector2(-14, -6);     // 오른쪽은 스크롤바 자리
+        vp.offsetMin = new Vector2(0, 6);
+        vp.gameObject.AddComponent<RectMask2D>();
+
+        // 글 자체가 내용이 된다. 높이는 글 길이가 정한다.
+        var contentGo = new GameObject("Content", typeof(RectTransform));
+        contentGo.transform.SetParent(vp, false);
+        var content = (RectTransform)contentGo.transform;
+        content.anchorMin = new Vector2(0, 1); content.anchorMax = new Vector2(1, 1);
+        content.pivot = new Vector2(0.5f, 1f);
+        content.offsetMin = new Vector2(12, 0); content.offsetMax = new Vector2(-12, 0);
+        var body = contentGo.AddComponent<TextMeshProUGUI>();
+        if (_font) body.font = _font;
+        body.fontSize = 18; body.color = Text;
+        body.alignment = TextAlignmentOptions.TopLeft;
+        body.richText = true; body.enableWordWrapping = true;
+        var fit = contentGo.AddComponent<ContentSizeFitter>();
+        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // 눈에 보이는 스크롤바. 얼마나 긴지도 같이 알려 준다.
+        var sbRt = Panel(root, "Scrollbar", new Color(1, 1, 1, 0.06f), 1, 0, 1, 1, 0);
+        sbRt.pivot = new Vector2(1, 0.5f);
+        sbRt.sizeDelta = new Vector2(10, 0);
+        sbRt.anchoredPosition = Vector2.zero;
+        var area = Panel(sbRt, "Sliding Area", clear, 0, 0, 1, 1, 0);
+        var handle = Panel(area, "Handle", Dim, 0, 0, 1, 1, 0);
+        var sb = sbRt.gameObject.AddComponent<Scrollbar>();
+        sb.direction = Scrollbar.Direction.BottomToTop;
+        sb.handleRect = handle;
+        sb.targetGraphic = handle.GetComponent<Image>();
+
+        sr.content = content; sr.viewport = vp; sr.verticalScrollbar = sb;
+        sr.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+        return new Box { body = body, scroll = sr };
+    }
+
     struct Btn { public Button button; public TMP_Text label; }
 
     static Btn Button(Transform parent, string name, string text, Color c,
@@ -208,7 +284,7 @@ public static class BuildOperatorHUD
         var rt = Panel(parent, name, c, ax, ay, bx, by, 0);
         var b = rt.gameObject.AddComponent<Button>();
         b.targetGraphic = rt.GetComponent<Image>();
-        var l = Label(rt, "Label", text, 20, Color.white, TextAlignmentOptions.Center, 0, 0, 1, 1);
+        var l = Label(rt, "Label", text, 17, Color.white, TextAlignmentOptions.Center, 0, 0, 1, 1);
         return new Btn { button = b, label = l };
     }
 
@@ -216,7 +292,7 @@ public static class BuildOperatorHUD
                           float ax, float ay, float bx, float by, UnityEngine.Events.UnityAction act)
     {
         var b = Button(parent, name, text, Line, ax, ay, bx, by);
-        b.label.fontSize = 18;
+        b.label.fontSize = 16;
         UnityEditor.Events.UnityEventTools.AddPersistentListener(b.button.onClick, act);
     }
 
@@ -228,7 +304,7 @@ public static class BuildOperatorHUD
         var d = rt.gameObject.AddComponent<TMP_Dropdown>();
         d.targetGraphic = rt.GetComponent<Image>();
 
-        var lbl = Label(rt, "Label", "", 19, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 12);
+        var lbl = Label(rt, "Label", "", 16, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 10);
         d.captionText = lbl;
 
         // 펼쳐지는 목록
@@ -243,7 +319,7 @@ public static class BuildOperatorHUD
         content.sizeDelta = new Vector2(0, 40);
         var item = Panel(content, "Item", new Color(0, 0, 0, 0), 0, 0.5f, 1, 0.5f, 0);
         item.sizeDelta = new Vector2(0, 40);
-        var itemLbl = Label(item, "Item Label", "", 19, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 12);
+        var itemLbl = Label(item, "Item Label", "", 16, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 10);
         var toggle = item.gameObject.AddComponent<Toggle>();
         toggle.targetGraphic = item.GetComponent<Image>();
         var sr = tmpl.gameObject.AddComponent<ScrollRect>();
