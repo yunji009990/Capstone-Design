@@ -33,6 +33,17 @@ from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+# 우리 로그도 UTF-8 로 내보낸다. 자식 프로세스와 같은 이유다 — 파이썬은 stdout 이
+# 파이프면 콘솔이 아니라 로케일(이 PC 는 cp949)로 인코딩한다. 터미널에서 직접 띄우면
+# 콘솔이 받아주니 멀쩡해 보이고, 로그를 파일이나 파이프로 넘기는 순간 한글이 깨진다.
+# 스트림 객체를 바꿔치기하지 않고 그 자리에서 고치므로 uvicorn 이 이미 잡아둔
+# 핸들러에도 그대로 적용된다.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:                      # 파이프가 아닌 것으로 바꿔치기된 경우
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "workspace")
 
