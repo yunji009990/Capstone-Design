@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>다시, 봄 — 체험 후</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <a href="/">등록</a><a href="/after" class="on">체험 후</a><a href="/admin">관리자</a>
+  </div>
+
+  <h1>체험을 마치고</h1>
+  <div class="note">방금 체험은 강한 감정을 동반할 수 있습니다. 천천히, 한 번에 한 호흡씩 돌아오세요.
+    아래의 짧은 안내가 도움이 될 거예요.</div>
+
+  <div class="card">
+    <h2>지금 잠시, 이렇게 해보세요</h2>
+    <ol style="margin:0; padding-left:20px; line-height:2">
+      <li><b>3분 호흡</b> — 4초 들이쉬고, 6초 내쉬기를 반복해 보세요.</li>
+      <li><b>물 한 잔 마시기</b> — 몸을 현재로 되돌리는 가장 빠른 방법이에요.</li>
+      <li><b>누군가에게 한 줄 메시지 보내기</b> — 안부 한 마디면 충분합니다.</li>
+      <li><b>떠오른 감정 한 단어로 적어 두기</b> — 정리는 나중에 해도 괜찮아요.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>필요할 때 닿을 수 있는 곳</h2>
+    <ul style="margin:0; padding-left:20px; line-height:2">
+      <li><b>자살예방상담전화 1393</b> — 24시간, 전국 무료</li>
+      <li><b>정신건강위기상담전화 1577-0199</b> — 24시간</li>
+      <li><b>한국생명존중희망재단</b> — life.go.kr</li>
+      <li><b>학교 학생상담센터</b> — 재학생 무료 상담</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>내 데이터 폐기하기</h2>
+    <div class="warn">체험에 사용된 사진·음성·설문 내용을 지금 즉시 삭제할 수 있어요.
+      <b>삭제하면 복구되지 않습니다.</b></div>
+    <label>체험 종료 시 안내받은 세션 코드</label>
+    <input type="text" id="sid" placeholder="예: 20260521-001">
+    <div class="row" style="margin-top:14px">
+      <button id="purge">이 코드의 데이터 모두 폐기</button>
+      <span class="hint" id="msg" style="margin:0"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+$("#purge").onclick = async () => {
+  const sid = $("#sid").value.trim();
+  if (!sid) { $("#msg").textContent = "세션 코드를 입력해 주세요."; return; }
+  if (!confirm(`${sid} 의 사진·음성·설문을 모두 지웁니다. 되돌릴 수 없습니다.`)) return;
+  $("#purge").disabled = true;
+  const fd = new FormData(); fd.append("session", sid);
+  try {
+    const r = await fetch("/purge", { method: "POST", body: fd });
+    const d = await r.json();
+    $("#msg").textContent = r.ok ? "폐기가 완료되었습니다. 천천히 돌아오세요."
+                                 : (d.detail || "실패했습니다.");
+  } catch (e) { $("#msg").textContent = "실패: " + e; }
+  $("#purge").disabled = false;
+};
+$("#sid").onkeydown = e => { if (e.key === "Enter") $("#purge").click(); };
+</script>
+</body>
+</html>

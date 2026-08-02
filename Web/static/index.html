@@ -3,82 +3,42 @@
 <head>
 <meta charset="utf-8">
 <title>다시, 봄 — 세션 등록</title>
-<style>
-  /* "다시, 봄" 톤 — 부드러움, 따듯함, 봄. Survey/core/styling.py 와 같은 색을 쓴다. */
-  :root { --line:#E2D2C2; --fg:#3E2D2A; --head:#4A3633; --dim:#8A7168;
-          --rose:#C58FA0; --rose2:#D8A2B3; --sand:#F2E0D2; --note:#F5E6D8;
-          --ok:#5E8C6A; --warn:#B98033; --bad:#C4614F; }
-  * { box-sizing:border-box; }
-  body { margin:0; color:var(--fg); min-height:100vh;
-         background:linear-gradient(180deg,#FBF7F2 0%,#F5EDE2 100%); background-attachment:fixed;
-         font:15px/1.65 "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
-  .wrap { max-width:760px; margin:0 auto; padding:36px 20px 72px; }
-  h1 { font-size:26px; font-weight:600; color:var(--head); letter-spacing:-.01em; margin:0 0 6px; }
-  .sub { color:var(--dim); font-size:14px; margin-bottom:22px; }
-  .card { background:#FFFFFFCC; border:1px solid #EFE3D6; border-radius:14px;
-          padding:22px 24px; margin-bottom:18px; }
-  /* 카드 제목은 설문 앱의 단계 배지를 그대로 쓴다 */
-  .card h2 { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
-             letter-spacing:.04em; padding:4px 12px; border-radius:999px;
-             margin:0 0 16px; font-weight:500; }
-  label { display:block; font-size:13px; color:#6B4F49; margin:12px 0 5px; }
-  input[type=text], input[type=number], textarea, select {
-      width:100%; background:#fff; color:var(--fg); border:1px solid var(--line);
-      border-radius:10px; padding:10px 12px; font:inherit; }
-  input:focus, textarea:focus, select:focus { outline:none; border-color:var(--rose);
-      box-shadow:0 0 0 2px rgba(197,143,160,.18); }
-  textarea { resize:vertical; font-size:14px; }
-  button { background:linear-gradient(135deg,var(--rose2) 0%,var(--rose) 100%); color:#fff;
-           border:0; border-radius:12px; padding:10px 20px; font:inherit; font-weight:500;
-           cursor:pointer; box-shadow:0 2px 6px rgba(197,143,160,.25);
-           transition:transform 120ms ease, filter 120ms ease; }
-  button:hover:not(:disabled) { transform:translateY(-1px); filter:brightness(1.04); }
-  button.ghost { background:#fff; color:#6B4F49; border:1px solid var(--line); box-shadow:none; }
-  button:disabled { opacity:.5; cursor:default; }
-  #drop, #dirdrop { border:1.5px dashed var(--line); border-radius:12px; padding:26px;
-          text-align:center; color:var(--dim); cursor:pointer; background:#FFFFFF88; }
-  #drop.on, #dirdrop.on { border-color:var(--rose); color:var(--fg); background:#fff; }
-  .tab.on { background:linear-gradient(135deg,var(--rose2),var(--rose)); color:#fff; border:0; }
-  canvas { width:100%; height:120px; display:block; background:#fff;
-           border:1px solid var(--line); border-radius:10px; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .grow { flex:1 1 auto; }
-  .pill { font-size:12px; padding:3px 10px; border-radius:999px; background:var(--sand); color:#8B5A50; }
-  .pill.ok { background:rgba(94,140,106,.14); color:var(--ok); }
-  .pill.warn { background:rgba(185,128,51,.14); color:var(--warn); }
-  .pill.bad { background:#FAE9E0; color:#6B3E33; }
-  pre { background:#FFFDFB; border:1px solid var(--line); border-radius:10px;
-        padding:12px; overflow:auto; font-size:13px; margin:10px 0 0; white-space:pre-wrap; }
-  .hint { font-size:13px; color:var(--dim); margin-top:8px; line-height:1.6; }
-  /* 설문 앱의 안내 상자 */
-  .note { background:var(--note); border-left:3px solid var(--rose); padding:12px 16px;
-          border-radius:8px; color:#5A4540; font-size:14px; margin:12px 0; }
-  .ck { display:inline-flex; align-items:center; gap:7px; font-size:14px;
-        color:var(--fg); margin:4px 0; cursor:pointer; }
-  .ck input { accent-color:var(--rose); width:15px; height:15px; }
-  input.s_quirk, input.s_mem { margin-bottom:7px; }
-  .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:20px;
-         padding:10px 14px; background:#FFFFFFAA; border:1px solid #EFE3D6;
-         border-radius:12px; flex-wrap:wrap; align-items:center; }
-  .spk { border:1.5px solid var(--line); border-radius:12px; padding:13px 15px;
-         margin-bottom:9px; cursor:pointer; background:#fff; }
-  .spk.sel { border-color:var(--rose); background:#FFF8F9; }
-  .spk .top { display:flex; align-items:center; gap:10px; }
-  .dot { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
-  .meta { font-size:12px; color:var(--dim); margin-top:6px; }
-  /* 단계 진행 — 설문 앱의 배지 + 진행 막대 */
-  .steptop { margin-bottom:16px; }
-  .badge { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
-           letter-spacing:.04em; padding:4px 12px; border-radius:999px; margin-bottom:10px; }
-  .prog { height:6px; background:#EFE3D6; border-radius:999px; overflow:hidden; }
-  #progbar { height:100%; width:0; border-radius:999px;
-             background:linear-gradient(90deg,var(--rose2),var(--rose)); transition:width 220ms ease; }
-  .nav { display:flex; align-items:center; gap:10px; margin-top:22px; }
-  .card.step h2 { margin-bottom:14px; }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="gate" style="display:none">
+  <h1>다시, 봄</h1>
+  <div class="sub">초대받으신 분에게만 안내되는 접근 코드가 필요합니다.</div>
+  <div class="card">
+    <div class="note">이 페이지는 사전 안내를 받은 참여자에게만 열립니다.
+      코드는 운영자가 알려드린 영문·숫자 조합으로 입력해 주세요.</div>
+    <label>접근 코드</label>
+    <input type="password" id="gatecode" maxlength="64">
+    <div class="row" style="margin-top:14px">
+      <button id="gatego">입력</button>
+      <span class="hint" id="gatemsg" style="margin:0"></span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="done" style="display:none">
+  <h1>고마워요. 잘 받았습니다.</h1>
+  <div class="note">체험 세션 코드는 <b id="donesid">-</b> 입니다.
+    체험 후 데이터를 직접 폐기하고 싶다면 <a href="/after">체험 후</a> 페이지에서 이 코드를 입력해 주세요.</div>
+  <div class="card">
+    <h2>다음 단계</h2>
+    <div class="hint" id="donemodel">이제 VR 기기에서 대화를 시작할 수 있습니다.</div>
+    <div class="row" style="margin-top:16px">
+      <button onclick="location.reload()">처음으로 돌아가기</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="main">
+  <div class="topnav">
+    <a href="/" class="on">등록</a><a href="/after">체험 후</a><a href="/admin">관리자</a>
+  </div>
+
   <h1>다시, 봄 — 세션 등록</h1>
   <div class="sub">영상이나 음성에서 화자를 분리해 목소리를 고르고, 인물 설정과 함께 Raon 서버에 등록합니다.</div>
 
@@ -163,9 +123,6 @@
     <input type="text" class="s_mem" placeholder="">
     <input type="text" class="s_mem" placeholder="">
 
-    <label>가장 그리운 순간 (선택)</label>
-    <input type="text" id="s_missed" placeholder="예: 아침에 부엌에서 나던 소리">
-
     <label>사진 (선택) — 3D 모델을 만듭니다</label>
     <div class="hint" style="margin-top:-4px">정면 전신 사진 한 장. 얼굴이 또렷하고 다른 사람이 안 나온 것이 좋습니다.
       등록할 때 함께 보내고, 완성되면 서버가 유니티로 넘겨줍니다.</div>
@@ -175,6 +132,25 @@
   </div>
 
   <div class="card step" data-step="4" style="display:none">
+    <h2>마음</h2>
+    <div class="note">지금 어렵게 느껴진다면 한 칸만 채워도 괜찮아요. 어려운 칸은 비워 두셔도 됩니다.</div>
+    <label>그분이 가장 그리운 순간은 언제인가요?</label>
+    <textarea id="s_missed2" rows="2" placeholder="예: 저녁상 차릴 때, 비 오는 날 우산을 챙겨 주시던 모습"></textarea>
+    <label>전하지 못한 말이 있다면 무엇인가요?</label>
+    <textarea id="s_unsaid" rows="2" placeholder="천천히 적으셔도 됩니다."></textarea>
+    <label>다시 한 번 듣고 싶은 말이 있다면 무엇인가요?</label>
+    <textarea id="s_wished" rows="2"></textarea>
+    <div class="hint">뒤의 두 가지는 <b>인물이 먼저 꺼내지 않습니다.</b>
+      사용자가 스스로 말을 꺼낼 때 자연스럽게 받도록 해 두었습니다.</div>
+  </div>
+
+  <div class="card step" data-step="5" style="display:none">
+    <h2>대화 톤</h2>
+    <div class="note">체험 중 인물이 어떤 어조로 응답하길 원하는지 골라 주세요.</div>
+    <div id="tones"></div>
+  </div>
+
+  <div class="card step" data-step="6" style="display:none">
     <h2>목소리</h2>
     <div class="row" style="margin-bottom:14px">
       <button class="ghost tab on" id="tabex">영상·음성에서 화자 분리</button>
@@ -202,7 +178,7 @@
     </div>
   </div>
 
-  <div class="card step" id="spkcard" data-step="5" style="display:none">
+  <div class="card step" id="spkcard" data-step="7" style="display:none">
     <h2>화자 선택</h2>
     <canvas id="wave" height="120"></canvas>
     <div class="hint" style="margin-bottom:12px">색이 화자입니다. 아래에서 사용할 목소리를 고르고 <b>반드시 들어보세요</b> —
@@ -213,7 +189,7 @@
     <audio id="player" controls style="width:100%; margin-top:10px; display:none"></audio>
   </div>
 
-  <div class="card step" data-step="6" style="display:none">
+  <div class="card step" data-step="8" style="display:none">
     <h2>인물 확인</h2>
     <div class="note">설문으로 만든 것입니다. <b>어색한 곳은 직접 고치세요.</b>
       특히 대화 예시가 그 사람답게 들리는지 보세요.</div>
@@ -231,7 +207,7 @@
       실제 인물의 것으로 바꾸세요.</b> 구체적인 장면 한 줄이 성격 설명 열 줄보다 낫습니다.</div>
   </div>
 
-  <div class="card step" data-step="7" style="display:none">
+  <div class="card step" data-step="9" style="display:none">
     <h2>등록</h2>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
@@ -318,9 +294,9 @@ const vals = sel => [...document.querySelectorAll(sel)].map(e => e.value.trim())
 
 // ── 단계 이동 ──
 // 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
-const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"목소리", 5:"화자 선택",
-                 6:"인물 확인", 7:"등록" };
-const LAST = 7;
+const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"마음", 5:"대화 톤",
+                 6:"목소리", 7:"화자 선택", 8:"인물 확인", 9:"등록" };
+const LAST = 9;
 let step = 1, personaEdited = false;
 
 $("#persona").oninput = $("#knowledge").oninput = () => { personaEdited = true; };
@@ -346,11 +322,11 @@ function blockedReason(n) {
     return "동의 세 가지를 모두 확인해 주세요.";
   if (n === 2 && !$("#s_rel").value.trim())
     return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
-  if (n === 4 && mode === "extract" && !result)
+  if (n === 6 && mode === "extract" && !result)
     return "영상이나 음성을 올리고 화자 분리가 끝나야 넘어갈 수 있습니다.";
-  if (n === 4 && mode === "direct" && !dirFile)
+  if (n === 6 && mode === "direct" && !dirFile)
     return "참조로 쓸 오디오를 지정해 주세요.";
-  if (n === 5 && !picked) return "쓸 목소리를 골라 주세요.";
+  if (n === 7 && !picked) return "쓸 목소리를 골라 주세요.";
   return null;
 }
 
@@ -371,12 +347,42 @@ $("#next").onclick = async () => {
   if (why) { $("#navinfo").textContent = why; return; }
   let n = step + 1;
   // 오디오를 직접 지정했으면 고를 화자가 없다
-  if (n === 5 && mode !== "extract") n = 6;
-  if (n === 6 && !personaEdited) await makePersona();
+  if (n === 7 && mode !== "extract") n = 8;
+  if (n === 8 && !personaEdited) await makePersona();
   showStep(n);
 };
-$("#prev").onclick = () => showStep(step === 6 && mode !== "extract" ? 4 : step - 1);
-showStep(1);
+$("#prev").onclick = () => showStep(step === 8 && mode !== "extract" ? 6 : step - 1);
+
+// 대화 톤 — 고른 것이 인물 설명의 한 줄이 된다
+const TONES = {
+  warm_comfort:      ["따듯한 위로형", "부드럽게 위로하고 안심시키는 톤으로 응답합니다."],
+  casual_recreation: ["평소 대화 재현형", "생전 평소 말투와 어조를 그대로 살려 자연스럽게 대화합니다."],
+  free_dialogue:     ["자유 대화형", "주제와 흐름을 사용자에게 맡기고 무엇이든 부드럽게 받아 줍니다."],
+};
+let tone = "casual_recreation";
+function drawTones() {
+  $("#tones").innerHTML = Object.entries(TONES).map(([k, [t, d]]) =>
+    `<div class="tone${k === tone ? " sel" : ""}" data-k="${k}">
+       <b>${k === tone ? "●" : "○"} ${t}</b><div class="meta">${d}</div></div>`).join("");
+  document.querySelectorAll(".tone").forEach(e =>
+    e.onclick = () => { tone = e.dataset.k; drawTones(); });
+}
+drawTones();
+
+// 접근 코드 — 설정돼 있을 때만 막는다
+(async () => {
+  let need = false;
+  try { need = (await (await fetch("/gate")).json()).required; } catch {}
+  if (!need) { $("#main").style.display = ""; showStep(1); return; }
+  $("#gate").style.display = "";
+  $("#gatego").onclick = async () => {
+    const fd = new FormData(); fd.append("code", $("#gatecode").value);
+    const d = await (await fetch("/gate", { method: "POST", body: fd })).json();
+    if (d.ok) { $("#gate").style.display = "none"; $("#main").style.display = ""; showStep(1); }
+    else $("#gatemsg").textContent = "코드가 일치하지 않습니다.";
+  };
+  $("#gatecode").onkeydown = e => { if (e.key === "Enter") $("#gatego").click(); };
+})();
 
 async function status() {
   try {
@@ -584,7 +590,10 @@ function surveyPayload() {
     personality_traits: [...document.querySelectorAll(".s_tr:checked")].map(e => e.value)
         .concat(vals("#s_trait_other")),
     speech_quirks: vals(".s_quirk"), shared_memories: vals(".s_mem"),
-    missed_moment: $("#s_missed").value.trim(),
+    missed_moment: $("#s_missed2").value.trim(),
+    unsaid_words: $("#s_unsaid").value.trim(),
+    wished_to_hear: $("#s_wished").value.trim(),
+    tone_setting: tone,
     bereavement_weeks: $("#bweeks").value === "" ? null : parseInt($("#bweeks").value, 10),
     consent_image: $("#c1").checked, consent_voice: $("#c2").checked,
     consent_understand: $("#c3").checked,
@@ -637,6 +646,13 @@ $("#publish").onclick = async () => {
       $("#refwarn").style.display = w ? "" : "none";
       $("#refwarn").textContent = w || "";
       if ($("#s_img").files[0] && jj.session) watchModel(jj.session);
+      // 설문 앱과 같이, 끝나면 세션 코드를 크게 알려 준다. 이 코드가 있어야 본인이 지운다.
+      $("#donesid").textContent = jj.session || "-";
+      $("#donemodel").innerHTML = $("#s_img").files[0]
+        ? "AI가 인물의 모습을 빚고 있습니다. 몇 분 걸립니다.<br>그 사이에도 VR 기기에서 대화는 시작할 수 있습니다."
+        : "이제 VR 기기에서 대화를 시작할 수 있습니다.";
+      $("#main").style.display = "none"; $("#done").style.display = "";
+      window.scrollTo({ top: 0 });
     }
   } catch (e) { show(String(e), true); }
   $("#publish").disabled = false; status();

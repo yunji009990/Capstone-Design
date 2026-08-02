@@ -1,0 +1,90 @@
+/* "다시, 봄" 공통 스타일. 등록·체험 후·관리자 세 화면이 나눠 쓴다. */
+:root { --line:#E2D2C2; --fg:#3E2D2A; --head:#4A3633; --dim:#8A7168;
+          --rose:#C58FA0; --rose2:#D8A2B3; --sand:#F2E0D2; --note:#F5E6D8;
+          --ok:#5E8C6A; --warn:#B98033; --bad:#C4614F; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--fg); min-height:100vh;
+         background:linear-gradient(180deg,#FBF7F2 0%,#F5EDE2 100%); background-attachment:fixed;
+         font:15px/1.65 "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:36px 20px 72px; }
+  h1 { font-size:26px; font-weight:600; color:var(--head); letter-spacing:-.01em; margin:0 0 6px; }
+  .sub { color:var(--dim); font-size:14px; margin-bottom:22px; }
+  .card { background:#FFFFFFCC; border:1px solid #EFE3D6; border-radius:14px;
+          padding:22px 24px; margin-bottom:18px; }
+  /* 카드 제목은 설문 앱의 단계 배지를 그대로 쓴다 */
+  .card h2 { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
+             letter-spacing:.04em; padding:4px 12px; border-radius:999px;
+             margin:0 0 16px; font-weight:500; }
+  label { display:block; font-size:13px; color:#6B4F49; margin:12px 0 5px; }
+  input[type=text], input[type=number], textarea, select {
+      width:100%; background:#fff; color:var(--fg); border:1px solid var(--line);
+      border-radius:10px; padding:10px 12px; font:inherit; }
+  input:focus, textarea:focus, select:focus { outline:none; border-color:var(--rose);
+      box-shadow:0 0 0 2px rgba(197,143,160,.18); }
+  textarea { resize:vertical; font-size:14px; }
+  button { background:linear-gradient(135deg,var(--rose2) 0%,var(--rose) 100%); color:#fff;
+           border:0; border-radius:12px; padding:10px 20px; font:inherit; font-weight:500;
+           cursor:pointer; box-shadow:0 2px 6px rgba(197,143,160,.25);
+           transition:transform 120ms ease, filter 120ms ease; }
+  button:hover:not(:disabled) { transform:translateY(-1px); filter:brightness(1.04); }
+  button.ghost { background:#fff; color:#6B4F49; border:1px solid var(--line); box-shadow:none; }
+  button:disabled { opacity:.5; cursor:default; }
+  #drop, #dirdrop { border:1.5px dashed var(--line); border-radius:12px; padding:26px;
+          text-align:center; color:var(--dim); cursor:pointer; background:#FFFFFF88; }
+  #drop.on, #dirdrop.on { border-color:var(--rose); color:var(--fg); background:#fff; }
+  .tab.on { background:linear-gradient(135deg,var(--rose2),var(--rose)); color:#fff; border:0; }
+  canvas { width:100%; height:120px; display:block; background:#fff;
+           border:1px solid var(--line); border-radius:10px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1 1 auto; }
+  .pill { font-size:12px; padding:3px 10px; border-radius:999px; background:var(--sand); color:#8B5A50; }
+  .pill.ok { background:rgba(94,140,106,.14); color:var(--ok); }
+  .pill.warn { background:rgba(185,128,51,.14); color:var(--warn); }
+  .pill.bad { background:#FAE9E0; color:#6B3E33; }
+  pre { background:#FFFDFB; border:1px solid var(--line); border-radius:10px;
+        padding:12px; overflow:auto; font-size:13px; margin:10px 0 0; white-space:pre-wrap; }
+  .hint { font-size:13px; color:var(--dim); margin-top:8px; line-height:1.6; }
+  /* 설문 앱의 안내 상자 */
+  .note { background:var(--note); border-left:3px solid var(--rose); padding:12px 16px;
+          border-radius:8px; color:#5A4540; font-size:14px; margin:12px 0; }
+  .ck { display:inline-flex; align-items:center; gap:7px; font-size:14px;
+        color:var(--fg); margin:4px 0; cursor:pointer; }
+  .ck input { accent-color:var(--rose); width:15px; height:15px; }
+  input.s_quirk, input.s_mem { margin-bottom:7px; }
+  .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:20px;
+         padding:10px 14px; background:#FFFFFFAA; border:1px solid #EFE3D6;
+         border-radius:12px; flex-wrap:wrap; align-items:center; }
+  .spk { border:1.5px solid var(--line); border-radius:12px; padding:13px 15px;
+         margin-bottom:9px; cursor:pointer; background:#fff; }
+  .spk.sel { border-color:var(--rose); background:#FFF8F9; }
+  .spk .top { display:flex; align-items:center; gap:10px; }
+  .dot { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+  .meta { font-size:12px; color:var(--dim); margin-top:6px; }
+  /* 단계 진행 — 설문 앱의 배지 + 진행 막대 */
+  .steptop { margin-bottom:16px; }
+  .badge { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
+           letter-spacing:.04em; padding:4px 12px; border-radius:999px; margin-bottom:10px; }
+  .prog { height:6px; background:#EFE3D6; border-radius:999px; overflow:hidden; }
+  #progbar { height:100%; width:0; border-radius:999px;
+             background:linear-gradient(90deg,var(--rose2),var(--rose)); transition:width 220ms ease; }
+  .nav { display:flex; align-items:center; gap:10px; margin-top:22px; }
+  .card.step h2 { margin-bottom:14px; }
+
+/* 페이지 이동 */
+.topnav { display:flex; gap:6px; margin-bottom:18px; }
+.topnav a { font-size:13px; color:#8B5A50; text-decoration:none; padding:5px 14px;
+            border-radius:999px; background:#FFFFFF88; border:1px solid #EFE3D6; }
+.topnav a.on { background:var(--sand); border-color:var(--sand); font-weight:500; }
+/* 되돌릴 수 없는 일을 알리는 상자 */
+.warn { background:#FAE9E0; border-left:3px solid #D88979; padding:12px 16px;
+        border-radius:8px; color:#6B3E33; font-size:14px; margin:12px 0; }
+/* 대화 톤 고르기 */
+.tone { border:1.5px solid var(--line); border-radius:12px; padding:13px 16px;
+        margin-bottom:9px; cursor:pointer; background:#fff; }
+.tone.sel { border-color:var(--rose); background:#FFF8F9; }
+/* 관리자 표 */
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #EFE3D6; }
+th { color:var(--dim); font-weight:500; }
+tr.click { cursor:pointer; }
+tr.click:hover { background:#FFF8F9; }

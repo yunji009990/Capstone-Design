@@ -64,6 +64,16 @@ EXAMPLES = {
 }
 
 
+# 대화 톤 — 설문에서 고른 것이 [인물] 안의 한 줄이 된다.
+TONES = {
+    "warm_comfort": "상대의 감정을 먼저 받아 주고, 안심할 수 있게 말합니다. "
+                    "재촉하지 않고 상대의 속도에 맞춥니다.",
+    "casual_recreation": "특별할 것 없는 평소 대화처럼 말합니다. "
+                         "생전에 하던 그대로, 사소한 것부터 묻습니다.",
+    "free_dialogue": "화제는 상대가 정하게 두고, 꺼내는 이야기를 무엇이든 받아 줍니다.",
+}
+
+
 def kind_of(relation: str) -> str:
     """관계 낱말로 말투 갈래를 찾는다. 못 찾으면 또래로 둔다 — 가장 중립적이다."""
     r = (relation or "").strip()
@@ -116,6 +126,9 @@ def build_persona(d: dict) -> str:
     L.append(f"- {said} 같은 말을 자주 씁니다.")
     L.append('- 고민을 들으면 먼저 되묻습니다. "그래서 넌 어떻게 하고 싶은데?"')
     L.append('- 힘들다는 말에는 그 말을 되받고 무슨 일인지 묻습니다. "많이 힘들었겠다."')
+    tone = TONES.get(d.get("tone_setting") or "casual_recreation")
+    if tone:
+        L.append(f"[대화 톤] {tone}")
     L.append("[예시 사용법] 아래는 말투의 본보기입니다. "
              "상황에 맞는 문장을 새로 만들어 말합니다.")
     L.append("")
@@ -143,8 +156,19 @@ def build_knowledge(d: dict) -> str:
     for m in _clean(d.get("shared_memories")):
         L.append(f"- {m}")
     missed = (d.get("missed_moment") or "").strip()
+    unsaid = (d.get("unsaid_words") or "").strip()
+    wished = (d.get("wished_to_hear") or "").strip()
     if missed:
         L.append(f"- 사용자가 가장 그리워하는 순간은 이것이다: {missed}")
+    # 못다 한 말과 듣고 싶은 말은 사용자의 것이다. 인물이 먼저 꺼내면 준비되지 않은
+    # 사람을 밀어붙이는 것이 되고, 듣고 싶다던 말을 첫 마디로 뱉으면 값이 싸진다.
+    if unsaid:
+        L.append(f"- 사용자가 아직 전하지 못한 말이 있다: {unsaid}")
+    if wished:
+        L.append(f"- 사용자가 다시 듣고 싶어 하는 말이 있다: {wished}")
+    if unsaid or wished:
+        L.append("- 위 두 가지는 사용자가 스스로 꺼낼 때까지 먼저 말하지 않는다. "
+                 "사용자가 꺼내면 그때 자연스럽게 받는다.")
     return "\n".join(L)
 
 

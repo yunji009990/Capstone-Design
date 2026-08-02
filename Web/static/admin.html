@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>다시, 봄 — 관리자</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <a href="/">등록</a><a href="/after">체험 후</a><a href="/admin" class="on">관리자</a>
+  </div>
+
+  <div id="login">
+    <h1>관리자</h1>
+    <div class="card">
+      <label>관리자 비밀번호</label>
+      <input type="password" id="pw">
+      <div class="row" style="margin-top:14px">
+        <button id="go">로그인</button>
+        <span class="hint" id="loginmsg" style="margin:0"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel" style="display:none">
+    <h1>관리자</h1>
+    <div class="row" style="margin-bottom:16px">
+      <label class="ck" style="margin:0"><input type="checkbox" id="showdel"> 폐기된 세션도 보기</label>
+      <div class="grow"></div>
+      <button class="ghost" id="reload">새로 고침</button>
+      <button class="ghost" id="logout">로그아웃</button>
+    </div>
+
+    <div class="card">
+      <h2>세션 목록</h2>
+      <div id="list"></div>
+    </div>
+
+    <div class="card" id="detail" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let pw = sessionStorage.getItem("adminpw") || "";
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || r.status);
+  return d;
+}
+// 비밀번호는 주소에 안 싣는다 — 주소는 기록에 남는다.
+const auth = () => ({ headers: { "X-Admin-Pw": pw } });
+
+async function login(p) {
+  const fd = new FormData(); fd.append("password", p);
+  await api("/admin/login", { method: "POST", body: fd });
+  pw = p; sessionStorage.setItem("adminpw", p);
+  $("#login").style.display = "none"; $("#panel").style.display = "";
+  loadList();
+}
+$("#go").onclick = async () => {
+  try { await login($("#pw").value); }
+  catch (e) { $("#loginmsg").textContent = "비밀번호가 다릅니다."; }
+};
+$("#pw").onkeydown = e => { if (e.key === "Enter") $("#go").click(); };
+$("#logout").onclick = () => { sessionStorage.removeItem("adminpw"); location.reload(); };
+$("#reload").onclick = () => loadList();
+$("#showdel").onchange = () => loadList();
+
+const FLAG = { deleted: "폐기됨", used: "사용됨", submitted: "제출됨" };
+
+async function loadList() {
+  const inc = $("#showdel").checked;
+  let d;
+  try { d = await api(`/admin/sessions?include_deleted=${inc}`, auth()); }
+  catch (e) { $("#list").textContent = "불러오기 실패: " + e; return; }
+  if (!d.sessions.length) { $("#list").innerHTML = '<div class="hint">아직 세션이 없습니다.</div>'; return; }
+  $("#list").innerHTML = `<table><tr><th>세션</th><th>만든 때</th><th>상태</th>
+      <th>사진</th><th>음성</th><th>사별</th></tr>` +
+    d.sessions.map(s => `<tr class="click" data-id="${s.session_id}">
+      <td><b>${s.session_id}</b></td><td>${(s.created_at || "").replace("T", " ")}</td>
+      <td>${FLAG[s.status] || s.status}</td>
+      <td>${s.has_image ? "○" : "-"}</td><td>${s.has_voice ? "○" : "-"}</td>
+      <td>${s.bereavement_weeks == null ? "-" : s.bereavement_weeks + "주"}</td></tr>`).join("") +
+    "</table>";
+  document.querySelectorAll("tr.click").forEach(tr =>
+    tr.onclick = () => showDetail(tr.dataset.id));
+}
+
+const MODEL = { stub: "생성 안 함(키 없음)", queued: "대기 중", processing: "만드는 중",
+                ready: "완성", failed: "실패" };
+
+async function showDetail(sid) {
+  let s;
+  try { s = await api(`/admin/session/${encodeURIComponent(sid)}`, auth()); }
+  catch (e) { return; }
+  const P = s.payload || {};
+  const row = (k, v) => v ? `<tr><th style="width:150px">${k}</th><td>${v}</td></tr>` : "";
+  $("#detail").style.display = "";
+  $("#detail").innerHTML = `
+    <h2>${sid}</h2>
+    <table>
+      ${row("관계", P.relation)}${row("성별", P.sex)}
+      ${row("그분 호칭", P.honorific)}${row("나를 부르던 말", P.calls_user)}
+      ${row("내 이름", P.user_name)}
+      ${row("성격", (P.personality_traits || []).join(", "))}
+      ${row("말버릇", (P.speech_quirks || []).join(" / "))}
+      ${row("추억", (P.shared_memories || []).join("<br>"))}
+      ${row("그리운 순간", P.missed_moment)}
+      ${row("못다 한 말", P.unsaid_words)}${row("듣고 싶은 말", P.wished_to_hear)}
+      ${row("대화 톤", P.tone_setting)}
+      ${row("동의", `사진 ${s.consent_image ? "○" : "×"} · 음성 ${s.consent_voice ? "○" : "×"} · 이해 ${s.consent_understand ? "○" : "×"}`)}
+      ${row("사별", s.bereavement_weeks == null ? "" : s.bereavement_weeks + "주 전")}
+      ${row("3D 모델", (MODEL[s.model_status] || s.model_status) + (s.model_error ? ` — ${s.model_error}` : ""))}
+    </table>
+    <div class="row" style="margin-top:16px">
+      <button class="ghost" data-dl="survey">설문 JSON</button>
+      ${s.has_image_file ? '<button class="ghost" data-dl="image">사진</button>' : ""}
+      ${s.has_voice_file ? '<button class="ghost" data-dl="voice">음성</button>' : ""}
+      ${s.model_status === "ready" ? '<button class="ghost" data-dl="model">model.glb</button>' : ""}
+    </div>
+    <div class="row" style="margin-top:12px">
+      ${s.has_image ? '<button data-act="retry">3D 모델 다시 시도</button>' : ""}
+      ${s.status !== "used" ? '<button class="ghost" data-act="used">사용됨으로 표시</button>' : ""}
+    </div>
+    <div class="warn" style="margin-top:16px">아래는 되돌릴 수 없습니다.</div>
+    <div class="row">
+      ${s.status !== "deleted" ? '<button class="ghost" data-act="purge">자료 폐기 (기록은 남김)</button>' : ""}
+      <button class="ghost" data-act="hard">영구 삭제 (기록까지)</button>
+    </div>
+    <div class="hint" id="actmsg"></div>`;
+
+  $("#detail").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+    const r = await fetch(`/admin/asset/${encodeURIComponent(sid)}/${b.dataset.dl}`, auth());
+    if (!r.ok) { $("#actmsg").textContent = "내려받기 실패"; return; }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = `${sid}_${b.dataset.dl}`; a.click();
+    URL.revokeObjectURL(url);
+  });
+  $("#detail").querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    const act = b.dataset.act;
+    const danger = { purge: "이 세션의 사진·음성·설문 내용을 지웁니다.",
+                     hard: "기록까지 통째로 지웁니다." }[act];
+    if (danger && !confirm(`${sid} — ${danger} 되돌릴 수 없습니다.`)) return;
+    const fd = new FormData();
+    fd.append("password", pw); fd.append("session", sid); fd.append("action", act);
+    try {
+      const d = await api("/admin/action", { method: "POST", body: fd });
+      $("#actmsg").textContent = "완료" + (d.result ? ` — ${d.result}` : "");
+      loadList();
+      if (act === "hard") $("#detail").style.display = "none"; else showDetail(sid);
+    } catch (e) { $("#actmsg").textContent = "실패: " + e; }
+  });
+}
+
+if (pw) login(pw).catch(() => { sessionStorage.removeItem("adminpw"); });
+</script>
+</body>
+</html>

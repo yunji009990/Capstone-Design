@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from core import database as survey_db          # noqa: E402
 from core import storage as survey_store        # noqa: E402
 from core import jobs as survey_jobs            # noqa: E402
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -198,6 +198,124 @@ def _push_model_when_ready(sid: str, timeout_sec: int = 1200):
             print(f"[모델] {sid} 중단 — {st}: {s.get('model_error')}", flush=True)
             return
     print(f"[모델] {sid} 시간 초과", flush=True)
+
+
+# ── 접근 코드 · 관리자 ──────────────────────────────────────────────
+# 설문 앱에 있던 것을 그대로 옮겼다. 참여자의 사진·음성·이야기를 다루므로
+# 아무나 열 수 있으면 안 되고, 본인이 원할 때 지울 수 있어야 한다.
+ACCESS_CODE = os.environ.get("SURVEY_ACCESS_CODE", "").strip()
+ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "dasibom-admin").strip()
+
+
+def _admin(pw: str):
+    if (pw or "").strip() != ADMIN_PW:
+        raise HTTPException(401, "관리자 비밀번호가 다릅니다")
+
+
+@app.get("/gate")
+def gate_needed():
+    """게이트가 필요한지만 알려준다. 코드 자체는 절대 내보내지 않는다."""
+    return {"required": bool(ACCESS_CODE)}
+
+
+@app.post("/gate")
+def gate_check(code: str = Form(...)):
+    if not ACCESS_CODE:
+        return {"ok": True}
+    return {"ok": code.strip().upper() == ACCESS_CODE.upper()}
+
+
+@app.post("/purge")
+def purge_mine(session: str = Form(...)):
+    """본인 세션 코드로 즉시 폐기. 비밀번호가 필요 없다 — 지울 권리는 본인 것이다."""
+    sid = session.strip()
+    s = survey_db.get_session(sid)
+    if not s or s.get("status") == "deleted":
+        raise HTTPException(404, "해당 코드를 찾을 수 없거나 이미 폐기된 자료입니다")
+    survey_store.purge_assets(sid)
+    survey_db.soft_delete(sid)
+    try:      # 서버에 아직 올라가 있으면 그것도 지운다
+        httpx.post(f"{RAON_URL}/session/end", data={"session": sid},
+                   headers=_headers(), timeout=30)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.post("/admin/login")
+def admin_login(password: str = Form(...)):
+    _admin(password)
+    return {"ok": True}
+
+
+@app.get("/admin/sessions")
+def admin_sessions(include_deleted: bool = False, x_admin_pw: str = Header("")):
+    _admin(x_admin_pw)
+    return {"sessions": survey_db.list_sessions(include_deleted=include_deleted)}
+
+
+@app.get("/admin/session/{sid}")
+def admin_session(sid: str, x_admin_pw: str = Header("")):
+    _admin(x_admin_pw)
+    s = survey_db.get_session(sid)
+    if not s:
+        raise HTTPException(404, "없는 세션")
+    img, voice = survey_store.find_image(sid), survey_store.find_voice(sid)
+    return {**s, "has_image_file": bool(img), "has_voice_file": bool(voice)}
+
+
+@app.get("/admin/asset/{sid}/{kind}")
+def admin_asset(sid: str, kind: str, x_admin_pw: str = Header("")):
+    _admin(x_admin_pw)
+    if kind == "survey":
+        s = survey_db.get_session(sid)
+        if not s:
+            raise HTTPException(404, "없는 세션")
+        return Response(json.dumps(s["payload"], ensure_ascii=False, indent=2),
+                        media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{sid}.json"'})
+    p = {"image": survey_store.find_image, "voice": survey_store.find_voice}.get(kind)
+    if p:
+        f = p(sid)
+        if not f:
+            raise HTTPException(404, "파일 없음")
+        return FileResponse(str(f), filename=f.name)
+    if kind == "model":
+        s = survey_db.get_session(sid)
+        g = (s or {}).get("model_glb_path")
+        if not g or not os.path.exists(g):
+            raise HTTPException(404, "모델 없음")
+        return FileResponse(g, filename="model.glb")
+    raise HTTPException(400, f"알 수 없는 자료: {kind}")
+
+
+@app.post("/admin/action")
+def admin_action(password: str = Form(...), session: str = Form(...), action: str = Form(...)):
+    _admin(password)
+    sid = session.strip()
+    if action == "purge":
+        survey_store.purge_assets(sid); survey_db.soft_delete(sid)
+    elif action == "hard":
+        survey_store.purge_assets(sid); survey_db.hard_delete(sid)
+    elif action == "used":
+        survey_db.mark_used(sid)
+    elif action == "retry":
+        msg = survey_jobs.retry(sid)
+        threading.Thread(target=_push_model_when_ready, args=(sid,), daemon=True).start()
+        return {"ok": True, "result": msg}
+    else:
+        raise HTTPException(400, f"알 수 없는 동작: {action}")
+    return {"ok": True}
+
+
+@app.get("/after")
+def page_after():
+    return FileResponse(os.path.join(HERE, "static", "after.html"))
+
+
+@app.get("/admin")
+def page_admin():
+    return FileResponse(os.path.join(HERE, "static", "admin.html"))
 
 
 @app.get("/model/{sid}")

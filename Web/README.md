@@ -78,3 +78,23 @@ set VCS_DIR=C:\...\voice_clone_studio
 | `VCS_DIR` | `C:\Users\user\Desktop\capstone\voice_clone_studio` |
 
 `workspace/` 는 업로드·추출 결과가 쌓이는 곳이라 버전 관리하지 않는다. 비워도 된다.
+
+## 환경변수
+
+```
+SURVEY_ACCESS_CODE   비우면 접근 코드 게이트 없음 (교내망 전용일 때)
+ADMIN_PASSWORD       관리자 페이지 비밀번호 (기본 dasibom-admin — 공개 전 반드시 바꿀 것)
+TRIPO_API_KEY        3D 모델 생성. 없으면 stub 으로 건너뛴다 (대화는 정상)
+RAON_URL / RAON_TOKEN   Raon 서버
+VCS_DIR              화자 분리 엔진(voice_clone_studio) 경로
+```
+
+## 화면
+
+| 주소 | 무엇 |
+|---|---|
+| `/` | 설문 → 목소리 → 인물 → 등록. 9단계 |
+| `/after` | 체험 후 안내와 **본인 세션 코드로 자료 폐기** |
+| `/admin` | 세션 목록·상세, 설문·사진·음성·모델 내려받기, 모델 재시도, 폐기·삭제 |
+
+참여자 자료는 `Survey/data/` 에 쌓이고 저장소에 올라가지 않는다.
