@@ -81,6 +81,24 @@ def job_dir(job):
     return os.path.join(WORK, job)
 
 
+def _utf8_env():
+    """자식 프로세스를 UTF-8 로 못박는다.
+
+    윈도우 파이썬은 출력이 파이프일 때 콘솔이 아니라 **로케일**(이 PC 는 cp949)로
+    인코딩한다. 우리는 utf-8 로 읽으므로 그대로 두면 진행 문구의 한글이 전부
+    깨져서 화면에 나온다.
+
+    두 가지를 함께 넘긴다. 화자 분리는 세 겹으로 실행되고(여기 → extract_runner
+    → nemo_env 의 nemo_diarize), 가운데 단은 손자를 `text=True` 로만 읽어 로케일
+    인코딩을 쓴다. PYTHONIOENCODING 만 넘기면 자식은 utf-8 로 쓰는데 가운데 단은
+    cp949 로 읽어 이번엔 거기서 깨진다. PYTHONUTF8 은 로케일 자체를 utf-8 로
+    바꿔서 그 단까지 함께 맞춘다."""
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
 def _run_extract(job, src, n_speakers):
     """NeMo 화자 분리를 서브프로세스로 돌린다. CPU 라 몇 분 걸릴 수 있다."""
     j = JOBS[job]
@@ -94,7 +112,7 @@ def _run_extract(job, src, n_speakers):
     try:
         # NeMo 하위 프로세스가 config 를 상대경로로 열기 때문에 cwd 를 맞춰야 한다
         p = subprocess.Popen(cmd, cwd=EXTRACT_DIR, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True,
+                             stderr=subprocess.STDOUT, text=True, env=_utf8_env(),
                              encoding="utf-8", errors="replace", bufsize=1)
         for line in p.stdout:
             line = line.strip()
