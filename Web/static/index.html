@@ -129,6 +129,12 @@
     <label>가장 그리운 순간 (선택)</label>
     <input type="text" id="s_missed" placeholder="예: 아침에 부엌에서 나던 소리">
 
+    <label>사진 (선택) — 3D 모델을 만듭니다</label>
+    <div class="hint" style="margin-top:-4px">정면 전신 사진 한 장. 얼굴이 또렷하고 다른 사람이 안 나온 것이 좋습니다.
+      등록할 때 함께 보내고, 완성되면 서버가 유니티로 넘겨줍니다.</div>
+    <input type="file" id="s_img" accept="image/jpeg,image/png" style="margin-top:4px">
+    <img id="s_imgprev" style="display:none; max-height:180px; border-radius:6px; margin-top:8px">
+
     <div class="row" style="margin-top:16px">
       <button id="mkpersona">이 내용으로 인물 만들기</button>
       <span class="hint" id="mkinfo" style="margin:0"></span>
@@ -197,6 +203,7 @@
       <button class="ghost" id="endbtn">현재 세션 종료</button>
     </div>
     <pre id="out" style="display:none"></pre>
+    <div class="hint" id="modelinfo" style="display:none"></div>
     <div class="pill bad" id="refwarn" style="display:none; margin-top:10px; padding:8px 12px; border-radius:6px"></div>
     <div class="hint" id="verify" style="display:none">
       아래는 <b>서버로 실제로 넘어간 참조 음성</b>입니다. 위에서 고른 것과 같은지 확인하세요.
@@ -499,11 +506,50 @@ function show(o, bad) {
   el.style.borderColor = bad ? "#e0574f" : "#232a36";
   el.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
 }
+// 설문 답과 사진은 등록할 때 함께 넘어간다. 여기서 모아야 두 등록 경로가 같은 것을 보낸다.
+function surveyPayload() {
+  return {
+    relation: $("#s_rel").value.trim(), sex: $("#s_sex").value,
+    honorific: $("#s_hon").value.trim(), calls_user: $("#s_calls").value.trim(),
+    user_name: $("#s_name").value.trim(),
+    personality_traits: [...document.querySelectorAll(".s_tr:checked")].map(e => e.value)
+        .concat(vals("#s_trait_other")),
+    speech_quirks: vals(".s_quirk"), shared_memories: vals(".s_mem"),
+    missed_moment: $("#s_missed").value.trim(),
+    bereavement_weeks: $("#bweeks").value === "" ? null : parseInt($("#bweeks").value, 10),
+    consent_image: $("#c1").checked, consent_voice: $("#c2").checked,
+    consent_understand: $("#c3").checked,
+  };
+}
+
+$("#s_img").onchange = () => {
+  const f = $("#s_img").files[0];
+  $("#s_imgprev").style.display = f ? "" : "none";
+  if (f) $("#s_imgprev").src = URL.createObjectURL(f);
+};
+
+// 모델은 몇 분 걸린다. 등록은 이미 끝났으니 진행 상황만 따로 알려준다.
+async function watchModel(sid) {
+  const el = $("#modelinfo");
+  el.style.display = "";
+  for (let i = 0; i < 400; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    let d; try { d = await (await fetch("/model/" + encodeURIComponent(sid))).json(); }
+    catch { continue; }
+    if (d.status === "ready") { el.innerHTML = "3D 모델 <b>완성</b> — 서버로 넘겼습니다."; return; }
+    if (d.status === "failed") { el.textContent = "3D 모델 실패: " + (d.error || ""); return; }
+    if (d.status === "stub") { el.textContent = "3D 모델 건너뜀 — API 키가 없습니다 (대화는 정상)."; return; }
+    el.textContent = "3D 모델 만드는 중… (" + (d.status || "대기") + ", 몇 분 걸립니다)";
+  }
+}
+
 $("#publish").onclick = async () => {
   const fd = new FormData();
   fd.append("session", $("#session").value.trim());
   fd.append("persona", $("#persona").value);
   fd.append("knowledge", $("#knowledge").value);
+  fd.append("survey", JSON.stringify(surveyPayload()));
+  if ($("#s_img").files[0]) fd.append("image", $("#s_img").files[0], $("#s_img").files[0].name);
   let url;
   if (mode === "extract") {
     url = "/publish"; fd.append("job", job); fd.append("spk_id", picked);
@@ -521,6 +567,7 @@ $("#publish").onclick = async () => {
       const w = (jj.sent || {}).warning;
       $("#refwarn").style.display = w ? "" : "none";
       $("#refwarn").textContent = w || "";
+      if ($("#s_img").files[0] && jj.session) watchModel(jj.session);
     }
   } catch (e) { show(String(e), true); }
   $("#publish").disabled = false; status();

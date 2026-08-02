@@ -24,6 +24,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import json
 import logging
 import mimetypes
@@ -72,12 +74,14 @@ class TripoClient:
 
     @classmethod
     def from_secrets(cls) -> "TripoClient":
-        api_key: str | None = None
-        try:
-            import streamlit as st
-            api_key = st.secrets.get("tripo_api_key", None)
-        except Exception:
-            pass
+        # 환경변수를 먼저 본다. Streamlit 밖(FastAPI 등)에서도 쓰기 위해서다.
+        api_key: str | None = os.environ.get("TRIPO_API_KEY") or None
+        if not api_key:
+            try:
+                import streamlit as st
+                api_key = st.secrets.get("tripo_api_key", None)
+            except Exception:
+                pass
         return cls(api_key)
 
     @property

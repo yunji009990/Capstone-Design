@@ -24,6 +24,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import json
 import logging
 import shutil
@@ -56,13 +58,14 @@ class MeshyClient:
 
     @classmethod
     def from_secrets(cls) -> "MeshyClient":
-        # Streamlit secrets에 접근 (호출 컨텍스트가 Streamlit이 아닐 수도 있어 안전 처리)
-        api_key: str | None = None
-        try:
-            import streamlit as st  # 지연 임포트
-            api_key = st.secrets.get("meshy_api_key", None)
-        except Exception:
-            pass
+        # 환경변수를 먼저 본다. Streamlit 밖(FastAPI 등)에서도 쓰기 위해서다.
+        api_key: str | None = os.environ.get("MESHY_API_KEY") or None
+        if not api_key:
+            try:
+                import streamlit as st  # 지연 임포트
+                api_key = st.secrets.get("meshy_api_key", None)
+            except Exception:
+                pass
         return cls(api_key)
 
     @property

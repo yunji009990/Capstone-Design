@@ -22,6 +22,13 @@ import numpy as np
 import soundfile as sf
 
 import persona as persona_builder
+
+# 설문 저장과 3D 모델 생성은 Survey/ 의 것을 그대로 쓴다. 스키마와 작업 추적이 이미
+# 있어서 다시 만들 이유가 없고, Survey/pages/2_관리자.py 로 같은 DB 를 들여다볼 수 있다.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Survey"))
+from core import database as survey_db          # noqa: E402
+from core import storage as survey_store        # noqa: E402
+from core import jobs as survey_jobs            # noqa: E402
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -128,6 +135,80 @@ def _measure_speakers(job):
             s["quality"] = {"error": str(e)}
 
 
+def _record_and_model(sid: str, survey_json: str, image: bytes, image_name: str):
+    """등록이 끝난 뒤 설문을 남기고, 사진이 있으면 3D 모델 작업을 띄운다.
+
+    등록 자체가 실패하면 안 되므로 여기서 나는 오류는 전부 삼킨다 — 대화는 사진 없이도
+    되고, 모델은 나중에 관리자 페이지에서 재시도할 수 있다."""
+    try:
+        d = json.loads(survey_json) if survey_json else {}
+    except json.JSONDecodeError:
+        d = {}
+    try:
+        survey_db.insert_session(
+            session_id=sid, payload=d,
+            consent_image=bool(d.get("consent_image")),
+            consent_voice=bool(d.get("consent_voice")),
+            consent_understand=bool(d.get("consent_understand")),
+            bereavement_weeks=d.get("bereavement_weeks"),
+            has_image=bool(image), has_voice=True,
+        )
+    except Exception as e:
+        print(f"[설문저장 실패] {sid}: {e}", flush=True)
+        return
+    if not image:
+        return
+    try:
+        ext = os.path.splitext(image_name)[1].lower() or ".jpg"
+        dest = survey_store.session_dir(sid) / f"front{ext}"
+        dest.write_bytes(image)
+        survey_db.set_model_status(sid, "queued")
+        print(f"[모델] {sid} 작업 시작 — {survey_jobs.dispatch_model_job(sid)}", flush=True)
+        threading.Thread(target=_push_model_when_ready, args=(sid,), daemon=True).start()
+    except Exception as e:
+        print(f"[모델 준비 실패] {sid}: {e}", flush=True)
+
+
+def _push_model_when_ready(sid: str, timeout_sec: int = 1200):
+    """모델이 완성되면 Raon 서버로 올린다.
+
+    작업 자체는 Survey/core/jobs.py 가 돌리고 DB 에 상태만 쓴다. 완성됐다고 알려주는
+    고리가 없어서 상태를 지켜보다가 넘긴다 — 유니티는 서버에서만 모델을 받는다."""
+    end = time.time() + timeout_sec
+    while time.time() < end:
+        time.sleep(3)
+        try:
+            s = survey_db.get_session(sid)
+        except Exception:
+            return
+        if not s:
+            return
+        st = s.get("model_status")
+        if st == "ready" and s.get("model_glb_path") and os.path.exists(s["model_glb_path"]):
+            try:
+                with open(s["model_glb_path"], "rb") as f:
+                    r = httpx.post(f"{RAON_URL}/session/{sid}/model",
+                                   files={"model": ("model.glb", f, "model/gltf-binary")},
+                                   headers=_headers(), timeout=120)
+                print(f"[모델] {sid} 서버 전달 {r.status_code}", flush=True)
+            except Exception as e:
+                print(f"[모델 전달 실패] {sid}: {e}", flush=True)
+            return
+        if st in ("failed", "stub"):
+            print(f"[모델] {sid} 중단 — {st}: {s.get('model_error')}", flush=True)
+            return
+    print(f"[모델] {sid} 시간 초과", flush=True)
+
+
+@app.get("/model/{sid}")
+def model_state(sid: str):
+    """진행 상황 조회. 웹이 이걸 보고 '모델 만드는 중'을 띄운다."""
+    s = survey_db.get_session(sid)
+    if not s:
+        return {"status": None}
+    return {"status": s.get("model_status"), "error": s.get("model_error")}
+
+
 @app.post("/persona")
 async def persona_from_survey(survey: str = Form(...)):
     """설문 응답을 인물·사전지식으로 바꾼다.
@@ -182,8 +263,9 @@ def file(job: str, path: str):
 
 
 @app.post("/publish")
-def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form(""),
-            persona: str = Form(...), knowledge: str = Form("")):
+async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form(""),
+                  persona: str = Form(...), knowledge: str = Form(""),
+                  survey: str = Form(""), image: UploadFile = File(None)):
     j = JOBS.get(job)
     if not j or not j.get("result"):
         raise HTTPException(400, "추출이 끝나지 않았습니다")
@@ -208,7 +290,10 @@ def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form("
         raise HTTPException(502, f"Raon 서버에 연결할 수 없습니다: {e}")
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
-    return {**r.json(), "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
+    out = r.json()
+    img = await image.read() if image is not None and image.filename else b""
+    _record_and_model(out["session"], survey, img, image.filename if image else "")
+    return {**out, "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
 
 
 CUT_BIN, CUT_KEEP, CUT_XF = 0.02, 0.12, 0.01
@@ -392,7 +477,8 @@ def _quality(y, sr=24000):
 
 @app.post("/publish_direct")
 async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...),
-                         knowledge: str = Form(""), session: str = Form("")):
+                         knowledge: str = Form(""), session: str = Form(""),
+                         survey: str = Form(""), image: UploadFile = File(None)):
     """화자 분리를 건너뛰고 올린 오디오를 그대로 참조로 등록한다.
     분리기가 만든 참조는 조각을 이어붙인 것이라 무엇이 넘어갔는지 알기 어렵다.
     직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다."""
@@ -410,7 +496,10 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         raise HTTPException(502, f"Raon 서버에 연결할 수 없습니다: {e}")
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
-    return {**r.json(), "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
+    out = r.json()
+    img = await image.read() if image is not None and image.filename else b""
+    _record_and_model(out["session"], survey, img, image.filename if image else "")
+    return {**out, "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
 
 @app.get("/last_ref.wav")
