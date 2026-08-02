@@ -180,6 +180,9 @@
   <div class="card step" data-step="7" style="display:none">
     <h2>목소리 고르기</h2>
     <div class="hint" id="jobinfo"></div>
+    <!-- 분리가 뒤에서 돌기 때문에 실패는 여기서야 드러난다. 6장을 되짚어
+         올라가게 하지 않고 같은 파일로 그 자리에서 다시 건다. -->
+    <button id="retry" style="display:none; margin-top:10px">다시 시도</button>
 
     <!-- 한 명일 때. 분리기를 거치지 않으므로 보낸 것과 서버가 쓰는 것이 같다. -->
     <div id="direct" style="display:none">
@@ -244,8 +247,10 @@
 <script>
 const $ = s => document.querySelector(s);
 const COLORS = ["#C58FA0", "#7A9E7E", "#C99A5B", "#8E86B5", "#B87C6A", "#6E93A8"];
+// 목소리 관련 상태는 전부 여기 모아 둔다. blockedReason 이 이보다 위에 있어서,
+// 아래쪽에 두면 화면이 뜨는 도중에 부를 때 TDZ 로 터진다.
 let job = null, result = null, picked = null, timer = null;
-let mode = "extract", dirFile = null;
+let mode = "extract", dirFile = null, pending = null, jobErr = null;
 
 $("#persona").value = `[캐릭터] 당신은 사용자의 오랜 친구이며 성별은 남자입니다. 고등학교 때부터 알고 지냈고,
 지금은 각자 바빠 자주 못 보지만 만나면 어제 본 사이처럼 편합니다.
@@ -364,7 +369,7 @@ function blockedReason(n) {
     return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
   if (n === 7 && mode === "direct") return null;      // 고를 것이 없다
   if (n === 7 && !result)
-    return jobErr ? "화자 분리에 실패했습니다. 2단계로 돌아가 다시 올려 주세요."
+    return jobErr ? "다시 시도하거나, 2단계로 돌아가 다른 파일을 올려 주세요."
                   : "화자를 갈라내는 중입니다. 조금만 기다려 주세요.";
   if (n === 7 && !picked) return "쓸 목소리를 골라 주세요.";
   return null;
@@ -467,12 +472,12 @@ function refresh() {
   const why = (step === 2 || step === 7) ? blockedReason(step) : null;
   $("#next").disabled = !!why;
   $("#navinfo").textContent = why || "";
+  $("#retry").style.display = (mode !== "direct" && jobErr) ? "" : "none";
 }
 
 // ── 파일 고르기 ──
 // 고른다고 바로 시작하지 않는다. 화자 수를 정하고 다음을 눌러야 시작한다.
 const drop = $("#drop");
-let pending = null, jobErr = null;
 
 function pick(f) {
   if (!f) return;
@@ -507,6 +512,13 @@ function start() {
   else if (!job) send();
 }
 
+$("#retry").onclick = () => {
+  if (!pending) return;
+  job = null; jobErr = null;
+  refresh();                    // 단추를 먼저 감춘다 — 두 번 눌리면 두 벌이 돈다
+  send();
+};
+
 function confirmDirect() {
   dirFile = pending;
   const p = $("#dirplayer");
@@ -534,11 +546,19 @@ async function send() {
     job = d.job;
     if (timer) clearInterval(timer);
     timer = setInterval(poll, 1200); poll();
-  } catch (e) {
-    jobErr = e.message;
-    $("#jobinfo").textContent = "실패: " + e.message;
-    refresh();
-  }
+  } catch (e) { showFail(e.message); }
+}
+
+// 서버가 주는 오류 원문은 파이썬 역추적일 때가 있다. 유가족 앞에 띄울 화면이라
+// 사람 말로 한 줄만 크게 보이고, 원문은 운영자가 볼 수 있게 아래에 작게 둔다.
+function showFail(raw) {
+  jobErr = raw || "알 수 없는 오류";
+  const t = document.createElement("div");
+  t.textContent = jobErr;                       // 원문을 그대로 넣으면 안 된다
+  $("#jobinfo").innerHTML = "<b>화자 분리에 실패했습니다.</b>" +
+    `<div style="margin-top:6px; font-size:12px; color:var(--dim); white-space:pre-wrap;
+       max-height:5.5em; overflow:auto">${t.innerHTML}</div>`;
+  refresh();
 }
 
 async function poll() {
@@ -550,11 +570,7 @@ async function poll() {
     return;
   }
   clearInterval(timer); timer = null;
-  if (d.state === "error") {
-    jobErr = d.error || "알 수 없는 오류";
-    $("#jobinfo").textContent = "실패: " + jobErr;
-    refresh(); return;
-  }
+  if (d.state === "error") { showFail(d.error); return; }
   result = d.result;
   $("#jobinfo").textContent =
     `${result.engine} · 전체 ${result.duration}초 · 발화 ${result.speech_sec}초(${result.speech_pct}%) · 화자 ${result.n_speakers}명`;
