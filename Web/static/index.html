@@ -54,6 +54,12 @@
     <div class="note">그리운 분에 대해 몇 가지 여쭙겠습니다. 여기 적으신 내용으로
       <b>대화할 인물을 만듭니다.</b> 짧아도 괜찮고, 나중에 고칠 수 있습니다.</div>
 
+    <div class="row" style="margin-bottom:14px">
+      <button class="ghost" id="fillsample" style="padding:6px 12px; font-size:13px">시험용 예시로 채우기</button>
+      <button class="ghost" id="clearall" style="padding:6px 12px; font-size:13px">전부 비우기</button>
+      <span class="hint" id="memoinfo" style="margin:0"></span>
+    </div>
+
     <div id="ethics" style="background:#FFFDFB; border:1px solid #EFE3D6; border-radius:12px; padding:16px 18px; margin-bottom:18px">
       <label style="margin-top:0">사별 후 얼마나 지났나요?</label>
       <div class="row">
@@ -155,6 +161,7 @@
     <div class="row" style="margin-bottom:14px">
       <button class="ghost tab on" id="tabex">영상·음성에서 화자 분리</button>
       <button class="ghost tab" id="tabdir">오디오 직접 지정</button>
+      <button class="ghost tab" id="tablast" style="display:none">직전 것 그대로</button>
     </div>
 
     <div id="paneex">
@@ -165,6 +172,13 @@
         <span class="hint" style="margin:0">0이면 자동 판별</span>
       </div>
       <div class="hint" id="jobinfo"></div>
+    </div>
+
+    <div id="panelast" style="display:none">
+      <div class="note" id="lastinfo">직전에 등록할 때 서버로 보낸 참조를 그대로 다시 씁니다.</div>
+      <audio id="lastplayer" controls style="width:100%; margin-top:10px"></audio>
+      <div class="hint">화자 분리를 다시 돌리지 않아도 됩니다. 같은 목소리로 프롬프트만
+        바꿔 가며 시험할 때 씁니다.</div>
     </div>
 
     <div id="panedir" style="display:none">
@@ -292,6 +306,61 @@ $("#bweeks").oninput = () => {
 
 const vals = sel => [...document.querySelectorAll(sel)].map(e => e.value.trim()).filter(Boolean);
 
+// ── 적은 것을 기억한다 ──
+// 시험할 때마다 같은 값을 다시 치는 것은 낭비다. 브라우저에 남겨 두고 새로고침하면
+// 되살린다. 참여자 자료가 남는 것이므로 "전부 비우기"를 같이 둔다.
+const MEMO = "dasibom.survey";
+const FIELDS = ["#bweeks","#s_rel","#s_sex","#s_hon","#s_calls","#s_name","#s_trait_other",
+                "#s_missed2","#s_unsaid","#s_wished","#session"];
+const CHECKS = ["#c1","#c2","#c3"];
+
+function collect() {
+  const o = { tone, v: {}, c: {}, tr: [], q: [], m: [] };
+  FIELDS.forEach(f => o.v[f] = $(f).value);
+  CHECKS.forEach(f => o.c[f] = $(f).checked);
+  document.querySelectorAll(".s_tr").forEach(e => { if (e.checked) o.tr.push(e.value); });
+  document.querySelectorAll(".s_quirk").forEach(e => o.q.push(e.value));
+  document.querySelectorAll(".s_mem").forEach(e => o.m.push(e.value));
+  return o;
+}
+function restore(o) {
+  if (!o) return;
+  FIELDS.forEach(f => { if (o.v && o.v[f] != null) $(f).value = o.v[f]; });
+  CHECKS.forEach(f => { if (o.c && o.c[f] != null) $(f).checked = o.c[f]; });
+  document.querySelectorAll(".s_tr").forEach(e => e.checked = (o.tr || []).includes(e.value));
+  document.querySelectorAll(".s_quirk").forEach((e, i) => e.value = (o.q || [])[i] || "");
+  document.querySelectorAll(".s_mem").forEach((e, i) => e.value = (o.m || [])[i] || "");
+  if (o.tone) { tone = o.tone; drawTones(); }
+  $("#bweeks").dispatchEvent(new Event("input"));
+}
+const saveMemo = () => {
+  try { localStorage.setItem(MEMO, JSON.stringify(collect())); } catch {}
+  $("#memoinfo").textContent = "적은 내용은 이 브라우저에 남습니다";
+};
+document.addEventListener("input", saveMemo);
+document.addEventListener("change", saveMemo);
+
+const SAMPLE = { tone: "casual_recreation",
+  v: { "#bweeks":"30", "#s_rel":"할머니", "#s_sex":"여자", "#s_hon":"할머니",
+       "#s_calls":"우리 강아지", "#s_name":"지연", "#s_trait_other":"",
+       "#s_missed2":"손 잡아주던 감촉", "#s_unsaid":"고맙다는 말을 못 했다",
+       "#s_wished":"잘하고 있다", "#session":"test" },
+  c: { "#c1":true, "#c2":true, "#c3":true },
+  tr: ["다 받아줌","걱정 많음"],
+  q: ["아이고 내 새끼","밥은 먹었냐",""],
+  m: ["여름마다 시골집 마루에서 수박을 먹었다","초등학교 3학년 때 소풍 김밥을 새벽에 싸주셨다",""] };
+
+$("#fillsample").onclick = () => { restore(SAMPLE); saveMemo(); personaEdited = false; };
+$("#clearall").onclick = () => {
+  if (!confirm("적은 내용을 전부 지웁니다.")) return;
+  localStorage.removeItem(MEMO);
+  restore({ tone: "casual_recreation", v: Object.fromEntries(FIELDS.map(f => [f, ""])),
+            c: {"#c1":false,"#c2":false,"#c3":false}, tr: [], q: [], m: [] });
+  $("#persona").value = ""; $("#knowledge").value = ""; personaEdited = false;
+  $("#memoinfo").textContent = "비웠습니다";
+};
+try { restore(JSON.parse(localStorage.getItem(MEMO))); } catch {}
+
 // ── 단계 이동 ──
 // 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
 const LABELS = { 1:"시작", 2:"기본 정보", 3:"추억", 4:"마음", 5:"대화 톤",
@@ -347,7 +416,7 @@ $("#next").onclick = async () => {
   if (why) { $("#navinfo").textContent = why; return; }
   let n = step + 1;
   // 오디오를 직접 지정했으면 고를 화자가 없다
-  if (n === 7 && mode !== "extract") n = 8;
+  if (n === 7 && mode !== "extract") n = 8;   // 고를 화자가 없다
   if (n === 8 && !personaEdited) await makePersona();
   showStep(n);
 };
@@ -417,23 +486,41 @@ status(); setInterval(status, 5000); refresh();
 // ── 참조 음성 방식 전환 ──
 // 어느 쪽을 골랐든 "무엇이 서버로 가는가"를 항상 4번 카드에 적는다.
 function refresh() {
-  const ok = mode === "extract" ? !!picked : !!dirFile;
+  const ok = mode === "extract" ? !!picked : mode === "last" ? true : !!dirFile;
   $("#publish").disabled = !ok;
   $("#refnow").innerHTML = !ok ? "참조 음성이 선택되지 않았습니다."
     : mode === "extract"
       ? `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`
-      : `참조: <b>${dirFile.name}</b> — 파일 그대로`;
+      : mode === "last"
+        ? "참조: <b>직전에 쓴 음성</b> — 그대로 다시 씁니다"
+        : `참조: <b>${dirFile.name}</b> — 파일 그대로`;
 }
 function setMode(m) {
   mode = m;
   $("#tabex").classList.toggle("on", m === "extract");
   $("#tabdir").classList.toggle("on", m === "direct");
+  $("#tablast").classList.toggle("on", m === "last");
   $("#paneex").style.display = m === "extract" ? "" : "none";
   $("#panedir").style.display = m === "direct" ? "" : "none";
+  $("#panelast").style.display = m === "last" ? "" : "none";
   refresh();
 }
 $("#tabex").onclick = () => setMode("extract");
 $("#tabdir").onclick = () => setMode("direct");
+$("#tablast").onclick = () => setMode("last");
+
+// 직전에 쓴 참조가 있으면 그것을 그대로 다시 쓸 수 있게 한다.
+// 같은 목소리로 프롬프트만 바꿔 가며 시험할 때 화자 분리를 다시 돌릴 이유가 없다.
+(async () => {
+  try {
+    const d = await (await fetch("/last_ref_info")).json();
+    if (!d.exists) return;
+    $("#tablast").style.display = "";
+    $("#lastinfo").innerHTML = `직전에 서버로 보낸 참조를 그대로 다시 씁니다 — ` +
+      `<b>${d.sec}초</b>, ${d.when} 에 보냄.`;
+    $("#lastplayer").src = "/last_ref.wav?t=" + Date.now();
+  } catch {}
+})();
 
 // ── 직접 지정 ──
 const dd = $("#dirdrop");
@@ -631,6 +718,8 @@ $("#publish").onclick = async () => {
   let url;
   if (mode === "extract") {
     url = "/publish"; fd.append("job", job); fd.append("spk_id", picked);
+  } else if (mode === "last") {
+    url = "/publish_direct"; fd.append("reuse_last", "1");
   } else {
     url = "/publish_direct"; fd.append("voice", dirFile, dirFile.name);
   }
