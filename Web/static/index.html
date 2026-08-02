@@ -4,55 +4,68 @@
 <meta charset="utf-8">
 <title>다시, 봄 — 세션 등록</title>
 <style>
-  :root { --bg:#0b0e14; --panel:#141922; --line:#232a36; --fg:#e6e9ef; --dim:#8b93a3;
-          --accent:#4c8dff; --ok:#3fbf7f; --warn:#e8b339; --bad:#e0574f; }
+  /* "다시, 봄" 톤 — 부드러움, 따듯함, 봄. Survey/core/styling.py 와 같은 색을 쓴다. */
+  :root { --line:#E2D2C2; --fg:#3E2D2A; --head:#4A3633; --dim:#8A7168;
+          --rose:#C58FA0; --rose2:#D8A2B3; --sand:#F2E0D2; --note:#F5E6D8;
+          --ok:#5E8C6A; --warn:#B98033; --bad:#C4614F; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg);
-         font:15px/1.6 "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
-  .wrap { max-width:1000px; margin:0 auto; padding:26px 20px 60px; }
-  h1 { font-size:22px; margin:0 0 4px; }
-  .sub { color:var(--dim); font-size:13px; margin-bottom:20px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
-          padding:18px; margin-bottom:16px; }
-  .card h2 { font-size:13px; margin:0 0 12px; color:var(--dim); font-weight:600; }
-  label { display:block; font-size:13px; color:var(--dim); margin:10px 0 4px; }
-  input[type=text], input[type=number], textarea { width:100%; background:#0e131b; color:var(--fg);
-      border:1px solid var(--line); border-radius:6px; padding:9px 11px; font:inherit; }
+  body { margin:0; color:var(--fg); min-height:100vh;
+         background:linear-gradient(180deg,#FBF7F2 0%,#F5EDE2 100%); background-attachment:fixed;
+         font:15px/1.65 "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:36px 20px 72px; }
+  h1 { font-size:26px; font-weight:600; color:var(--head); letter-spacing:-.01em; margin:0 0 6px; }
+  .sub { color:var(--dim); font-size:14px; margin-bottom:22px; }
+  .card { background:#FFFFFFCC; border:1px solid #EFE3D6; border-radius:14px;
+          padding:22px 24px; margin-bottom:18px; }
+  /* 카드 제목은 설문 앱의 단계 배지를 그대로 쓴다 */
+  .card h2 { display:inline-block; background:var(--sand); color:#8B5A50; font-size:12px;
+             letter-spacing:.04em; padding:4px 12px; border-radius:999px;
+             margin:0 0 16px; font-weight:500; }
+  label { display:block; font-size:13px; color:#6B4F49; margin:12px 0 5px; }
+  input[type=text], input[type=number], textarea, select {
+      width:100%; background:#fff; color:var(--fg); border:1px solid var(--line);
+      border-radius:10px; padding:10px 12px; font:inherit; }
+  input:focus, textarea:focus, select:focus { outline:none; border-color:var(--rose);
+      box-shadow:0 0 0 2px rgba(197,143,160,.18); }
   textarea { resize:vertical; font-size:14px; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:6px;
-           padding:9px 16px; font:inherit; cursor:pointer; }
-  button.ghost { background:#252c39; }
-  button:disabled { opacity:.45; cursor:default; }
-  #drop, #dirdrop { border:1.5px dashed var(--line); border-radius:8px; padding:24px;
-          text-align:center; color:var(--dim); cursor:pointer; }
-  #drop.on, #dirdrop.on { border-color:var(--accent); color:var(--fg); }
-  .tab.on { background:var(--accent); color:#fff; }
-  canvas { width:100%; height:120px; display:block; background:#0e131b;
-           border:1px solid var(--line); border-radius:6px; }
+  button { background:linear-gradient(135deg,var(--rose2) 0%,var(--rose) 100%); color:#fff;
+           border:0; border-radius:12px; padding:10px 20px; font:inherit; font-weight:500;
+           cursor:pointer; box-shadow:0 2px 6px rgba(197,143,160,.25);
+           transition:transform 120ms ease, filter 120ms ease; }
+  button:hover:not(:disabled) { transform:translateY(-1px); filter:brightness(1.04); }
+  button.ghost { background:#fff; color:#6B4F49; border:1px solid var(--line); box-shadow:none; }
+  button:disabled { opacity:.5; cursor:default; }
+  #drop, #dirdrop { border:1.5px dashed var(--line); border-radius:12px; padding:26px;
+          text-align:center; color:var(--dim); cursor:pointer; background:#FFFFFF88; }
+  #drop.on, #dirdrop.on { border-color:var(--rose); color:var(--fg); background:#fff; }
+  .tab.on { background:linear-gradient(135deg,var(--rose2),var(--rose)); color:#fff; border:0; }
+  canvas { width:100%; height:120px; display:block; background:#fff;
+           border:1px solid var(--line); border-radius:10px; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .grow { flex:1 1 auto; }
-  .pill { font-size:12px; padding:3px 9px; border-radius:99px; background:#252c39; color:var(--dim); }
-  .pill.ok { background:rgba(63,191,127,.15); color:var(--ok); }
-  .pill.warn { background:rgba(232,179,57,.15); color:var(--warn); }
-  .pill.bad { background:rgba(224,87,79,.15); color:var(--bad); }
-  pre { background:#0e131b; border:1px solid var(--line); border-radius:6px;
+  .pill { font-size:12px; padding:3px 10px; border-radius:999px; background:var(--sand); color:#8B5A50; }
+  .pill.ok { background:rgba(94,140,106,.14); color:var(--ok); }
+  .pill.warn { background:rgba(185,128,51,.14); color:var(--warn); }
+  .pill.bad { background:#FAE9E0; color:#6B3E33; }
+  pre { background:#FFFDFB; border:1px solid var(--line); border-radius:10px;
         padding:12px; overflow:auto; font-size:13px; margin:10px 0 0; white-space:pre-wrap; }
-  .hint { font-size:12px; color:var(--dim); margin-top:8px; }
-  select { width:100%; background:#0e131b; color:var(--fg); border:1px solid var(--line);
-           border-radius:6px; padding:9px 11px; font:inherit; }
-  .ck { display:inline-flex; align-items:center; gap:6px; font-size:13px;
-        color:var(--fg); margin:3px 0; cursor:pointer; }
-  .ck input { accent-color:var(--accent); }
-  input.s_quirk, input.s_mem { margin-bottom:6px; }
-  .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:18px;
-         padding:9px 12px; background:var(--panel); border:1px solid var(--line);
-         border-radius:8px; flex-wrap:wrap; }
-  .spk { border:1.5px solid var(--line); border-radius:8px; padding:12px 14px;
-         margin-bottom:8px; cursor:pointer; background:#0e131b; }
-  .spk.sel { border-color:var(--accent); background:rgba(76,141,255,.08); }
+  .hint { font-size:13px; color:var(--dim); margin-top:8px; line-height:1.6; }
+  /* 설문 앱의 안내 상자 */
+  .note { background:var(--note); border-left:3px solid var(--rose); padding:12px 16px;
+          border-radius:8px; color:#5A4540; font-size:14px; margin:12px 0; }
+  .ck { display:inline-flex; align-items:center; gap:7px; font-size:14px;
+        color:var(--fg); margin:4px 0; cursor:pointer; }
+  .ck input { accent-color:var(--rose); width:15px; height:15px; }
+  input.s_quirk, input.s_mem { margin-bottom:7px; }
+  .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:20px;
+         padding:10px 14px; background:#FFFFFFAA; border:1px solid #EFE3D6;
+         border-radius:12px; flex-wrap:wrap; align-items:center; }
+  .spk { border:1.5px solid var(--line); border-radius:12px; padding:13px 15px;
+         margin-bottom:9px; cursor:pointer; background:#fff; }
+  .spk.sel { border-color:var(--rose); background:#FFF8F9; }
   .spk .top { display:flex; align-items:center; gap:10px; }
   .dot { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
-  .meta { font-size:12px; color:var(--dim); margin-top:5px; }
+  .meta { font-size:12px; color:var(--dim); margin-top:6px; }
 </style>
 </head>
 <body>
@@ -64,10 +77,10 @@
 
   <div class="card">
     <h2>1. 사전 정보</h2>
-    <div class="hint" style="margin-bottom:14px">여기 적으신 내용으로 <b>인물 설정을 자동으로 만듭니다.</b>
+    <div class="note">여기 적으신 내용으로 <b>인물 설정을 자동으로 만듭니다.</b>
       만든 뒤 아래 3번에서 직접 고칠 수 있습니다.</div>
 
-    <div id="ethics" style="border:1px solid #3a3a3a; border-radius:6px; padding:12px; margin-bottom:16px">
+    <div id="ethics" style="background:#FFFDFB; border:1px solid #EFE3D6; border-radius:12px; padding:16px 18px; margin-bottom:18px">
       <label style="margin-top:0">사별 후 얼마나 지났나요?</label>
       <div class="row">
         <input type="number" id="bweeks" min="0" max="9999" style="width:100px" placeholder="주">
@@ -83,7 +96,7 @@
 
     <div class="row" style="align-items:flex-start; gap:16px">
       <div style="flex:1">
-        <label>관계 <span style="color:#e0574f">*</span></label>
+        <label>관계 <span style="color:#C4614F">*</span></label>
         <input type="text" id="s_rel" placeholder="어머니, 친구, 형, 할아버지 …">
         <div class="hint">이 한 낱말이 말투 전체를 정합니다.</div>
       </div>
@@ -214,7 +227,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-const COLORS = ["#4c8dff", "#e8b339", "#3fbf7f", "#c778dd", "#e0574f", "#39c5cf"];
+const COLORS = ["#C58FA0", "#7A9E7E", "#C99A5B", "#8E86B5", "#B87C6A", "#6E93A8"];
 let job = null, result = null, picked = null, timer = null;
 let mode = "extract", dirFile = null;
 
@@ -487,14 +500,14 @@ function drawWave() {
   });
 
   const mid = h / 2;
-  g.strokeStyle = "#5b6675";
+  g.strokeStyle = "#C9B6A4";
   for (let i = 0; i < v.peaks.length; i++) {
     const x = i / v.peaks.length * w;
     g.beginPath(); g.moveTo(x, mid - v.peaks[i] * mid * .9);
     g.lineTo(x, mid + v.peaks[i] * mid * .9); g.stroke();
   }
   (v.overlaps || []).forEach(o => {
-    g.fillStyle = "rgba(224,87,79,.5)";
+    g.fillStyle = "rgba(196,97,79,.45)";
     g.fillRect(o.start / v.duration * w, h - 5, Math.max(1, (o.end - o.start) / v.duration * w), 5);
   });
 }
@@ -503,7 +516,7 @@ addEventListener("resize", () => result && drawWave());
 // ── 등록 ──
 function show(o, bad) {
   const el = $("#out"); el.style.display = "";
-  el.style.borderColor = bad ? "#e0574f" : "#232a36";
+  el.style.borderColor = bad ? "#C4614F" : "#E2D2C2";
   el.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
 }
 // 설문 답과 사진은 등록할 때 함께 넘어간다. 여기서 모아야 두 등록 경로가 같은 것을 보낸다.
