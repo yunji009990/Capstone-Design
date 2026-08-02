@@ -48,16 +48,20 @@ public static class BuildOperatorHUD
         // 바탕 — 게임 화면이 뒤로 비치면 무엇이 UI 인지 알 수 없다
         var back = Panel(hud.transform, "Backdrop", Ink, 0, 0, 1, 1, 0);
 
+        // AspectRatioFitter 는 앵커를 무시하고 "부모"에 맞춘다. 화면 전체를 부모로 두면
+        // 화면 전체를 채워 버리므로, 놓일 자리만큼의 빈 칸으로 한 번 감싼다.
+        var pane = Panel(back, "VRPane", new Color(0, 0, 0, 0), SPLIT, ROW, 1, 1, 10);
+
         // RawImage 로 바로 만든다. Image 를 지우고 갈아 끼우면 참조가 안 붙었다.
         var vrGo = new GameObject("VRView", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
-        vrGo.transform.SetParent(back, false);
+        vrGo.transform.SetParent(pane, false);
         var vrView = (RectTransform)vrGo.transform;
-        vrView.anchorMin = new Vector2(SPLIT, ROW); vrView.anchorMax = new Vector2(1, 1);
-        vrView.offsetMin = new Vector2(10, 10);  vrView.offsetMax = new Vector2(-10, -10);
+        vrView.anchorMin = Vector2.zero; vrView.anchorMax = Vector2.one;
+        vrView.offsetMin = Vector2.zero; vrView.offsetMax = Vector2.zero;
         var raw = vrGo.GetComponent<RawImage>();
         raw.color = Color.white;
-        Label(vrView, "VRViewCaption", "체험자가 보는 화면", 20, Dim,
-              TextAlignmentOptions.BottomRight, 0, 0, 1, 0.05f);
+        Label(pane, "VRViewCaption", "체험자가 보는 화면", 20, Dim,
+              TextAlignmentOptions.BottomRight, 0, 0, 1, 0.06f);
 
         var status = Panel(back, "StatusCard", Card, 0, 0, SPLIT, 1, 10);
         var setting = Panel(back, "SettingsCard", Card, SPLIT, 0, 1, ROW, 10);
