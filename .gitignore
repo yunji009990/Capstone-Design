@@ -95,3 +95,6 @@ tools/__pycache__/
 /Survey/.streamlit/
 Survey/core/__pycache__/
 Web/__pycache__/
+
+# MCP 스크린샷 (일회성)
+/Assets/Screenshots/
