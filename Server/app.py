@@ -21,6 +21,8 @@ KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
 SUMM  = os.environ.get("RAON_SUMMARY", "1") == "1"
 # 앞선 답변과 마지막 문장이 이만큼 닮으면 다시 뽑는다. 0 이면 끈다.
 REGEN = float(os.environ.get("RAON_REGEN_SIM", "0.6"))
+# 요약이 이보다 길어질 때만 통째로 다시 접는다. 매번 다시 접으면 사실이 깎인다.
+SUMM_MAX = int(os.environ.get("RAON_SUMMARY_CHARS", "600"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
 VERIFY= os.environ.get("RAON_VERIFY", "1") == "1"
 CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 S["cont"]
@@ -340,7 +342,7 @@ def clean_summary(s):
     s = re.sub(r"[*#`_=]", "", s)
     s = re.sub(r"^\s*[-•·]\s*", "", s, flags=re.M)
     s = SUMM_JUNK.sub("", s)
-    return "\n".join(l.strip() for l in s.splitlines() if l.strip())[:400]
+    return "\n".join(l.strip() for l in s.splitlines() if l.strip())[:SUMM_MAX]
 
 def build_msgs(session, user_content):
     """시스템(+요약) + 최근 원문 + 이번 발화.
@@ -392,15 +394,21 @@ def record(session, heard, answer):
         return
     old, keep = h[:-KEEP*2], h[-KEEP*2:]
     log = "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}" for m in old)
-    if SUMM_TEXT.get(session):
-        log = f"(앞서 간추린 것)\n{SUMM_TEXT[session]}\n\n{log}"
     try:
         t0 = time.time()
-        out = clean_summary(S["pipe"].chat(
+        new = clean_summary(S["pipe"].chat(
             [{"role": "user", "content": SUMM_PROMPT.format(log=log)}],
             max_new_tokens=200, temperature=0.3))
-        SUMM_TEXT[session], h[:] = out, keep
-        print(f"[{session}] 요약 {len(old)}개 접음 ({time.time()-t0:.1f}초) — {out!r}", flush=True)
+        # 새로 접은 것만 덧붙인다. 접은 것을 또 접으면 사실이 깎인다 — 3턴에 심은
+        # "면접"이 세 번 다시 요약되며 사라져, 15턴에서 8회 중 7회를 틀렸다.
+        merged = f"{SUMM_TEXT.get(session, '')}\n{new}".strip()
+        if len(merged) > SUMM_MAX:
+            merged = clean_summary(S["pipe"].chat(
+                [{"role": "user", "content": SUMM_PROMPT.format(log=merged)}],
+                max_new_tokens=300, temperature=0.3))
+            print(f"[{session}] 요약이 길어져 다시 접음", flush=True)
+        SUMM_TEXT[session], h[:] = merged, keep
+        print(f"[{session}] 요약 {len(old)}개 접음 ({time.time()-t0:.1f}초) — {new!r}", flush=True)
     except Exception as e:
         # 요약이 실패해도 대화는 이어져야 한다. 예전처럼 자르기로 물러선다.
         print(f"[{session}] 요약 실패, 자르기로 대체: {e}", flush=True)
