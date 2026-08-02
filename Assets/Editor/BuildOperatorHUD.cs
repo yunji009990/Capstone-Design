@@ -142,21 +142,25 @@ public static class BuildOperatorHUD
 
         // 마이크가 살아 있는지는 말해 보면 안다. 막대가 움직이면 들어오고 있는 것이다.
         Label(root, "MicMeterLabel", "입력 세기", 15, Dim, TextAlignmentOptions.Left,
-              0.02f, 0.38f, 0.30f, 0.47f, 12);
-        var bar = Panel(root, "LevelBar", Line, 0.02f, 0.27f, 0.30f, 0.36f, 0);
-        bar.offsetMin = new Vector2(12, 0); bar.offsetMax = new Vector2(-12, 0);
-        var fill = Panel(bar, "Fill", Accent, 0, 0, 1, 1, 0);
-        var fillImg = fill.GetComponent<Image>();
-        // Filled 는 스프라이트가 있어야 동작한다. 없으면 fillAmount 를 넣어도 꽉 찬
-        // 네모 그대로라서 색만 바뀌고 길이가 안 변한다 — 소리 크기를 알 수 없었다.
-        fillImg.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
-        fillImg.type = Image.Type.Filled;
-        fillImg.fillMethod = Image.FillMethod.Horizontal;
-        fillImg.fillOrigin = (int)Image.OriginHorizontal.Left;
-        fillImg.fillAmount = 0f;
-        // 이 선을 넘어야 말로 인식된다
-        var marker = Panel(bar, "ThresholdMarker", Text, 0.1f, 0, 0.1f, 1, 0);
-        marker.sizeDelta = new Vector2(2, 0);
+              0.02f, 0.36f, 0.20f, 0.45f, 12);
+        var micHint = Label(root, "MicHint", "", 14, Dim, TextAlignmentOptions.Right,
+                            0.18f, 0.36f, 0.30f, 0.45f, 12);
+
+        // 홈은 어둡게, 채워지는 쪽만 밝게. 자식 칸의 너비를 늘려 그린다 —
+        // Filled 로 스프라이트를 잘라 쓰면 둥근 모서리가 일그러진다.
+        var track = Panel(root, "LevelBar", new Color(0, 0, 0, 0.35f), 0.02f, 0.26f, 0.30f, 0.345f, 0);
+        track.offsetMin = new Vector2(12, 0); track.offsetMax = new Vector2(-12, 0);
+        var fillRt = Panel(track, "Fill", new Color(0.36f, 0.44f, 0.52f), 0, 0, 0, 1, 0);
+        var marker = Panel(track, "ThresholdMarker", new Color(1, 1, 1, 0.55f), 0.1f, 0, 0.1f, 1, 0);
+
+        var meterOwner = root.GetComponentInParent<OperatorHUD>().gameObject;
+        var meter = meterOwner.GetComponent<LevelMeter>() ?? meterOwner.AddComponent<LevelMeter>();
+        var mso = new SerializedObject(meter);
+        mso.FindProperty("voice").objectReferenceValue = voice;
+        mso.FindProperty("fill").objectReferenceValue = fillRt;
+        mso.FindProperty("marker").objectReferenceValue = marker;
+        mso.FindProperty("hint").objectReferenceValue = micHint;
+        mso.ApplyModifiedPropertiesWithoutUndo();
 
         // ② 체험 조작
         var start = Button(root, "StartButton", "체험 시작", Accent, 0.34f, 0.55f, 0.58f, 0.72f);
@@ -182,8 +186,8 @@ public static class BuildOperatorHUD
 
         var ui = root.GetComponentInParent<RaonVoiceUI>();
         Wire(ui, "micDropdown", drop);
-        Wire(ui, "levelFill", fillImg);
-        Wire(ui, "thresholdMarker", marker);
+        Wire(ui, "levelFill", null);         // 세기 막대는 LevelMeter 가 그린다
+        Wire(ui, "thresholdMarker", null);
         Wire(ui, "resetButton", reset.button);
         Wire(ui, "talkButton", null);        // 자동 감지라 누를 일이 없다
         Wire(ui, "talkButtonLabel", null);

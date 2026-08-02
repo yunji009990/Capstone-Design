@@ -23,8 +23,16 @@ public class ExperienceControl : MonoBehaviour
     public Button startButton;
     public TMP_Text startLabel;
 
-    /// <summary>한 번이라도 시작했는가. 화면 표시에 쓴다.</summary>
+    /// <summary>시작했는가. 화면 표시와 듣기 여부를 함께 정한다.</summary>
     public bool Started { get; private set; }
+
+    /// <summary>체험을 멈춘다. 다음 사람을 맞기 전에 듣기를 닫아 둔다.</summary>
+    public void Stop()
+    {
+        if (voice != null) voice.autoDetect = false;
+        Started = false;
+        Refresh();
+    }
 
     void Awake()
     {
@@ -35,6 +43,9 @@ public class ExperienceControl : MonoBehaviour
     void Start()
     {
         if (startButton) startButton.onClick.AddListener(Begin);
+        // 시작을 누르기 전에는 듣지 않는다. 자동 감지가 켜져 있으면 준비 중에 오간 말이
+        // 그대로 서버로 가서, 체험이 시작되기도 전에 인물이 대답한다.
+        if (voice != null) voice.autoDetect = false;
         Refresh();
     }
 
@@ -44,6 +55,7 @@ public class ExperienceControl : MonoBehaviour
         if (voice == null || !voice.HasSession) return;
         voice.ResetSession();
         if (log != null) log.Clear();
+        voice.autoDetect = true;      // 이제부터 말을 걸면 받는다
         Started = true;
         Refresh();
     }

@@ -34,6 +34,7 @@ public class OperatorHUD : MonoBehaviour
     [Tooltip("비워두면 씬에서 찾는다.")]
     public RaonVoiceClient voice;
     public PersonaSpawner spawner;
+    public ExperienceControl experience;
 
     [Tooltip("체험자의 시점 카메라. 비워두면 Camera.main 을 쓴다.")]
     public Camera vrCamera;
@@ -53,6 +54,7 @@ public class OperatorHUD : MonoBehaviour
     {
         if (voice == null) voice = FindObjectOfType<RaonVoiceClient>();
         if (spawner == null) spawner = FindObjectOfType<PersonaSpawner>();
+        if (experience == null) experience = FindObjectOfType<ExperienceControl>();
         if (vrCamera == null) vrCamera = Camera.main;
         // 화면을 다시 지으면 인스펙터 연결이 끊긴다. 이름으로 다시 찾아 잇는다.
         if (vrView == null) vrView = transform.Find("Backdrop/VRPane/VRView")?.GetComponent<RawImage>();
@@ -141,6 +143,15 @@ public class OperatorHUD : MonoBehaviour
             s.AppendLine("  <color=#E0B36A>등록된 인물이 없습니다</color>");
             s.AppendLine("  웹에서 먼저 등록하세요");
         }
+        // 시작 전에는 말을 걸어도 서버로 안 간다. 그것을 모르면 고장으로 오해한다.
+        if (experience != null)
+        {
+            s.AppendLine();
+            s.AppendLine("<b>체험</b>");
+            s.AppendLine(experience.Started ? "  <color=#7ED9A5>진행 중</color>"
+                                            : "  <color=#E0B36A>시작 전 — 말을 걸어도 받지 않습니다</color>");
+        }
+
         // 상태 한 줄은 위 점이, 마이크 세기는 아래 막대가, 오간 말은 기록 창이 맡는다.
         // 같은 것을 두 번 보여주면 글이 길어져 기록 창을 밀어낸다.
         return s.ToString();
