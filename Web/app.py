@@ -594,29 +594,16 @@ def _quality(y, sr=24000):
 
 
 @app.post("/publish_direct")
-async def publish_direct(voice: UploadFile = File(None), persona: str = Form(...),
+async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...),
                          knowledge: str = Form(""), session: str = Form(""),
-                         survey: str = Form(""), image: UploadFile = File(None),
-                         reuse_last: str = Form("")):
+                         survey: str = Form(""), image: UploadFile = File(None)):
     """화자 분리를 건너뛰고 올린 오디오를 그대로 참조로 등록한다.
     분리기가 만든 참조는 조각을 이어붙인 것이라 무엇이 넘어갔는지 알기 어렵다.
-    직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다.
-
-    reuse_last 를 주면 직전에 보낸 참조를 그대로 다시 쓴다. 시험할 때마다 화자 분리를
-    몇 분씩 다시 돌릴 이유가 없다."""
-    name = "직전 참조"
-    if reuse_last not in ("", "0", "false", "False"):
-        if not os.path.exists(LAST_REF):
-            raise HTTPException(400, "직전에 쓴 참조가 없습니다. 한 번은 올려야 합니다")
-        wav, dur, qual = _to_wav24(open(LAST_REF, "rb").read(), "last_ref.wav")
-    else:
-        if voice is None or not voice.filename:
-            raise HTTPException(400, "참조 음성이 없습니다")
-        name = voice.filename
-        ext = os.path.splitext(voice.filename)[1].lower()
-        if ext not in ALLOWED:
-            raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
-        wav, dur, qual = _to_wav24(await voice.read(), voice.filename)
+    직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다."""
+    ext = os.path.splitext(voice.filename)[1].lower()
+    if ext not in ALLOWED:
+        raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
+    wav, dur, qual = _to_wav24(await voice.read(), voice.filename)
     with open(LAST_REF, "wb") as o:      # 보낸 것을 그대로 들어볼 수 있게 남긴다
         o.write(wav)
     try:
@@ -630,16 +617,7 @@ async def publish_direct(voice: UploadFile = File(None), persona: str = Form(...
     out = r.json()
     img = await image.read() if image is not None and image.filename else b""
     _record_and_model(out["session"], survey, img, image.filename if image else "")
-    return {**out, "sent": {"file": name, "sec": round(dur, 2), **qual}}
-
-
-@app.get("/last_ref_info")
-def last_ref_info():
-    """직전에 쓴 참조가 있는지. 있으면 웹이 '그대로 다시 쓰기'를 띄운다."""
-    if not os.path.exists(LAST_REF):
-        return {"exists": False}
-    return {"exists": True, "sec": round(os.path.getsize(LAST_REF) / (24000 * 2), 1),
-            "when": time.strftime("%m-%d %H:%M", time.localtime(os.path.getmtime(LAST_REF)))}
+    return {**out, "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
 
 @app.get("/last_ref.wav")

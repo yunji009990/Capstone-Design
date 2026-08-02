@@ -88,3 +88,10 @@ th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #EFE3D6; }
 th { color:var(--dim); font-weight:500; }
 tr.click { cursor:pointer; }
 tr.click:hover { background:#FFF8F9; }
+
+/* 오른쪽 위 시험용 단추. 실제 참여자에게 보일 화면이 아니므로 눈에 안 띄게 둔다. */
+#testfill { position:fixed; top:14px; right:16px; z-index:50;
+            padding:6px 14px; font-size:13px; opacity:.5;
+            background:#fff; color:#6B4F49; border:1px solid var(--line);
+            box-shadow:none; }
+#testfill:hover { opacity:1; transform:none; }
