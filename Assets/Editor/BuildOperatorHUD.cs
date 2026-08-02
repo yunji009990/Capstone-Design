@@ -213,6 +213,7 @@ public static class BuildOperatorHUD
         so.FindProperty("log").objectReferenceValue = owner.GetComponent<ConversationLog>();
         so.FindProperty("startButton").objectReferenceValue = start.button;
         so.FindProperty("startLabel").objectReferenceValue = start.label;
+        so.FindProperty("buttonImage").objectReferenceValue = start.button.GetComponent<Image>();
         so.ApplyModifiedPropertiesWithoutUndo();
     }
 
