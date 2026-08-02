@@ -12,8 +12,8 @@ using UnityEngine.UI;
 
 public static class BuildOperatorHUD
 {
-    const float SPLIT = 0.34f;      // 좌우를 가르는 자리. 오른쪽이 2/3
-    const float ROW = 0.38f;        // 왼쪽에서 상태와 설정을 가르는 자리
+    const float SPLIT = 0.30f;      // 좌우를 가르는 자리. 오른쪽이 2/3 넘게
+    const float ROW = 0.34f;        // 오른쪽에서 화면과 설정을 가르는 자리
 
     static readonly Color Ink = new Color(0.055f, 0.067f, 0.086f, 1f);      // 바탕
     static readonly Color Card = new Color(0.094f, 0.110f, 0.137f, 1f);     // 카드
@@ -52,15 +52,15 @@ public static class BuildOperatorHUD
         var vrGo = new GameObject("VRView", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
         vrGo.transform.SetParent(back, false);
         var vrView = (RectTransform)vrGo.transform;
-        vrView.anchorMin = new Vector2(SPLIT, 0); vrView.anchorMax = new Vector2(1, 1);
+        vrView.anchorMin = new Vector2(SPLIT, ROW); vrView.anchorMax = new Vector2(1, 1);
         vrView.offsetMin = new Vector2(10, 10);  vrView.offsetMax = new Vector2(-10, -10);
         var raw = vrGo.GetComponent<RawImage>();
         raw.color = Color.white;
         Label(vrView, "VRViewCaption", "체험자가 보는 화면", 20, Dim,
               TextAlignmentOptions.BottomRight, 0, 0, 1, 0.05f);
 
-        var status = Panel(back, "StatusCard", Card, 0, ROW, SPLIT, 1, 10);
-        var setting = Panel(back, "SettingsCard", Card, 0, 0, SPLIT, ROW, 10);
+        var status = Panel(back, "StatusCard", Card, 0, 0, SPLIT, 1, 10);
+        var setting = Panel(back, "SettingsCard", Card, SPLIT, 0, 1, ROW, 10);
 
         var info = BuildStatus(status, voice);
         BuildSettings(setting, voice);
@@ -83,10 +83,10 @@ public static class BuildOperatorHUD
     static TMP_Text BuildStatus(RectTransform root, RaonVoiceClient voice)
     {
         Label(root, "Title", "현재 상태", 28, Text, TextAlignmentOptions.TopLeft,
-              0, 0.93f, 1, 1, 20);
+              0, 0.955f, 1, 1, 20);
 
         // 한 줄 상태. 색깔 점이 제일 먼저 눈에 들어온다.
-        var dotRow = Panel(root, "StateRow", new Color(0, 0, 0, 0), 0, 0.855f, 1, 0.925f, 0);
+        var dotRow = Panel(root, "StateRow", new Color(0, 0, 0, 0), 0, 0.905f, 1, 0.95f, 0);
         var dot = Panel(dotRow, "StatusDot", Dim, 0, 0.5f, 0, 0.5f, 0);
         dot.anchoredPosition = new Vector2(28, 0);
         dot.sizeDelta = new Vector2(14, 14);
@@ -95,12 +95,12 @@ public static class BuildOperatorHUD
 
         // 서버·인물·대화는 OperatorHUD 가 글로 채운다
         var info = Label(root, "InfoText", "", 21, Text, TextAlignmentOptions.TopLeft,
-                         0, 0.16f, 1, 0.85f, 20);
+                         0, 0.10f, 1, 0.90f, 20);
 
         // 마이크 — 옆에서 보는 사람에게는 막대가 제일 빠르다
         Label(root, "MicTitle", "마이크 입력", 18, Dim, TextAlignmentOptions.Left,
-              0, 0.10f, 1, 0.15f, 20);
-        var bar = Panel(root, "LevelBar", Line, 0, 0.04f, 1, 0.095f, 20);
+              0, 0.055f, 1, 0.095f, 20);
+        var bar = Panel(root, "LevelBar", Line, 0, 0.02f, 1, 0.05f, 20);
         var fill = Panel(bar, "Fill", Accent, 0, 0, 1, 1, 0);
         var fillImg = fill.GetComponent<Image>();
         fillImg.type = Image.Type.Filled;
@@ -122,37 +122,38 @@ public static class BuildOperatorHUD
         return info;
     }
 
-    // ── 왼쪽 아래 · 설정 ──────────────────────────────────────────
+    // ── 오른쪽 아래 · 설정 ────────────────────────────────────────
+    // 넓고 낮은 칸이라 세로로 쌓지 않고 세 줄기로 나눈다.
     static void BuildSettings(RectTransform root, RaonVoiceClient voice)
     {
-        Label(root, "Title", "설정", 28, Text, TextAlignmentOptions.TopLeft,
-              0, 0.88f, 1, 1, 20);
+        Label(root, "Title", "설정", 26, Text, TextAlignmentOptions.TopLeft,
+              0, 0.80f, 0.3f, 1, 20);
 
+        // ① 마이크 고르기
         Label(root, "MicLabel", "마이크", 18, Dim, TextAlignmentOptions.Left,
-              0, 0.79f, 1, 0.87f, 20);
-        var drop = Dropdown(root, "MicDropdown", 0, 0.69f, 1, 0.785f);
+              0.02f, 0.60f, 0.32f, 0.78f, 12);
+        var drop = Dropdown(root, "MicDropdown", 0.02f, 0.33f, 0.32f, 0.58f);
 
-        var talk = Button(root, "TalkButton", "말하기", Accent, 0, 0.57f, 0.48f, 0.665f);
-        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.52f, 0.57f, 1, 0.665f);
+        // ② 대화 조작
+        var talk = Button(root, "TalkButton", "말하기", Accent, 0.35f, 0.56f, 0.60f, 0.80f);
+        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.35f, 0.26f, 0.60f, 0.50f);
 
+        // ③ 자리 옮기기 — 가운데가 처음 자리로 되돌리기다
         Label(root, "MoveLabel", "체험자 자리 옮기기", 18, Dim, TextAlignmentOptions.Left,
-              0, 0.47f, 1, 0.55f, 20);
+              0.63f, 0.80f, 1, 0.98f, 12);
 
-        // 방향 패드. 가운데가 처음 자리로 되돌리기다.
-        var pad = Panel(root, "MovePad", new Color(0, 0, 0, 0), 0.02f, 0.05f, 0.62f, 0.45f, 0);
-        var move = root.GetComponentInParent<OperatorHUD>().gameObject
-                       .GetComponent<VRMoveControl>();
-        if (move == null) move = root.GetComponentInParent<OperatorHUD>().gameObject
-                                     .AddComponent<VRMoveControl>();
+        var owner = root.GetComponentInParent<OperatorHUD>().gameObject;
+        var move = owner.GetComponent<VRMoveControl>() ?? owner.AddComponent<VRMoveControl>();
 
+        var pad = Panel(root, "MovePad", new Color(0, 0, 0, 0), 0.63f, 0.08f, 0.85f, 0.78f, 0);
         PadButton(pad, "Forward",  "앞",   0.34f, 0.68f, 0.66f, 1.00f, move.MoveForward);
         PadButton(pad, "Left",     "좌",   0.00f, 0.34f, 0.32f, 0.66f, move.MoveLeft);
         PadButton(pad, "Recenter", "처음", 0.34f, 0.34f, 0.66f, 0.66f, move.Recenter);
         PadButton(pad, "Right",    "우",   0.68f, 0.34f, 1.00f, 0.66f, move.MoveRight);
         PadButton(pad, "Backward", "뒤",   0.34f, 0.00f, 0.66f, 0.32f, move.MoveBackward);
 
-        var col = Panel(root, "HeightPad", new Color(0, 0, 0, 0), 0.66f, 0.05f, 0.98f, 0.45f, 0);
-        PadButton(col, "Up",   "위로",  0, 0.53f, 1, 1.00f, move.MoveUp);
+        var col = Panel(root, "HeightPad", new Color(0, 0, 0, 0), 0.87f, 0.08f, 0.99f, 0.78f, 0);
+        PadButton(col, "Up",   "위로",   0, 0.53f, 1, 1.00f, move.MoveUp);
         PadButton(col, "Down", "아래로", 0, 0.00f, 1, 0.47f, move.MoveDown);
 
         var ui = root.GetComponentInParent<RaonVoiceUI>();

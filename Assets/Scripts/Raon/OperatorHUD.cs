@@ -19,6 +19,7 @@ using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.XR;
 
 [DisallowMultipleComponent]
 public class OperatorHUD : MonoBehaviour
@@ -65,10 +66,23 @@ public class OperatorHUD : MonoBehaviour
         SetupSpectator();
     }
 
+    /// <summary>
+    /// 헤드셋 한쪽 눈의 가로세로 비. Quest 는 세로가 더 긴 편이라 16:9 로 찍으면
+    /// 실제로 보이는 것과 다른 화면이 된다.
+    /// </summary>
+    float EyeAspect()
+    {
+        if (XRSettings.enabled && XRSettings.eyeTextureWidth > 0 && XRSettings.eyeTextureHeight > 0)
+            return (float)XRSettings.eyeTextureWidth / XRSettings.eyeTextureHeight;
+        if (vrCamera != null && vrCamera.aspect > 0.01f) return vrCamera.aspect;
+        return 16f / 9f;
+    }
+
     /// <summary>체험자 카메라와 같은 자리에서 같은 것을 찍는 카메라를 하나 더 둔다.</summary>
     void SetupSpectator()
     {
-        int h = Mathf.Max(360, Mathf.RoundToInt(captureWidth * 9f / 16f));
+        float aspect = EyeAspect();
+        int h = Mathf.Max(360, Mathf.RoundToInt(captureWidth / aspect));
         _rt = new RenderTexture(captureWidth, h, 24) { name = "VRSpectator" };
 
         var go = new GameObject("SpectatorCamera");
@@ -78,11 +92,20 @@ public class OperatorHUD : MonoBehaviour
         _spectator.targetTexture = _rt;
         _spectator.stereoTargetEye = StereoTargetEyeMask.None;   // 헤드셋용이 아니다
         _spectator.depth = vrCamera.depth - 1;
+        _spectator.aspect = aspect;
         // 카메라를 하나 더 두면 소리도 두 번 들린다.
         var listener = go.GetComponent<AudioListener>();
         if (listener) Destroy(listener);
 
-        if (vrView != null) vrView.texture = _rt;
+        if (vrView != null)
+        {
+            vrView.texture = _rt;
+            // 늘려서 채우면 얼굴이 넓어진다. 비율을 지키고 남는 자리는 비워 둔다.
+            var fit = vrView.GetComponent<AspectRatioFitter>();
+            if (fit == null) fit = vrView.gameObject.AddComponent<AspectRatioFitter>();
+            fit.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+            fit.aspectRatio = aspect;
+        }
     }
 
     void Update()
