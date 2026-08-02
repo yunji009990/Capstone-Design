@@ -98,13 +98,15 @@ public static class BuildOperatorHUD
                                TextAlignmentOptions.Left, 0, 0, 1, 1, 50);
 
         // 서버·인물 요약. 대화는 아래 기록 창이 맡으므로 짧게 둔다.
-        var info = Label(root, "InfoText", "", 20, Text, TextAlignmentOptions.TopLeft,
-                         0, 0.62f, 1, 0.895f, 20);
+        var info = Label(root, "InfoText", "", 19, Text, TextAlignmentOptions.TopLeft,
+                         0, 0.72f, 1, 0.895f, 20);
+        // 넘치면 아래 기록 창을 덮는다. 칸을 넘어가면 잘라낸다.
+        info.overflowMode = TextOverflowModes.Truncate;
 
         // 대화 기록 — 마지막 한 마디만 보이면 흐름을 못 따라간다
         Label(root, "LogTitle", "대화 기록", 20, Text, TextAlignmentOptions.Left,
-              0, 0.565f, 1, 0.615f, 20);
-        var logBody = ScrollBox(root, "ConversationLog", 0, 0.02f, 1, 0.56f);
+              0, 0.685f, 1, 0.735f, 20);
+        var logBody = ScrollBox(root, "ConversationLog", 0, 0.02f, 1, 0.68f);
 
         var ui = root.GetComponentInParent<RaonVoiceUI>();
         Wire(ui, "client", voice);
@@ -145,8 +147,12 @@ public static class BuildOperatorHUD
         bar.offsetMin = new Vector2(12, 0); bar.offsetMax = new Vector2(-12, 0);
         var fill = Panel(bar, "Fill", Accent, 0, 0, 1, 1, 0);
         var fillImg = fill.GetComponent<Image>();
+        // Filled 는 스프라이트가 있어야 동작한다. 없으면 fillAmount 를 넣어도 꽉 찬
+        // 네모 그대로라서 색만 바뀌고 길이가 안 변한다 — 소리 크기를 알 수 없었다.
+        fillImg.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
         fillImg.type = Image.Type.Filled;
         fillImg.fillMethod = Image.FillMethod.Horizontal;
+        fillImg.fillOrigin = (int)Image.OriginHorizontal.Left;
         fillImg.fillAmount = 0f;
         // 이 선을 넘어야 말로 인식된다
         var marker = Panel(bar, "ThresholdMarker", Text, 0.1f, 0, 0.1f, 1, 0);
@@ -303,6 +309,7 @@ public static class BuildOperatorHUD
         rt.offsetMin = new Vector2(20, 0); rt.offsetMax = new Vector2(-20, 0);
         var d = rt.gameObject.AddComponent<TMP_Dropdown>();
         d.targetGraphic = rt.GetComponent<Image>();
+        rt.gameObject.AddComponent<MicDropdownRefresh>();
 
         var lbl = Label(rt, "Label", "", 16, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 10);
         d.captionText = lbl;

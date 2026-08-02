@@ -73,11 +73,16 @@ public class RaonVoiceUI : MonoBehaviour
         SetText(messageLabel, "서버 확인 중…");
     }
 
-    void PopulateMicDropdown()
+    /// <summary>
+    /// 마이크 목록을 다시 읽는다. 한 번만 채우면 나중에 꽂은 마이크가 안 보인다 —
+    /// 목록을 펼치는 순간에 다시 부르라고 public 으로 둔다.
+    /// </summary>
+    public void PopulateMicDropdown()
     {
         if (micDropdown == null) return;
 
         var devices = new List<string>(client.MicDevices);
+        micDropdown.onValueChanged.RemoveAllListeners();   // 다시 채우면 두 번 걸린다
         micDropdown.ClearOptions();
 
         if (devices.Count == 0)

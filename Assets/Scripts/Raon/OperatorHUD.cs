@@ -141,27 +141,9 @@ public class OperatorHUD : MonoBehaviour
             s.AppendLine("  <color=#E0B36A>등록된 인물이 없습니다</color>");
             s.AppendLine("  웹에서 먼저 등록하세요");
         }
-        s.AppendLine();
-
-        s.AppendLine("<b>상태</b>");
-        string state = voice.isRecording ? "<color=#E08C7E>듣는 중</color>"
-                     : voice.isWaiting ? "<color=#E0B36A>생각하는 중</color>"
-                     : "대기";
-        s.AppendLine($"  {state}");
-        s.AppendLine($"  마이크 {Bar(voice.MicLevel)}");
-        s.AppendLine();
-
-        s.AppendLine("<b>방금 오간 말</b>");
-        s.AppendLine(string.IsNullOrEmpty(voice.lastHeard) ? "  —" : $"  체험자: {voice.lastHeard}");
-        s.AppendLine(string.IsNullOrEmpty(voice.lastAnswer) ? "  —" : $"  인물: {voice.lastAnswer}");
+        // 상태 한 줄은 위 점이, 마이크 세기는 아래 막대가, 오간 말은 기록 창이 맡는다.
+        // 같은 것을 두 번 보여주면 글이 길어져 기록 창을 밀어낸다.
         return s.ToString();
-    }
-
-    /// <summary>마이크 세기를 글자로 그린다. 옆에서 보는 사람에게는 이게 제일 빠르다.</summary>
-    static string Bar(float level)
-    {
-        int n = Mathf.Clamp(Mathf.RoundToInt(level * 40f), 0, 12);
-        return new string('|', n).PadRight(12, '·');
     }
 
     void OnDestroy()
