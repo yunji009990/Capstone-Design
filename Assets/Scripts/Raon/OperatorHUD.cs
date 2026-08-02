@@ -53,6 +53,9 @@ public class OperatorHUD : MonoBehaviour
         if (voice == null) voice = FindObjectOfType<RaonVoiceClient>();
         if (spawner == null) spawner = FindObjectOfType<PersonaSpawner>();
         if (vrCamera == null) vrCamera = Camera.main;
+        // 화면을 다시 지으면 인스펙터 연결이 끊긴다. 이름으로 다시 찾아 잇는다.
+        if (vrView == null) vrView = transform.Find("Backdrop/VRView")?.GetComponent<RawImage>();
+        if (infoText == null) infoText = transform.Find("Backdrop/StatusCard/InfoText")?.GetComponent<TMP_Text>();
 
         if (vrCamera == null)
         {
