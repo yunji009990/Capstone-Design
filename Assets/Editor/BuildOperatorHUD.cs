@@ -163,8 +163,22 @@ public static class BuildOperatorHUD
         mso.ApplyModifiedPropertiesWithoutUndo();
 
         // ② 체험 조작
-        var start = Button(root, "StartButton", "체험 시작", Accent, 0.34f, 0.55f, 0.58f, 0.72f);
-        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.34f, 0.33f, 0.58f, 0.50f);
+        var start = Button(root, "StartButton", "체험 시작", Accent, 0.34f, 0.62f, 0.58f, 0.79f);
+        var reset = Button(root, "ResetButton", "대화 초기화", Line, 0.34f, 0.42f, 0.58f, 0.59f);
+
+        // 체험자 말을 받아쓸지. 켜면 기록에 남고 0.5초 늦어진다.
+        var sub = Check(root, "SubtitleToggle", "체험자 말 받아쓰기", 0.34f, 0.26f, 0.58f, 0.38f);
+        var subHint = Label(root, "SubtitleHint", "", 13, Dim, TextAlignmentOptions.TopLeft,
+                            0.34f, 0.06f, 0.60f, 0.25f, 4);
+        subHint.overflowMode = TextOverflowModes.Truncate;
+
+        var subOwner = root.GetComponentInParent<OperatorHUD>().gameObject;
+        var subCtl = subOwner.GetComponent<SubtitleToggle>() ?? subOwner.AddComponent<SubtitleToggle>();
+        var sso = new SerializedObject(subCtl);
+        sso.FindProperty("voice").objectReferenceValue = voice;
+        sso.FindProperty("toggle").objectReferenceValue = sub;
+        sso.FindProperty("hint").objectReferenceValue = subHint;
+        sso.ApplyModifiedPropertiesWithoutUndo();
 
         // ③ 자리 옮기기 — 가운데가 처음 자리로 되돌리기다
         Label(root, "MoveLabel", "체험자 자리 옮기기", 18, Dim, TextAlignmentOptions.Left,
@@ -284,6 +298,24 @@ public static class BuildOperatorHUD
         sr.content = content; sr.viewport = vp; sr.verticalScrollbar = sb;
         sr.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
         return new Box { body = body, scroll = sr };
+    }
+
+    /// <summary>켜고 끄는 칸. 네모와 글이 한 줄로 붙어 있어야 눌러야 할 곳이 분명하다.</summary>
+    static Toggle Check(Transform parent, string name, string text,
+                        float ax, float ay, float bx, float by)
+    {
+        var rt = Panel(parent, name, new Color(0, 0, 0, 0), ax, ay, bx, by, 0);
+        var t = rt.gameObject.AddComponent<Toggle>();
+
+        var box = Panel(rt, "Box", Line, 0, 0.5f, 0, 0.5f, 0);
+        box.anchoredPosition = new Vector2(20, 0);
+        box.sizeDelta = new Vector2(20, 20);
+        var mark = Panel(box, "Mark", Accent, 0.22f, 0.22f, 0.78f, 0.78f, 0);
+
+        t.targetGraphic = box.GetComponent<Image>();
+        t.graphic = mark.GetComponent<Image>();
+        Label(rt, "Label", text, 16, Text, TextAlignmentOptions.Left, 0, 0, 1, 1, 40);
+        return t;
     }
 
     struct Btn { public Button button; public TMP_Text label; }
