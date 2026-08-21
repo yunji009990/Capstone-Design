@@ -47,11 +47,11 @@ for _s in (sys.stdout, sys.stderr):
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "workspace")
 
-# 화자 분리 엔진 — voice_clone_studio 의 것을 재사용한다.
-STUDIO = os.environ.get(
-    "VCS_DIR", r"C:\Users\user\Desktop\capstone\voice_clone_studio")
-EXTRACT_DIR = os.path.join(STUDIO, "engine", "extraction")
-EXTRACT_RUNNER = os.path.join(STUDIO, "backend", "runners", "extract_runner.py")
+# 화자 분리 엔진 — 저장소 안에 있다. 예전에는 바탕화면의 voice_clone_studio 를
+# VCS_DIR 로 가리켰는데, 그 PC 에서만 돌아서 코드를 들여왔다. 무거운 nemo_env 만
+# 저장소 밖이며, 만드는 법은 extraction/README.md 에 있다.
+EXTRACT_DIR = os.path.join(HERE, "extraction")
+EXTRACT_RUNNER = os.path.join(EXTRACT_DIR, "extract_runner.py")
 
 RAON_URL = os.environ.get("RAON_URL", "http://220.69.208.201:8000")
 RAON_TOKEN = os.environ.get("RAON_TOKEN", "23605a891e448b5aa46f82c8640b554c")

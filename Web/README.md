@@ -48,15 +48,13 @@ cd Web && python -m uvicorn app:app --port 8500
 
 ## 화자 분리는 새로 만들지 않았다
 
-`Desktop/capstone/voice_clone_studio` 의 **NeMo MSDD 엔진을 그대로 호출**한다.
-가정용 영상은 여러 사람이 섞여 있어서 단순히 "소리 큰 구간"을 자르면 참조 음성이
-망가진다. 그쪽이 이미 해결해둔 문제라 재사용하는 게 맞다.
+`voice_clone_studio` 의 **NeMo MSDD 엔진을 그대로 가져왔다.** 가정용 영상은 여러
+사람이 섞여 있어서 단순히 "소리 큰 구간"을 자르면 참조 음성이 망가진다. 그쪽이 이미
+해결해둔 문제라 재사용하는 게 맞다.
 
-경로는 환경변수로 바꿀 수 있다.
-
-```bash
-set VCS_DIR=C:\...\voice_clone_studio
-```
+코드는 **`extraction/` 에 저장소 안으로 들어와 있다.** 예전에는 바탕화면 경로를
+`VCS_DIR` 로 가리켰는데 그 PC 에서만 돌았다. 무거운 `nemo_env`(1.8GB)만 저장소 밖이며,
+만드는 법은 [`extraction/README.md`](extraction/README.md) 에 있다.
 
 **CPU 전용이다.** 이 PC 의 torch 는 `2.13.0+cpu`. **실측 63~99초**(3~10MB, 6분 24초
 오디오가 66초로 길이의 1/6쯤). 추출은 백그라운드 작업 + 폴링 구조라 설문을 채우는
@@ -96,7 +94,7 @@ set VCS_DIR=C:\...\voice_clone_studio
 |---|---|
 | `RAON_URL` | `http://220.69.208.201:8000` |
 | `RAON_TOKEN` | 서버 `start.sh` 의 값과 같아야 함 |
-| `VCS_DIR` | `C:\Users\user\Desktop\capstone\voice_clone_studio` |
+| `NEMO_PY` | 비우면 `extraction/nemo_env/Scripts/python.exe` |
 
 `workspace/` 는 업로드·추출 결과가 쌓이는 곳이라 버전 관리하지 않는다. 비워도 된다.
 
@@ -107,7 +105,7 @@ SURVEY_ACCESS_CODE   비우면 접근 코드 게이트 없음 (교내망 전용�
 ADMIN_PASSWORD       관리자 페이지 비밀번호 (기본 dasibom-admin — 공개 전 반드시 바꿀 것)
 TRIPO_API_KEY        3D 모델 생성. 없으면 stub 으로 건너뛴다 (대화는 정상)
 RAON_URL / RAON_TOKEN   Raon 서버
-VCS_DIR              화자 분리 엔진(voice_clone_studio) 경로
+NEMO_PY              nemo_env 의 python.exe. 비우면 extraction/nemo_env 를 쓴다
 ```
 
 ## 화면
