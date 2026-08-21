@@ -47,6 +47,34 @@ for _s in (sys.stdout, sys.stderr):
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "workspace")
 
+
+def _load_env():
+    """`Web/.env` 를 읽어 환경변수로 올린다.
+
+    API 키를 저장소에 넣지 않으면서 PC 마다 다르게 두려면 파일이 하나 필요하다.
+    시스템 환경변수는 등록이 번거롭고, Unity 에서 띄울 때는 에디터를 재시작해야
+    반영된다. 이 파일은 `.gitignore` 로 빠지고 `.env.example` 이 서식을 보여준다.
+
+    **이미 설정된 환경변수는 덮지 않는다.** 한 번만 다른 값으로 띄워보고 싶을 때
+    터미널에서 `set` 한 것이 파일에 먹히면 곤란하다.
+    """
+    path = os.path.join(HERE, ".env")
+    if not os.path.exists(path):
+        return
+    n = 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            n += 1
+    print(f"[설정] .env 에서 {n}개 읽음", flush=True)
+
+
+_load_env()
+
 # 화자 분리 엔진 — 저장소 안에 있다. 예전에는 바탕화면의 voice_clone_studio 를
 # VCS_DIR 로 가리켰는데, 그 PC 에서만 돌아서 코드를 들여왔다. 무거운 nemo_env 만
 # 저장소 밖이며, 만드는 법은 extraction/README.md 에 있다.
@@ -681,7 +709,10 @@ def mode(cont: str = Form(...)):
 
 @app.get("/status")
 def status():
-    out = {"url": RAON_URL, "engine": os.path.exists(EXTRACT_RUNNER)}
+    # 키 자체는 절대 내보내지 않는다. 있는지 없는지만 알면 "3D 모델이 왜 안 뜨지"에
+    # 답할 수 있고, 그 이상은 화면에 띄울 이유가 없다.
+    out = {"url": RAON_URL, "engine": os.path.exists(EXTRACT_RUNNER),
+           "tripo": bool(os.environ.get("TRIPO_API_KEY"))}
     try:
         out["health"] = httpx.get(f"{RAON_URL}/health", timeout=10).json()
         out["current"] = httpx.get(f"{RAON_URL}/session/current",

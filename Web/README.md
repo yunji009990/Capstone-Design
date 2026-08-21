@@ -98,15 +98,29 @@ cd Web && python -m uvicorn app:app --port 8500
 
 `workspace/` 는 업로드·추출 결과가 쌓이는 곳이라 버전 관리하지 않는다. 비워도 된다.
 
-## 환경변수
+## 환경변수 — `.env` 에 넣는다
+
+키를 저장소에 넣지 않으면서 PC 마다 다르게 두려고 `Web/.env` 를 읽는다. 이 파일은
+`.gitignore` 로 빠지고, `.env.example` 이 서식을 보여준다.
+
+```bash
+cd Web
+copy .env.example .env      # 그리고 값을 채운다
+```
+
+서버가 뜰 때 한 번 읽으므로 **고친 뒤에는 껐다 켜야 한다.** 이미 설정된 환경변수가
+있으면 그쪽이 이긴다 — 한 번만 다른 값으로 띄워보고 싶을 때를 위해서다.
 
 ```
-SURVEY_ACCESS_CODE   비우면 접근 코드 게이트 없음 (교내망 전용일 때)
-ADMIN_PASSWORD       관리자 페이지 비밀번호 (기본 dasibom-admin — 공개 전 반드시 바꿀 것)
 TRIPO_API_KEY        3D 모델 생성. 없으면 stub 으로 건너뛴다 (대화는 정상)
+ADMIN_PASSWORD       관리자 페이지 비밀번호 (기본 dasibom-admin — 공개 전 반드시 바꿀 것)
+SURVEY_ACCESS_CODE   비우면 접근 코드 게이트 없음 (교내망 전용일 때)
 RAON_URL / RAON_TOKEN   Raon 서버
 NEMO_PY              nemo_env 의 python.exe. 비우면 extraction/nemo_env 를 쓴다
 ```
+
+키가 잡혔는지는 `GET /status` 의 `tripo` 로 확인한다(값은 안 내보낸다). Unity 의
+**Tools > 서버 연결 상태 확인** 창에도 같은 것이 나온다.
 
 ## 화면
 
