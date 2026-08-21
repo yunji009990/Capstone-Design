@@ -8,6 +8,7 @@
 """
 import io
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -43,6 +44,35 @@ for _s in (sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8")
     except Exception:                      # 파이프가 아닌 것으로 바꿔치기된 경우
         pass
+
+# 되풀이되는 폴링 로그가 나머지를 덮는다. 웹 화면과 Unity 창이 저마다 5초마다
+# /status 를 두드리고, 서버는 그때마다 Raon 에 health·current 두 번을 물어본다.
+# 창이 셋이면 분당 100줄이 넘어서 [모델]·[설문저장 실패] 같은 것이 위로 밀려 사라진다.
+#
+# 끄는 게 아니라 **잘 돌아간 폴링만** 가린다. 200 이 아니면 그대로 올라오므로
+# 서버가 죽거나 경로가 틀린 것은 여전히 보인다.
+POLLING = ("/status", "/extract/")
+
+
+class _HidePolling(logging.Filter):
+    """uvicorn 접근 로그에서 성공한 폴링 요청을 지운다.
+
+    uvicorn 은 record.args 에 (주소, 메서드, 경로, HTTP버전, 상태코드) 를 넣는다.
+    모양이 다르면 판단하지 않고 통과시킨다 — 가리려다 놓치는 쪽이 더 나쁘다.
+    """
+
+    def filter(self, record):
+        a = getattr(record, "args", None)
+        if not isinstance(a, tuple) or len(a) < 5:
+            return True
+        path = str(a[2]).split("?")[0]
+        if not str(a[4]).startswith("2"):
+            return True
+        return not path.startswith(POLLING)
+
+
+logging.getLogger("uvicorn.access").addFilter(_HidePolling())
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "workspace")
