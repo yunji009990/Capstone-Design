@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -78,8 +79,9 @@ def _run_meshy_job(session_id: str) -> None:
 
         # 3) 결과 처리
         if result.status == "ready" and result.glb_url:
+            glb_url = _seated_or_original(client, session_id, task_id, result.glb_url)
             dest = storage.session_dir(session_id) / "model.glb"
-            client.download_glb(result.glb_url, dest)
+            client.download_glb(glb_url, dest)
             database.set_model_status(session_id, "ready", model_glb_path=str(dest.resolve()))
             log.info(f"[{session_id}] 모델 저장: {dest}")
         else:
@@ -93,6 +95,52 @@ def _run_meshy_job(session_id: str) -> None:
     finally:
         with _lock:
             _in_flight.discard(session_id)
+
+
+def _seated_or_original(client, session_id: str, model_task_id: str, fallback_url: str) -> str:
+    """앉은 자세 glb 의 URL. 어느 단계든 막히면 원본(선 자세) URL 을 돌려준다.
+
+    카페에 앉아 대화하는 장면이라 앉은 자세가 필요하다. image_to_model 에는
+    자세 파라미터가 없어서 리깅 후 프리셋을 입힌다(자세한 사정은 tripo.py).
+
+    여기서 실패해도 작업 전체를 실패로 만들지 않는다. 다리가 잘린 사진은
+    리깅이 안 되는데, 그런 참여자에게 아무것도 안 보여주는 것보다 서 있는
+    인물이라도 띄우는 편이 낫다. 앉히기는 부가 기능이지 필수가 아니다.
+
+    TRIPO_POSE 를 비우면 이 단계를 통째로 건너뛴다 — 크레딧을 아끼거나
+    문제가 생겼을 때 코드 수정 없이 예전 동작으로 돌아가기 위한 것이다.
+    """
+    pose = os.environ.get("TRIPO_POSE", "preset:sit").strip()
+    if not pose:
+        log.info(f"[{session_id}] TRIPO_POSE 비어 있음 — 자세 적용 건너뜀")
+        return fallback_url
+
+    try:
+        # 과금 0 이라 항상 먼저 묻는다. 리깅(25)을 헛되이 쓰지 않는다.
+        riggable, rig_type = client.check_riggable(model_task_id)
+        if not riggable:
+            log.warning(f"[{session_id}] 리깅 불가 — 선 자세 모델 사용")
+            return fallback_url
+
+        rig_task = client.rig_model(model_task_id, rig_type=rig_type or "biped")
+        rig_res = client.wait_until_ready(rig_task)
+        if rig_res.status != "ready":
+            log.warning(f"[{session_id}] 리깅 실패({rig_res.error}) — 선 자세 모델 사용")
+            return fallback_url
+
+        anim_task = client.retarget_animation(rig_task, pose)
+        anim_res = client.wait_until_ready(anim_task)
+        if anim_res.status != "ready" or not anim_res.glb_url:
+            log.warning(f"[{session_id}] 리타겟 실패({anim_res.error}) — 선 자세 모델 사용")
+            return fallback_url
+
+        log.info(f"[{session_id}] 자세 적용 완료: {pose}")
+        return anim_res.glb_url
+
+    except Exception as exc:
+        # 자세 때문에 모델 전체를 못 쓰게 만들지 않는다.
+        log.warning(f"[{session_id}] 자세 적용 중 예외({exc}) — 선 자세 모델 사용")
+        return fallback_url
 
 
 def retry(session_id: str) -> str:

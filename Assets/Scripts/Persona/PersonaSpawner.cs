@@ -57,6 +57,22 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("spawnPoint 의 회전을 그대로 사용할지 여부.")]
     public bool useSpawnRotation = true;
 
+    [Header("자세")]
+    // Tripo 가 리타겟해 준 glb 는 앉은 자세를 애니메이션으로 들고 온다. 바인드
+    // 포즈는 서 있는 자세라, 클립을 적용하지 않으면 카페 의자 위에 선 채로 뜬다.
+    // glTFast 는 Animation 컴포넌트를 붙이고 clip 까지 넣어주지만 재생은 하지 않는다.
+    [Tooltip("모델에 애니메이션이 있으면 적용한다. 끄면 바인드 포즈(선 자세) 그대로.")]
+    public bool applyPoseAnimation = true;
+
+    [Tooltip("한 프레임만 적용하고 정지. 앉은 자세로 굳는다. 끄면 루프 재생.")]
+    public bool freezePose = true;
+
+    // preset:sit 은 7.2초 루프인데 시작 지점은 자세가 덜 자리잡아 있다. 실측으로
+    // t=0 의 허벅지가 128°, 중간이 104° 로 24° 차이가 났다. 굳힐 프레임을 고를 수
+    // 있어야 의자에 맞는 자세를 잡는다.
+    [Tooltip("굳힐 시점(초). 0 이면 클립 시작. 자세가 어색하면 조금 올려 본다.")]
+    public float freezeTimeSec = 0f;
+
     [Header("대기")]
     [Tooltip("모델이 아직 없을 때 다시 물어보는 간격(초). 생성에 몇 분 걸린다.")]
     public float retryIntervalSec = 3f;
@@ -222,6 +238,10 @@ public class PersonaSpawner : MonoBehaviour
             return;
         }
 
+        if (applyPoseAnimation) ApplyPose(_spawnedInstance);
+
+        // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
+        // 달라서, 순서가 뒤바뀌면 앉은 인물을 선 키에 맞춰 키워버린다.
         if (targetHeightMeters > 0f) NormalizeHeight(_spawnedInstance, targetHeightMeters);
         if (scaleMultiplier > 0f && Mathf.Abs(scaleMultiplier - 1f) > 0.0001f)
             _spawnedInstance.transform.localScale *= scaleMultiplier;
@@ -237,6 +257,40 @@ public class PersonaSpawner : MonoBehaviour
     {
         public string session;
         public bool has_model;
+    }
+
+    /// <summary>
+    /// glb 에 실려 온 자세 애니메이션(Tripo 의 preset:sit 등)을 적용한다.
+    /// glTFast 는 legacy 클립을 Animation 컴포넌트에 넣어두기만 하고 재생하지
+    /// 않아서, 이걸 부르지 않으면 바인드 포즈 그대로 서 있는다.
+    /// </summary>
+    void ApplyPose(GameObject root)
+    {
+        var anim = root.GetComponentInChildren<Animation>();
+        if (anim == null || anim.clip == null)
+        {
+            if (verboseLog) Debug.Log("[PersonaSpawner] 자세 애니메이션 없음 — 원본 포즈 사용");
+            return;
+        }
+
+        if (freezePose)
+        {
+            // 재생하지 않고 한 프레임만 찍어 굳힌다. 대화 중 인물이 움직일
+            // 필요가 없고, 정지 쪽이 프레임도 아낀다.
+            float t = Mathf.Clamp(freezeTimeSec, 0f, anim.clip.length);
+            anim.clip.SampleAnimation(anim.gameObject, t);
+            anim.enabled = false;   // 이후 아무도 포즈를 덮어쓰지 못하게 한다
+            if (verboseLog)
+                Debug.Log($"[PersonaSpawner] 자세 고정: {anim.clip.name} @ {t:0.00}s " +
+                          $"(클립 {anim.clip.length:0.00}s)");
+        }
+        else
+        {
+            anim.wrapMode = WrapMode.Loop;
+            anim.Play();
+            if (verboseLog)
+                Debug.Log($"[PersonaSpawner] 자세 재생: {anim.clip.name} 루프");
+        }
     }
 
     static void NormalizeHeight(GameObject root, float targetHeight)
