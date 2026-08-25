@@ -73,8 +73,46 @@ BASE_RULES = """당신은 아래 [인물]에 적힌 사람입니다. 그 사람�
 def _sess_path(sid, *parts):
     return os.path.join(SESS_DIR, sid, *parts)
 
-def _sess_system(sid):
-    """공통 규칙 + 인물 설명 + 사전지식. 웹은 인물만 보내면 된다.
+EX_HEAD = "[대화 예시]"
+EX_NOTE = "[예시 사용법]"
+
+def _split_examples(persona):
+    """[대화 예시] 블록을 페르소나에서 떼어 진짜 대화 턴으로 만든다.
+
+    시스템 프롬프트 안의 글로 두면 모델이 '설명'으로 읽고, user/assistant 턴으로
+    두면 '내가 이렇게 말했다'로 읽는다. 예시가 하는 일은 말투 유지가 아니라 어투
+    유지이고(docs/페르소나_작성규격.md) 빼면 설교조가 네 배로 는다 — 더 강하게
+    따르게 할 값어치가 있다.
+
+    형식은 Web/persona.py 가 만드는 것을 따른다 — "사용자:" 다음 줄이 답이다.
+    답하는 쪽 이름은 관계어(엄마·형·친구…)이고 설문 자유 입력이라, 이름으로
+    찾지 않고 차례로만 짝짓는다.
+
+    블록이 없거나 형식이 어긋나면 원본을 그대로 돌려준다. 파싱 실패로 예시가
+    통째로 사라지느니 예전처럼 글로라도 두는 게 낫다."""
+    lines = persona.splitlines()
+    head = next((n for n, l in enumerate(lines) if l.strip() == EX_HEAD), -1)
+    if head < 0:
+        return persona, []
+    turns, body, n = [], lines[head + 1:], 0
+    while n + 1 < len(body):
+        u, a = body[n].strip(), body[n + 1].strip()
+        if not u.startswith("사용자:") or ":" not in a:
+            break
+        turns += [{"role": "user", "content": u.split(":", 1)[1].strip()},
+                  {"role": "assistant", "content": a.split(":", 1)[1].strip()}]
+        n += 2
+    if not turns:
+        return persona, []
+    # "아래는 말투의 본보기입니다" 가 가리킬 아래가 없어졌다.
+    rest = [f"{EX_NOTE} 앞서 나눈 대화는 말투의 본보기입니다. "
+            "상황에 맞는 문장을 새로 만들어 말합니다."
+            if l.startswith(EX_NOTE) else l
+            for l in lines[:head] + body[n:]]
+    return "\n".join(rest).strip(), turns
+
+def _sess_build(sid):
+    """공통 규칙 + 인물 설명 + 사전지식, 그리고 대화 예시 턴. 웹은 인물만 보내면 된다.
 
     규칙은 등록할 때 rules 로 덮어쓸 수 있다. 기본값을 서버가 갖고 있는 이유는
     위와 같지만, 이 규칙 자체가 답변 품질을 좌우해서 재배포 없이 바꿔가며 재볼 수
@@ -91,11 +129,12 @@ def _sess_system(sid):
     if os.path.exists(k):
         knowledge = open(k, encoding="utf-8").read().strip()
     if not persona:
-        return ""
+        return {"system": "", "examples": []}
+    persona, examples = _split_examples(persona)
     out = f"{rules}\n\n[인물]\n{persona}"
     if knowledge:
         out += f"\n\n[사전지식]\n{knowledge}"
-    return out
+    return {"system": out, "examples": examples}
 
 def load_sessions():
     """재시작해도 등록된 세션이 살아 있도록 디스크에서 복원한다."""
@@ -104,7 +143,7 @@ def load_sessions():
     for sid in sorted(os.listdir(SESS_DIR)):
         v = _sess_path(sid, "voice.wav")
         if os.path.exists(v):
-            SESS[sid] = {"voice": v, "system": _sess_system(sid)}
+            SESS[sid] = {"voice": v, **_sess_build(sid)}
             CURRENT["session"] = sid
     if SESS:
         print(f"[세션] {len(SESS)}개 복원, 현재={CURRENT['session']}", flush=True)
@@ -122,6 +161,9 @@ def sess_voice(sid):
 
 def sess_system(sid):
     return need_session(sid)["system"]
+
+def sess_examples(sid):
+    return need_session(sid).get("examples") or []
 
 def _save_atomic(data, path):
     """임시 파일에 쓴 뒤 rename. 합성 중 반쪽 파일을 읽는 사고를 막는다."""
@@ -345,15 +387,21 @@ def clean_summary(s):
     return "\n".join(l.strip() for l in s.splitlines() if l.strip())[:SUMM_MAX]
 
 def build_msgs(session, user_content):
-    """시스템(+요약) + 최근 원문 + 이번 발화.
+    """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
 
     요약을 시스템 프롬프트 안에 넣는 이유는, 대화가 길어져도 밀려나지 않게 하려는 것이다.
     별도 메시지로 앞에 두면 원문 턴들에 파묻혀 말투 규칙과 함께 무시된다.
-    세 경로(/chat·/talk·/talk_stream)가 같은 것을 보도록 한 곳에 둔다."""
+    세 경로(/chat·/talk·/talk_stream)가 같은 것을 보도록 한 곳에 둔다.
+
+    대화 예시는 시스템 프롬프트 안의 글이 아니라 요약 뒤·실제 대화 앞의 턴으로
+    넣는다. 글로 두면 설명으로 읽고, 턴으로 두면 제가 한 말로 읽는다."""
     sysmsg = sess_system(session)
     if SUMM_TEXT.get(session):
         sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
-    return [{"role": "system", "content": sysmsg}] + list(HIST.get(session, [])) + [user_content]
+    return ([{"role": "system", "content": sysmsg}]
+            + sess_examples(session)
+            + list(HIST.get(session, []))
+            + [user_content])
 
 def _tail(text):
     ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
@@ -628,7 +676,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     if has_model:
         _save_atomic(await model.read(), _sess_path(sid, "model.glb"))
 
-    SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), "system": _sess_system(sid)}
+    SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), **_sess_build(sid)}
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
     SUMM_TEXT.pop(sid, None)
