@@ -385,15 +385,25 @@ SUMM_PROMPT = """===== 대화 시작 =====
 날짜나 장소를 적을 때는 그때 무슨 일이 있는지를 함께 적는다.
 한 줄에 한 가지씩 평서문으로 적는다. 글자와 쉼표, 마침표만 쓴다.
 
-다른 대화는 이렇게 적었다.
+다른 대화는 이렇게 적었다. 꼴만 보고 내용은 가져오지 마라.
 상대가 다음 주 목요일에 이사를 간다.
 상대의 동생 이름은 지우이고 올해 스물이다.
 상대가 새로 산 차는 흰색이다.
 
-낱말만 옮기지 말고 위처럼 무슨 일인지가 드러나게 적어라."""
+낱말만 옮기지 말고 위처럼 무슨 일인지가 드러나게 적어라.
+대화에 나오지 않은 것은 한 줄도 적지 마라."""
 
 # 요약에 섞여 나오는 지시문 뼈대. 프롬프트를 고쳐도 완전히는 안 막힌다.
 SUMM_JUNK = re.compile(r"^\s*(지키는 것|남길 것|간추린 내용|세 줄|요약|대화|사실)\s*:?\s*$", re.M)
+
+# 본보기를 그대로 베껴 오는 일이 있다. 실제로 "상대가 새로 산 차는 흰색이다"가 요약에
+# 두 번 들어갔고, 고양이 색을 묻자 "흰색이야. 새 차 색깔이랑 똑같지."라고 답했다.
+# 지시로는 줄일 수 있어도 없앨 수 없으니 코드로 막는다. 몇 줄을 걷어냈는지 세어 두면
+# 지시가 먹히는지도 같이 보인다 — 자주 걷어내면 본보기를 다시 써야 한다는 뜻이다.
+SUMM_EXAMPLE = {re.sub(r"\s+", "", l) for l in
+                ("상대가 다음 주 목요일에 이사를 간다.",
+                 "상대의 동생 이름은 지우이고 올해 스물이다.",
+                 "상대가 새로 산 차는 흰색이다.")}
 
 def clean_summary(s):
     """요약은 시스템 프롬프트로 되돌아간다. 목록기호나 굵은 글씨가 섞이면 그 서식이
@@ -401,7 +411,17 @@ def clean_summary(s):
     s = re.sub(r"[*#`_=]", "", s)
     s = re.sub(r"^\s*[-•·]\s*", "", s, flags=re.M)
     s = SUMM_JUNK.sub("", s)
-    return "\n".join(l.strip() for l in s.splitlines() if l.strip())[:SUMM_MAX]
+    out, copied = [], 0
+    for l in (x.strip() for x in s.splitlines()):
+        if not l:
+            continue
+        if re.sub(r"\s+", "", l) in SUMM_EXAMPLE:
+            copied += 1
+            continue
+        out.append(l)
+    if copied:
+        print(f"[요약] 본보기를 베낀 {copied}줄 걷어냄", flush=True)
+    return "\n".join(out)[:SUMM_MAX]
 
 def build_msgs(session, user_content):
     """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
