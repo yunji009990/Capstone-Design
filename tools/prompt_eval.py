@@ -155,8 +155,11 @@ def run_once(name, exs, rep):
     for i, (say, want) in enumerate(SCRIPT, 1):
         r = post("/chat", data={"text": say, "session": SID}).json()
         ans = r["answer"]
+        # 요약을 턴마다 남긴다. 되묻기를 틀렸을 때 "그 사실이 눈앞에 있었나"를
+        # 나중에 따져보려면 이게 있어야 한다 — 있는데 안 쓴 것과 요약이 버린 것은
+        # 처방이 전혀 다르다.
         row = {"변형": name, "회차": rep, "턴": i, "질문": say, "답변": ans,
-               "초": r["elapsed"], "남은턴": r["turns"]}
+               "초": r["elapsed"], "남은턴": r["turns"], "요약": r["summary"]}
         row.update(score(ans, prev_a, prev_q, prev_t, exs, want))
         rows.append(row)
         mark = "" if row["기억"] is None else ("  기억 O" if row["기억"] else "  기억 X")
