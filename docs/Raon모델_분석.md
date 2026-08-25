@@ -416,6 +416,19 @@ sampled_ids = apply_repetition_aware_sampling(..., logits=logits, ...)
 15개 그룹과 어긋난다. 고치려면 `logits=processed_logits` 한 단어. 다만 RAS 를 꺼도
 지지직은 그대로였으므로 **이건 지지직과 별개의 개선 항목**이다.
 
+**자리는 `modeling_raon.py:6258`.** 바로 위 6252 가 `F.softmax(processed_logits, ...)` 로
+필터 거친 것을 쓰는데 RAS 만 원본을 받는다.
+
+```python
+6255            if ras_enabled and audio_codes.shape[1] > 0:
+6256                sampled_ids = apply_repetition_aware_sampling(
+6257                    sampled_ids=sampled_ids,
+6258                    logits=logits,          # ← processed_logits
+```
+
+`Server/modeling_raon.patch` 에 훅으로 넣어 뒀다. 모델을 다시 받으면 스트리밍 훅과
+함께 이것도 다시 발라야 한다.
+
 ### 6.6 "늘어진다"의 절반은 반복이 아니라 무음이다 (2026-08-01)
 
 깨끗한 참조(`good`)로 `/talk` 5회를 재고 사용자 청취와 대조한 결과.
