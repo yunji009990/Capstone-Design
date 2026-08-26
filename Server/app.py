@@ -13,12 +13,22 @@ MODEL = os.path.join(BASE, "models", "AX-K2-Raon-Speech")
 SRV   = os.path.join(BASE, "server")
 MEMFR = float(os.environ.get("RAON_MEM_FRACTION", "0.60"))
 TOKENS= int(os.environ.get("RAON_ANSWER_TOKENS", "200"))
-TURNS = int(os.environ.get("RAON_MAX_TURNS", "6"))
-# 대화가 길어지면 앞쪽을 요약으로 접는다(RAON_KEEP_TURNS 턴만 원문으로 남긴다).
-# 원문 6턴을 그대로 넘기면 뒤로 갈수록 시스템 프롬프트가 대화에 묻혀 말투 규칙이 풀리고,
-# 이미 한 질문을 또 한다. 요약은 시스템 프롬프트 안에 붙어 절대 밀려나지 않는다.
+TURNS = int(os.environ.get("RAON_MAX_TURNS", "30"))
+# 요약은 껐다(2026-08-26). 원래는 6턴마다 앞쪽을 접고 3턴만 원문으로 남겼는데,
+# 재보니 접는 것이 순전히 손해였다. final 8회차로 나란히 잰 결과다.
+#
+#            기억     길이초과  꼬리고착  응답 평균  3초 넘김
+#   요약 켬   58/64    27/160      5      1.06초    5/160
+#   요약 끔   62/64    20/160      0      0.70초    0/160
+#
+# 접는 이유로 적혀 있던 "뒤로 갈수록 말투 규칙이 풀리고 이미 한 질문을 또 한다"는
+# 재현되지 않았다 — 존댓말·상담원 0 그대로고 질문반복은 0.17 → 0.15 였다.
+# 요약이 사실을 버리는 문제로 하루에 여섯 번을 고쳤는데, 없애는 것이 답이었다.
+#
+# **한계** — 30턴을 넘기면 앞쪽을 요약 없이 그냥 버린다. 체험이 그보다 길어지면
+# 다시 볼 것. 원문이 길어질수록 프리필도 늘어난다. 되돌리려면 RAON_SUMMARY=1.
 KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
-SUMM  = os.environ.get("RAON_SUMMARY", "1") == "1"
+SUMM  = os.environ.get("RAON_SUMMARY", "0") == "1"
 # 앞선 답변과 마지막 문장이 이만큼 닮으면 다시 뽑는다. 0 이면 끈다.
 REGEN = float(os.environ.get("RAON_REGEN_SIM", "0.6"))
 # 요약이 이보다 길어질 때만 통째로 다시 접는다. 매번 다시 접으면 사실이 깎인다.
