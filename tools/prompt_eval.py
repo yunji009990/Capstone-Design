@@ -205,7 +205,8 @@ def summarize(rows):
         d["기억"] = f"{sum(r['기억'] for r in mem)}/{len(mem)}"
         # 뒤로 갈수록 규칙이 풀리는지 본다. 앞 절반과 뒤 절반을 가른다.
         half = len(SCRIPT) // 2
-        for lbl, sel in [("앞10턴", lambda r: r["턴"] <= half), ("뒤10턴", lambda r: r["턴"] > half)]:
+        for lbl, sel in [(f"앞{half}턴", lambda r: r["턴"] <= half),
+                         (f"뒤{half}턴", lambda r: r["턴"] > half)]:
             part = [r for r in rs if sel(r)]
             d[lbl + "위반"] = sum(1 for r in part for k in VIOLATIONS if r[k])
             d[lbl + "글자"] = round(statistics.mean(r["글자수"] for r in part), 1)
@@ -215,7 +216,7 @@ def summarize(rows):
 def table(summary):
     cols = ["턴", "글자수", "문장수", "되묻기", "호명", "격려", "기억",
             "예시베낌", "답변반복", "질문반복"] \
-           + VIOLATIONS + ["앞10턴위반", "뒤10턴위반", "앞10턴글자", "뒤10턴글자"]
+           + VIOLATIONS + [c for c in summary[next(iter(summary))] if c.startswith(("앞", "뒤"))]
     w = max(max(len(n) for n in summary) + 2, 10)
     print("\n" + "항목".ljust(12) + "".join(n.rjust(w) for n in summary))
     for c in cols:
@@ -227,7 +228,15 @@ def main():
     ap.add_argument("variants", nargs="*")
     ap.add_argument("-n", "--reps", type=int, default=1)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--long", action="store_true",
+                    help="100턴 대본으로 돌린다(tools/script_long.py). "
+                         "20·50·95턴에서 같은 것을 되물어 거리별로 본다")
     a = ap.parse_args()
+
+    if a.long:
+        global SCRIPT
+        from script_long import SCRIPT as LONG
+        SCRIPT = LONG
 
     if a.list or not a.variants:
         for p in sorted(PROMPT.glob("*.persona.md")):
