@@ -397,6 +397,12 @@ SUMM_JUNK = re.compile(r"^\s*(지키는 것|남길 것|간추린 내용|세 줄|
 # 대화에 무엇이 없었다는 말은 뒤에 이어 말하는 데 아무 쓸모가 없다.
 SUMM_EMPTY = re.compile(r"(언급되지 않|언급이 없|나오지 않|알 수 없|확인되지 않|명시되지 않)")
 
+# 요약에 원문 대화가 그대로 실려 오는 일이 있다. 넘겨주는 기록이 "상대: …" / "나: …"
+# 꼴이라 모델이 그 꼴째로 베낀다. 열거를 걷어낸 뒤 160턴 중 112턴에서 나왔다.
+# 요약이 아니라 복사본이라 길이만 차지하고, 그만큼 사전지식이 뒤로 밀린다 —
+# 실제로 사전지식 되묻기가 7/8 → 5/8, 8/8 → 6/8 로 내려갔다.
+SUMM_RAW = re.compile(r"^(상대|나)\s*:")
+
 def clean_summary(s):
     """요약은 시스템 프롬프트로 되돌아간다. 목록기호나 굵은 글씨가 섞이면 그 서식이
     답변에 옮아붙고 그대로 음성으로 읽힌다. 소제목이 남으면 이름으로 오해된다."""
@@ -407,12 +413,12 @@ def clean_summary(s):
     for l in (x.strip() for x in s.splitlines()):
         if not l:
             continue
-        if SUMM_EMPTY.search(l):
+        if SUMM_EMPTY.search(l) or SUMM_RAW.match(l):
             copied += 1
             continue
         out.append(l)
     if copied:
-        print(f"[요약] 없다고 적은 {copied}줄 걷어냄", flush=True)
+        print(f"[요약] 쓸모없는 {copied}줄 걷어냄", flush=True)
     return "\n".join(out)[:SUMM_MAX]
 
 def build_msgs(session, user_content):
