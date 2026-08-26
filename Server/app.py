@@ -448,12 +448,27 @@ def _tail(text):
 CHEER = re.compile(r"잘할 (거|수)|잘 할 (거|수)|잘 될 거|넌 충분|충분히 잘|넌 항상|"
                    r"너 원래|원래 잘|힘내|응원할게|괜찮아질|자신감을 가지|넌 잘")
 
+def _drop_cheer_tail(a):
+    """마지막 문장이 격려면 뗀다. 앞 문장이 남고 격려가 거기만 있을 때만.
+
+    다시 뽑는 쪽은 값이 안 맞았다 — 두 번 뽑아도 또 격려면 그대로 내보내게 되어
+    38건 중 27%만 잡히는데, 3초 넘는 응답이 5/160 에서 11/160 으로 늘었다.
+
+    실측에서 격려 38건 중 30건이 마지막 문장에만 있다. 그 문장은 덧붙인 맺음말이라
+    떼도 사실이 안 사라진다 — "화요일이라고 했지. 긴장되겠지만 잘할 거야."에서
+    화요일은 남는다. 덤으로 길이초과도 같이 준다. 문장이 그것 하나뿐이면 두지 않고,
+    앞에도 격려가 있으면 떼지 않는다 — "너 잘할 수 있어. 나도 그렇게 생각해."에서
+    앞을 떼면 뒤가 뜬금없어진다."""
+    ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (a or "").strip()) if s.strip()]
+    if len(ss) < 2 or not CHEER.search(ss[-1]):
+        return a
+    if any(CHEER.search(s) for s in ss[:-1]):
+        return a
+    return " ".join(ss[:-1])
+
+
 def _reject(a, prev):
     """다시 뽑아야 할 이유. 없으면 빈 문자열."""
-    if NOCHEER:
-        m = CHEER.search(a)
-        if m:
-            return f"격려 클리셰({m.group(0)})"
     if REGEN and prev:
         t = _tail(a)
         if len(t) >= 8 and max((_sim(t, p) for p in prev), default=0.0) >= REGEN:
@@ -474,6 +489,7 @@ def answer_for(session, msgs, tries=2):
     a = ""
     for i in range(tries):
         a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7 + 0.3 * i)
+        a = _drop_cheer_tail(a) if NOCHEER else a
         why = _reject(a, prev)
         if not why:
             return a
