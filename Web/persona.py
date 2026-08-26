@@ -87,6 +87,27 @@ def _clean(items) -> list[str]:
     return [s.strip() for s in (items or []) if s and s.strip()]
 
 
+def _greet_with_quirk(greet: str, quirks: list) -> str:
+    """첫 인사 예시 앞에 말버릇을 붙인다.
+
+    예시는 그대로 복사돼 나온다 — 1턴 답변 127개 중 서로 다른 것이 16가지뿐이고
+    둘이 68%를 먹었다(2026-08-26 실측). 그러니 **복사돼도 되는 문장**, 곧 그 사람이
+    실제로 하던 말을 넣는 편이 낫다. 모두가 같은 첫 인사를 듣는 것보다 낫다.
+
+    짧은 추임새만 쓴다. 설문은 "아이고~" 같은 것도 "밥은 먹었니" 같은 문장도 받는데,
+    문장을 앞에 붙이면 인사와 겹쳐 어색해진다("밥은 먹었니, 왔니. 밥은 먹었고?").
+    인사에 이미 나오는 낱말이 든 것도 거른다.
+    """
+    for q in quirks:
+        q = q.strip().strip("~.!?, ")
+        if not q or len(q) > 6:
+            continue
+        if any(q[i:i + 2] in greet for i in range(len(q) - 1)):
+            continue
+        return f"{q}, {greet}"
+    return greet
+
+
 def build_persona(d: dict) -> str:
     """설문 응답 → [인물]. 서버가 [인물] 항목으로 붙인다."""
     rel   = (d.get("relation") or "그리운 사람").strip()
@@ -133,9 +154,9 @@ def build_persona(d: dict) -> str:
              "상황에 맞는 문장을 새로 만들어 말합니다.")
     L.append("")
     L.append("[대화 예시]")
-    for u, a in EXAMPLES[kind]:
+    for i, (u, a) in enumerate(EXAMPLES[kind]):
         L.append(f"사용자: {u}")
-        L.append(f"{rel}: {a}")
+        L.append(f"{rel}: {_greet_with_quirk(a, quirks) if i == 0 else a}")
     return "\n".join(L)
 
 
