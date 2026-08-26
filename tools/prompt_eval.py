@@ -228,15 +228,19 @@ def main():
     ap.add_argument("variants", nargs="*")
     ap.add_argument("-n", "--reps", type=int, default=1)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--turns", type=int, default=0,
+                    help="대본을 이 턴에서 자른다. 되묻기 지점을 쪼개지 않게 고를 것")
     ap.add_argument("--long", action="store_true",
                     help="100턴 대본으로 돌린다(tools/script_long.py). "
                          "20·50·95턴에서 같은 것을 되물어 거리별로 본다")
     a = ap.parse_args()
+    global SCRIPT
 
     if a.long:
-        global SCRIPT
         from script_long import SCRIPT as LONG
         SCRIPT = LONG
+    if a.turns:
+        SCRIPT = SCRIPT[:a.turns]
 
     if a.list or not a.variants:
         for p in sorted(PROMPT.glob("*.persona.md")):
