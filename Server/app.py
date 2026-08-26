@@ -21,7 +21,6 @@ KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
 SUMM  = os.environ.get("RAON_SUMMARY", "1") == "1"
 # 앞선 답변과 마지막 문장이 이만큼 닮으면 다시 뽑는다. 0 이면 끈다.
 REGEN = float(os.environ.get("RAON_REGEN_SIM", "0.6"))
-NOCHEER = os.environ.get("RAON_NO_CHEER", "1") == "1"
 # 요약이 이보다 길어질 때만 통째로 다시 접는다. 매번 다시 접으면 사실이 깎인다.
 SUMM_MAX = int(os.environ.get("RAON_SUMMARY_CHARS", "600"))
 FRAME_CHUNK= int(os.environ.get("RAON_FRAME_CHUNK", "8"))
@@ -437,46 +436,8 @@ def _tail(text):
     ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
     return ss[-1] if ss else ""
 
-# 상대를 평가하고 앞일을 장담하는 상담사 말투. 친구는 이렇게 말하지 않는다.
-# 프롬프트로 네 번 막아 봤다 — 금지형 규칙, 페르소나의 "판단은 상대가 물을 때만",
-# 자책을 받아주는 예시 쌍, 불안을 받아주는 예시 쌍. 넷 다 20턴당 3~4에서 안 움직였고
-# 페르소나 쪽은 오히려 늘었다. 꼬리 반복과 같은 결론이다 — 프롬프트로 안 되면 코드다.
-#
-# 계측기(tools/prompt_eval.py)보다 좁게 잡는다. 거기서 쓰는 "충분히"나 "믿어"는
-# 격려가 아닌 자리에도 흔히 쓰여서, 서버가 그걸로 답을 버리면 멀쩡한 말을 버린다.
-# 좁게 잡은 덕에 계측기가 여전히 독립적으로 잰다 — 이 표현들만 사라지면 반칙이다.
-CHEER = re.compile(r"잘할 (거|수)|잘 할 (거|수)|잘 될 거|넌 충분|충분히 잘|넌 항상|"
-                   r"너 원래|원래 잘|힘내|응원할게|괜찮아질|자신감을 가지|넌 잘")
-
-def _drop_cheer_tail(a):
-    """마지막 문장이 격려면 뗀다. 앞 문장이 남고 격려가 거기만 있을 때만.
-
-    다시 뽑는 쪽은 값이 안 맞았다 — 두 번 뽑아도 또 격려면 그대로 내보내게 되어
-    38건 중 27%만 잡히는데, 3초 넘는 응답이 5/160 에서 11/160 으로 늘었다.
-
-    실측에서 격려 38건 중 30건이 마지막 문장에만 있다. 그 문장은 덧붙인 맺음말이라
-    떼도 사실이 안 사라진다 — "화요일이라고 했지. 긴장되겠지만 잘할 거야."에서
-    화요일은 남는다. 덤으로 길이초과도 같이 준다. 문장이 그것 하나뿐이면 두지 않고,
-    앞에도 격려가 있으면 떼지 않는다 — "너 잘할 수 있어. 나도 그렇게 생각해."에서
-    앞을 떼면 뒤가 뜬금없어진다."""
-    ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (a or "").strip()) if s.strip()]
-    if len(ss) < 2 or not CHEER.search(ss[-1]):
-        return a
-    if any(CHEER.search(s) for s in ss[:-1]):
-        return a
-    return " ".join(ss[:-1])
-
-
-def _reject(a, prev):
-    """다시 뽑아야 할 이유. 없으면 빈 문자열."""
-    if REGEN and prev:
-        t = _tail(a)
-        if len(t) >= 8 and max((_sim(t, p) for p in prev), default=0.0) >= REGEN:
-            return "꼬리 반복"
-    return ""
-
 def answer_for(session, msgs, tries=2):
-    """답변을 뽑되, 걸리는 것이 있으면 온도를 올려 한 번 더 뽑는다.
+    """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
 
     실측에서 16턴부터 20턴까지 "면접 끝나면 연락해."가 다섯 턴 연속 붙었다. 모델이
     히스토리에 있는 제 답변을 베끼는 것이라, 금지형("반복하지 마세요")으로도
@@ -489,11 +450,12 @@ def answer_for(session, msgs, tries=2):
     a = ""
     for i in range(tries):
         a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7 + 0.3 * i)
-        a = _drop_cheer_tail(a) if NOCHEER else a
-        why = _reject(a, prev)
-        if not why:
+        t = _tail(a)
+        if not REGEN or not prev or len(t) < 8:
             return a
-        print(f"[{session}] {why}, 다시 뽑는다 — {a!r}", flush=True)
+        if max((_sim(t, p) for p in prev), default=0.0) < REGEN:
+            return a
+        print(f"[{session}] 꼬리 반복, 다시 뽑는다 — {t!r}", flush=True)
     return a
 
 def record(session, heard, answer):
