@@ -286,15 +286,17 @@ def register(persona, knowledge, rules):
 
 def run_once(name, exs, rep):
     post("/reset", data={"session": SID})
-    rows, prev_a, prev_q, prev_t, summary = [], [], [], [], ""
+    rows, prev_a, prev_q, prev_t, summary, learned = [], [], [], [], "", []
     for i, (say, want) in enumerate(SCRIPT, 1):
         r = post("/chat", data={"text": say, "session": SID}).json()
         ans = r["answer"]
-        # 요약을 턴마다 남긴다. 되묻기를 틀렸을 때 "그 사실이 눈앞에 있었나"를
+        # 요약과 적립을 턴마다 남긴다. 되묻기를 틀렸을 때 "그 사실이 눈앞에 있었나"를
         # 나중에 따져보려면 이게 있어야 한다 — 있는데 안 쓴 것과 요약이 버린 것은
-        # 처방이 전혀 다르다.
+        # 처방이 전혀 다르다. 적립은 **무엇이 쌓였나**보다 **없는 턴에 안 쌓였나**를
+        # 봐야 한다. 빈손으로 못 돌아오면 매 턴 지어낸다.
         row = {"변형": name, "회차": rep, "턴": i, "질문": say, "답변": ans,
-               "초": r["elapsed"], "남은턴": r["turns"], "요약": r["summary"]}
+               "초": r["elapsed"], "남은턴": r["turns"], "요약": r["summary"],
+               "적립": list(r.get("learned") or [])}
         row.update(score(ans, prev_a, prev_q, prev_t, exs, want))
         rows.append(row)
         mark = "" if row["기억"] is None else ("  기억 O" if row["기억"] else "  기억 X")
@@ -303,6 +305,10 @@ def run_once(name, exs, rep):
         if r["summary"] != summary:
             summary = r["summary"]
             print(f"      ── 요약 ──\n      " + summary.replace("\n", "\n      "))
+        if row["적립"] != learned:
+            for l in row["적립"][len(learned):]:
+                print(f"      ── 적립 ── {l}")
+            learned = row["적립"]
         prev_a.append(ans)
         prev_q += questions(ans)
         prev_t.append(tail(ans))

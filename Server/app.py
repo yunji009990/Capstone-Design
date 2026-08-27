@@ -37,6 +37,16 @@ TURNS = int(os.environ.get("RAON_MAX_TURNS", "30"))
 # 아무 데도 없으니 헤드셋 테스트 때 세어 볼 것. 되돌리려면 RAON_SUMMARY=1.
 KEEP  = int(os.environ.get("RAON_KEEP_TURNS", "3"))
 SUMM  = os.environ.get("RAON_SUMMARY", "0") == "1"
+# 대화 중에 사용자가 말한 사실을 사전지식 옆에 적립한다. 0 이면 끈다.
+#
+# 요약(SUMM)과 헷갈리지 말 것. 요약은 **접기**다 — 원문 턴을 버리고 압축본으로
+# 바꾼다. 그래서 기억이 62/64 에서 50/64 로 무너져 껐다. 적립은 **더하기**라
+# 버리는 것이 없고, 30턴을 넘겨 앞이 잘릴 때 사실만 건져 두는 쪽으로 작동한다.
+LEARN = os.environ.get("RAON_LEARN", "1") == "1"
+LEARN_MAX = int(os.environ.get("RAON_LEARN_CHARS", "600"))
+# 이보다 짧은 발화는 모델에 안 물어본다. "응", "그러게", "보고 싶었어" 에서 건질
+# 것은 없는데 호출값은 똑같이 든다. 짧은 사실을 놓치는 쪽이 안전한 실패다.
+LEARN_MIN = int(os.environ.get("RAON_LEARN_MIN", "8"))
 # 앞선 답변과 마지막 문장이 이만큼 닮으면 다시 뽑는다. 0 이면 끈다.
 REGEN = float(os.environ.get("RAON_REGEN_SIM", "0.6"))
 # 요약이 이보다 길어질 때만 통째로 다시 접는다. 매번 다시 접으면 사실이 깎인다.
@@ -61,6 +71,7 @@ TOKEN = os.environ.get("RAON_TOKEN", "")
 S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
 HIST, LOCK = {}, asyncio.Lock()
 SUMM_TEXT = {}                  # session -> 접어둔 앞부분의 요약
+KNOWN = {}                      # session -> 대화 중에 사용자에게 들은 사실 (줄 목록)
 
 # ── 세션 ────────────────────────────────────────────────────────────
 # 인물은 반드시 웹에서 등록한다. 서버에 기본 음성·기본 인물을 두지 않는다.
@@ -359,6 +370,7 @@ async def set_mode(cont: str = Form(...), x_token: str = Header("")):
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
     auth(x_token); HIST.pop(session, None); SUMM_TEXT.pop(session, None)
+    KNOWN.pop(session, None)
     return {"ok": True}
 
 @app.post("/tts")
@@ -415,7 +427,7 @@ SUMM_JUNK = re.compile(r"^\s*(지키는 것|남길 것|간추린 내용|세 줄|
 # 대화에 무엇이 없었다는 말은 뒤에 이어 말하는 데 아무 쓸모가 없다.
 SUMM_EMPTY = re.compile(r"(언급되지 않|언급이 없|나오지 않|알 수 없|확인되지 않|명시되지 않)")
 
-def clean_summary(s):
+def clean_summary(s, tag="요약"):
     """요약은 시스템 프롬프트로 되돌아간다. 목록기호나 굵은 글씨가 섞이면 그 서식이
     답변에 옮아붙고 그대로 음성으로 읽힌다. 소제목이 남으면 이름으로 오해된다."""
     s = re.sub(r"[*#`_=]", "", s)
@@ -430,8 +442,63 @@ def clean_summary(s):
             continue
         out.append(l)
     if copied:
-        print(f"[요약] 없다고 적은 {copied}줄 걷어냄", flush=True)
+        print(f"[{tag}] 없다고 적은 {copied}줄 걷어냄", flush=True)
     return "\n".join(out)[:SUMM_MAX]
+
+
+# 사용자 발화에서 사실을 뽑는 지시. **갈래를 정해 주지 않는다** —
+# "이름과 숫자와 날짜를 옮겨라" 처럼 열거하면 모델은 목록에 없는 것을 버리거나
+# (면접을 지웠다) 목록에 있는데 대화엔 없는 것을 지어낸다(160턴 중 112턴).
+# 꼴만 말하고 무엇을 뽑을지는 안 정한다. §「열거하지 말 것」.
+#
+# 마지막 줄이 이 프롬프트에서 제일 중요하다. 적립은 **매 턴 돌고 대부분의 턴에는
+# 새 사실이 없다.** 빈손으로 돌아올 수 없으면 매 턴 지어낸다.
+LEARN_PROMPT = """상대가 방금 이렇게 말했다.
+"{heard}"
+
+이 말에서, 뒤에 이어 말할 때 알고 있어야 할 사실만 적어라.
+상대가 직접 말한 것만 적는다. 짐작해서 채우지 마라.
+한 줄에 한 가지씩, 누가 무엇인지가 드러나는 평서문으로 적는다.
+"야", "떨린다" 처럼 낱말만 떼어 놓지 마라.
+적을 것이 없으면 아무것도 적지 마라. 없다고 적지도 마라.
+글자와 쉼표, 마침표만 쓴다."""
+
+
+def learn(session, heard):
+    """사용자 발화에서 사실을 뽑아 사전지식 옆에 쌓는다. LOCK 을 쥐고 불러야 한다.
+
+    **모델 답변에서는 절대 뽑지 않는다.** 사전지식에 없는 것을 물으면 모델은
+    36번 중 26번 없는 사실을 만든다(2026-08-27 실측). "민수? 응, 잘 지내고 있지."
+    를 적립하면 지어낸 것이 사전지식으로 굳어 되돌릴 방법이 없다. 지어내기를
+    고치려다 지어내기를 영구화하는 것이라, 사용자가 한 말만 받는다.
+
+    같은 이유로 **앞 턴을 맥락으로 주지 않는다.** "지훈이야" 한 마디만으로는
+    아무것도 안 쌓이지만, 앞 턴을 같이 주면 모델이 지어낸 물음("동생 이름이
+    민수였지?")이 사실로 새어 든다. **못 배우는 쪽이 잘못 배우는 쪽보다 낫다.**
+    """
+    if not LEARN:
+        return
+    heard = (heard or "").strip()
+    lines = KNOWN.setdefault(session, [])
+    if len(heard) < LEARN_MIN or sum(len(l) for l in lines) >= LEARN_MAX:
+        return
+    try:
+        t0 = time.time()
+        out = clean_summary(S["pipe"].chat(
+            [{"role": "user", "content": LEARN_PROMPT.format(heard=heard)}],
+            max_new_tokens=120, temperature=0.3), tag="적립")
+    except Exception as e:
+        print(f"[{session}] 적립 실패, 넘어간다 — {e}", flush=True)
+        return
+    # 이미 아는 것은 안 쌓는다. 사전지식을 되받아 적는 일이 있고, 같은 말을 두 번
+    # 하면 두 줄이 된다. 글자로만 거른다 — 뜻으로 거르려면 또 모델을 써야 한다.
+    olds = [x.strip() for x in (sess_system(session) + "\n" + "\n".join(lines)).splitlines()
+            if x.strip()]
+    fresh = [l for l in (x.strip() for x in out.splitlines())
+             if len(l) >= 6 and not any(_sim(l, p) > 0.7 for p in olds)]
+    if fresh:
+        lines += fresh
+        print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
 
 def build_msgs(session, user_content):
     """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
@@ -443,6 +510,10 @@ def build_msgs(session, user_content):
     대화 예시는 시스템 프롬프트 안의 글이 아니라 요약 뒤·실제 대화 앞의 턴으로
     넣는다. 글로 두면 설명으로 읽고, 턴으로 두면 제가 한 말로 읽는다."""
     sysmsg = sess_system(session)
+    # 적립한 사실은 사전지식 바로 뒤에 둔다. 요약과 달리 접은 것이 아니라 더한 것이라
+    # 원문 턴과 같이 있어도 겹치지 않는다.
+    if KNOWN.get(session):
+        sysmsg += "\n\n[대화 중에 알게 된 것]\n" + "\n".join(KNOWN[session])
     if SUMM_TEXT.get(session):
         sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
     return ([{"role": "system", "content": sysmsg}]
@@ -484,6 +555,7 @@ def record(session, heard, answer):
     h = HIST.setdefault(session, [])
     h += [{"role": "user", "content": heard},
           {"role": "assistant", "content": answer}]
+    learn(session, heard)        # 사용자가 말한 것만 — answer 는 넘기지 않는다
     if not SUMM or len(h) <= TURNS * 2:
         del h[:-TURNS*2]                 # 요약을 끄면 예전처럼 자르기만 한다
         return
@@ -536,7 +608,8 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
     # 도는지 확인할 수 있어야 한다.
     return {"answer": answer, "elapsed": round(el, 2),
             "turns": len(HIST.get(session, [])) // 2,
-            "summary": SUMM_TEXT.get(session, "")}
+            "summary": SUMM_TEXT.get(session, ""),
+            "learned": KNOWN.get(session, [])}
 
 
 async def _record_history(session: str, path: str, answer: str):
@@ -726,7 +799,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     SESS[sid] = {"voice": _sess_path(sid, "voice.wav"), **_sess_build(sid)}
     CURRENT["session"] = sid
     HIST.pop(sid, None)          # 인물이 바뀌었으므로 이전 대화는 버린다
-    SUMM_TEXT.pop(sid, None)
+    SUMM_TEXT.pop(sid, None); KNOWN.pop(sid, None)
     REF_TEXT.pop(SESS[sid]["voice"], None)   # 같은 경로에 다른 음성이 덮였다
 
     # 서버는 한 번에 한 인물만 보관한다. 세션 ID 를 비우면 시각으로 자동 생성되므로
@@ -735,7 +808,7 @@ async def session_start(persona: str = Form(...), knowledge: str = Form(""),
     for old in [s for s in SESS if s != sid]:
         SESS.pop(old, None)
         HIST.pop(old, None)
-        SUMM_TEXT.pop(old, None)
+        SUMM_TEXT.pop(old, None); KNOWN.pop(old, None)
         REF_TEXT.pop(_sess_path(old, "voice.wav"), None)
         shutil.rmtree(_sess_path(old), ignore_errors=True)
         print(f"[세션] {old} 정리", flush=True)
@@ -788,7 +861,7 @@ def session_end(session: str = Form(...), x_token: str = Header("")):
     if s:
         REF_TEXT.pop(s["voice"], None)
     HIST.pop(session, None)
-    SUMM_TEXT.pop(session, None)
+    SUMM_TEXT.pop(session, None); KNOWN.pop(session, None)
     if CURRENT["session"] == session:
         CURRENT["session"] = None
     d = _sess_path(session)
