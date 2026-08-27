@@ -72,6 +72,7 @@ S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
 HIST, LOCK = {}, asyncio.Lock()
 SUMM_TEXT = {}                  # session -> 접어둔 앞부분의 요약
 KNOWN = {}                      # session -> 대화 중에 사용자에게 들은 사실 (줄 목록)
+JUDGED = {}                     # session -> 판정기가 마지막으로 뱉은 말 (디버그)
 
 # ── 세션 ────────────────────────────────────────────────────────────
 # 인물은 반드시 웹에서 등록한다. 서버에 기본 음성·기본 인물을 두지 않는다.
@@ -581,7 +582,13 @@ def unknown(session, heard):
         return False
     # "없다"가 들어 있을 때만 건다. 애매하면 안 거는 쪽이다 — 아는 것까지
     # 모른다고 하면 기억 62/64 가 무너진다.
-    return "없다" in out
+    v = "없다" in out
+    # 판정기가 무엇을 뱉었는지 남긴다. 안 걸렸을 때 "있다"라고 한 것인지 물음에
+    # 답해 버린 것인지 구별이 안 되면 고칠 수가 없다.
+    JUDGED[session] = out.strip()[:30]
+    print(f"[{session}] 판정 {'모른다' if v else '안다'} — {heard!r} -> {out.strip()[:30]!r}",
+          flush=True)
+    return v
 
 
 TASKS = set()                   # 배경 작업 참조. 안 잡아 두면 가비지 컬렉터가 가져간다
@@ -725,7 +732,8 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
     return {"answer": answer, "elapsed": round(el, 2),
             "turns": len(HIST.get(session, [])) // 2,
             "summary": SUMM_TEXT.get(session, ""),
-            "learned": KNOWN.get(session, [])}
+            "learned": KNOWN.get(session, []),
+            "judged": JUDGED.get(session, "")}
 
 
 async def _record_history(session: str, path: str, answer: str):
