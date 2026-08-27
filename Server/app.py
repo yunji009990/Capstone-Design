@@ -373,7 +373,7 @@ async def set_mode(cont: str = Form(...), x_token: str = Header("")):
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
     auth(x_token); HIST.pop(session, None); SUMM_TEXT.pop(session, None)
-    KNOWN.pop(session, None)
+    KNOWN.pop(session, None); JUDGED.pop(session, None)
     return {"ok": True}
 
 @app.post("/tts")
