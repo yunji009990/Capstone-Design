@@ -163,7 +163,9 @@ def _sess_build(sid):
     out = f"{rules}\n\n[인물]\n{persona}"
     if knowledge:
         out += f"\n\n[사전지식]\n{knowledge}"
-    return {"system": out, "examples": examples}
+    # 사전지식을 따로도 들고 있는다. 판정기는 규칙과 인물 설명을 보면 안 된다 —
+    # 물음의 답이 있는지만 가려야 하는데 말투 규칙이 섞이면 연기를 시작한다.
+    return {"system": out, "examples": examples, "knowledge": knowledge}
 
 def load_sessions():
     """재시작해도 등록된 세션이 살아 있도록 디스크에서 복원한다."""
@@ -521,6 +523,67 @@ def learn(session, heard):
         print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
 
 
+# ── 모르는 것을 묻는가 ──────────────────────────────────────────────
+# 사전지식에 없는 것을 물으면 36번 중 27번 지어낸다. 프롬프트로 누르는 것은
+# **세 번 실패했다** — 공통 규칙("확실한 것만 말하고"), 본보기 쌍, 지식 경계선.
+# 셋 다 문항별로 보면 형제·생일·동생이름·작년여름이 6/6 그대로였다.
+#
+# 실패의 성질은 **전제 수용**이다. "내 동생 이름 기억나?" 에 동생이 있다고 치고
+# 시작한다. 그래서 답을 뽑는 자리에서 누르지 않고, **뽑기 전에 따로 묻는다.**
+# 연기 중에 상대 비위를 맞추는 것과 연기 밖에서 예/아니오를 가리는 것은 다른 일이다.
+JUDGE = os.environ.get("RAON_JUDGE", "1") == "1"
+
+# 판정을 걸어 볼 발화인가. **느슨해도 된다** — 여기서 통과해도 판정기가 "묻는 말이
+# 아니면 있다"로 되돌린다. 이 자리는 호출값을 아끼는 것이지 판단하는 곳이 아니다.
+ASKING = re.compile(r"\?|기억\s*(나|해|하)|알아|아니야|뭐(야|였|지|더라|랬)|"
+                    r"무슨|어디|언제|누구|누가|왜|어떻게|몇|어느|더라")
+
+JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
+===== 아는 것 =====
+{known}
+===== 끝 =====
+
+상대가 이렇게 말했다.
+"{heard}"
+
+이 말에 답하는 데 필요한 것이 위에 있으면 "있다", 없으면 "없다" 라고만 적어라.
+묻는 말이 아니면 "있다" 라고 적어라.
+물음이 무언가를 전제하더라도 그 전제가 위에 없으면 "없다" 이다.
+다른 말은 적지 마라."""
+
+# 모른다고 판정됐을 때 그 턴에만 시스템 프롬프트 끝에 붙인다. 공통 규칙과 다른 점은
+# **이번 물음을 가리킨다**는 것이다. 일반 규칙은 그 순간의 사회적 압력에 지지만,
+# 방금 온 물음을 지목하면 겨룰 상대가 없다.
+JUDGE_NOTE = ("\n\n[이번 물음]\n방금 상대가 물은 것은 당신이 모르는 것이다. "
+              "모른다고 말하고 상대에게 되물어라. 짐작해서 답하지 마라.")
+
+
+def unknown(session, heard):
+    """이 물음의 답이 사전지식에 없는가. LOCK 을 쥐고 불러야 한다.
+
+    **답을 뽑기 전에 불러야 하므로 미룰 수 없다.** 적립과 달리 이번 턴에 쓰인다.
+    그래서 물음일 때만 건다 — 서술문에까지 걸면 호출이 매 턴 하나씩 는다.
+
+    판정기에는 사전지식과 적립만 보인다. 규칙과 인물 설명을 같이 주면 연기를
+    시작해서 "있다"를 남발한다."""
+    if not JUDGE or not heard or not ASKING.search(heard):
+        return False
+    known = "\n".join(x for x in [need_session(session).get("knowledge", ""),
+                                  "\n".join(KNOWN.get(session, []))] if x)
+    if not known:
+        return False
+    try:
+        out = S["pipe"].chat(
+            [{"role": "user", "content": JUDGE_PROMPT.format(known=known, heard=heard)}],
+            max_new_tokens=8, temperature=0.1)
+    except Exception as e:
+        print(f"[{session}] 판정 실패, 그냥 답한다 — {e}", flush=True)
+        return False
+    # "없다"가 들어 있을 때만 건다. 애매하면 안 거는 쪽이다 — 아는 것까지
+    # 모른다고 하면 기억 62/64 가 무너진다.
+    return "없다" in out
+
+
 TASKS = set()                   # 배경 작업 참조. 안 잡아 두면 가비지 컬렉터가 가져간다
 
 
@@ -547,7 +610,7 @@ def learn_later(session, heard):
     TASKS.add(t)
     t.add_done_callback(TASKS.discard)
 
-def build_msgs(session, user_content):
+def build_msgs(session, user_content, note=""):
     """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
 
     요약을 시스템 프롬프트 안에 넣는 이유는, 대화가 길어져도 밀려나지 않게 하려는 것이다.
@@ -563,7 +626,9 @@ def build_msgs(session, user_content):
         sysmsg += "\n\n[대화 중에 알게 된 것]\n" + "\n".join(KNOWN[session])
     if SUMM_TEXT.get(session):
         sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
-    return ([{"role": "system", "content": sysmsg}]
+    # note 는 이번 턴에만 붙는다. 맨 끝에 두는 것이 중요하다 — 앞에 두면 다른 규칙들과
+    # 섞여 하나로 읽히는데, 일반 규칙으로는 이미 세 번 졌다.
+    return ([{"role": "system", "content": sysmsg + note}]
             + sess_examples(session)
             + list(HIST.get(session, []))
             + [user_content])
@@ -646,7 +711,8 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
     need_session(session)
     async with LOCK:
         t0 = time.time()
-        msgs = build_msgs(session, {"role": "user", "content": text})
+        note = JUDGE_NOTE if unknown(session, text) else ""
+        msgs = build_msgs(session, {"role": "user", "content": text}, note)
         answer = answer_for(session, msgs)
         record(session, text, answer)
         # 여기만 동기로 적립한다. 계측기가 쓰는 길이라 이번 응답에 결과가 실려야
@@ -696,8 +762,10 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             pipe, t0 = S["pipe"], time.time()
             heard = pipe.stt(p) if want_heard else ""
             t1 = time.time()
+            # 받아적기를 끄면 판정할 글이 없다. 그때는 예전처럼 그냥 답한다.
+            note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
-                                        "content": [{"type": "audio", "audio": p}]})
+                                        "content": [{"type": "audio", "audio": p}]}, note)
             answer = answer_for(session, msgs)
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
@@ -737,8 +805,10 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
         heard = pipe.stt(p) if want_heard else ""
+        # 받아적기를 끄면 판정할 글이 없다. 그때는 예전처럼 그냥 답한다.
+        note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
-                                    "content": [{"type": "audio", "audio": p}]})
+                                    "content": [{"type": "audio", "audio": p}]}, note)
         answer = answer_for(session, msgs)
         if want_heard:
             record(session, heard, answer)
