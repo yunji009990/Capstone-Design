@@ -773,13 +773,17 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
         t.write(raw); p = t.name
 
+    # **자막을 보여줄지와 받아적기를 언제 할지는 별개다.** 판정기가 켜져 있으면
+    # 답을 만들기 전에 글이 있어야 하므로, 자막을 안 보내더라도 먼저 받아적는다.
+    # 묶어 두면 자막 스위치 하나가 지어내기 27/36 을 되살린다 — 운영자 화면에서
+    # 끌 수 있는 스위치라 더 위험하다.
+    early = want_heard or JUDGE
     deferred = False
     try:
         async with LOCK:
             pipe, t0 = S["pipe"], time.time()
-            heard = pipe.stt(p) if want_heard else ""
+            heard = pipe.stt(p) if early else ""
             t1 = time.time()
-            # 받아적기를 끄면 판정할 글이 없다. 그때는 예전처럼 그냥 답한다.
             note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]}, note)
@@ -787,15 +791,16 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
-            if want_heard:
+            if early:
                 record(session, heard, answer)
             print(f"[{session}] {heard!r} -> {answer!r} "
                   f"(인식{t1-t0:.1f} 생성{t2-t1:.1f} 합성{t3-t2:.1f} 총{t3-t0:.1f}초)", flush=True)
 
         headers = {"X-Answer": quote(answer), "X-Elapsed": f"{t3-t0:.2f}"}
         if want_heard:
+            headers["X-Heard"] = quote(heard)   # 받아적어도 안 보낼 수 있다
+        if early:
             learn_later(session, heard)     # LOCK 을 놓은 뒤라야 한다
-            headers["X-Heard"] = quote(heard)
         else:
             background.add_task(_record_history, session, p, answer)
             deferred = True
@@ -818,16 +823,18 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
         t.write(raw); p = t.name
 
+    # 자막을 안 보내더라도 판정기가 켜져 있으면 먼저 받아적는다 — /talk 주석 참고.
+    early = want_heard or JUDGE
+
     # 답변 텍스트는 헤더로 먼저 나가야 하므로 여기서 확정한다
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
-        heard = pipe.stt(p) if want_heard else ""
-        # 받아적기를 끄면 판정할 글이 없다. 그때는 예전처럼 그냥 답한다.
+        heard = pipe.stt(p) if early else ""
         note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
         answer = answer_for(session, msgs)
-        if want_heard:
+        if early:
             record(session, heard, answer)
         t1 = time.time()
 
@@ -877,18 +884,19 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
                 await worker
             el = time.time() - t0
             print(f"[{session}]   완료 {el:.2f}초 {n/48000:.1f}초분", flush=True)
-            if want_heard:
+            if early:
                 learn_later(session, heard)  # 체험자가 답을 듣는 동안 돈다
         finally:
-            if want_heard:
+            if early:
                 try:
                     os.unlink(p)
                 except OSError:
                     pass
 
-    bg = None if want_heard else BackgroundTask(_record_history, session, p, answer)
+    bg = None if early else BackgroundTask(_record_history, session, p, answer)
     return StreamingResponse(body(), media_type="application/octet-stream", background=bg, headers={
-        "X-Heard": quote(heard), "X-Answer": quote(answer),
+        "X-Heard": quote(heard if want_heard else ""),   # 받아적어도 안 보낼 수 있다
+        "X-Answer": quote(answer),
         "X-Sample-Rate": "24000", "X-Channels": "1",
     })
 
