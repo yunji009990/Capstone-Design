@@ -463,6 +463,24 @@ LEARN_PROMPT = """상대가 방금 이렇게 말했다.
 적을 것이 없으면 아무것도 적지 마라. 없다고 적지도 마라.
 글자와 쉼표, 마침표만 쓴다."""
 
+# **"다"로 끝나는 줄만 받는다.** 마지막 줄("적을 것이 없으면 적지 마라")은 안 먹혔다 —
+# 8개 발화로 재보니 5개에서 발화를 그대로 베껴 적었다. 그런데 **베낀 것과 뽑은 것은
+# 끝맺음이 다르다.** 시키는 대로 평서문을 만들면 "-다."로 끝나고, 베끼면 원문의
+# 구어체 끝이 그대로 남는다.
+#
+#   남길 것   내 동생 이름은 지훈이다. / 지훈은 나보다 세 살 아래이다. /
+#             다음 주 화요일에 면접이 있다.
+#   버릴 것   내 동생 이름 / 우리 같이 본 영화 뭐였지? / 그냥 요즘 좀 그래. /
+#             별일은 없어. / 보고 싶었어 진짜로
+#
+# 9줄 중 8줄이 이 한 줄로 갈렸다. 남은 하나는 아래 LEARN_JUNK 가 잡는다.
+LEARN_OK = re.compile(r"다\s*\.?$")
+
+# 모델이 지시문을 그대로 베껴 적는다. "상대가 직접 말한 내용만 적는다." 가 적립된
+# 적이 있다 — 이것도 "다."로 끝나서 위 규칙을 통과한다. 프롬프트의 줄과 닮으면 버린다.
+LEARN_JUNK = [l.strip() for l in LEARN_PROMPT.splitlines()
+              if l.strip() and "{heard}" not in l]
+
 
 def learn(session, heard):
     """사용자 발화에서 사실을 뽑아 사전지식 옆에 쌓는다. LOCK 을 쥐고 불러야 한다.
@@ -495,7 +513,9 @@ def learn(session, heard):
     olds = [x.strip() for x in (sess_system(session) + "\n" + "\n".join(lines)).splitlines()
             if x.strip()]
     fresh = [l for l in (x.strip() for x in out.splitlines())
-             if len(l) >= 6 and not any(_sim(l, p) > 0.7 for p in olds)]
+             if len(l) >= 6 and LEARN_OK.search(l)
+             and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)
+             and not any(_sim(l, p) > 0.7 for p in olds)]
     if fresh:
         lines += fresh
         print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
