@@ -552,11 +552,13 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 물음이 무언가를 전제하더라도 그 전제가 위에 없으면 "없다" 이다.
 다른 말은 적지 마라."""
 
-# 모른다고 판정됐을 때 그 턴에만 시스템 프롬프트 끝에 붙인다. 공통 규칙과 다른 점은
-# **이번 물음을 가리킨다**는 것이다. 일반 규칙은 그 순간의 사회적 압력에 지지만,
-# 방금 온 물음을 지목하면 겨룰 상대가 없다.
-JUDGE_NOTE = ("\n\n[이번 물음]\n방금 상대가 물은 것은 당신이 모르는 것이다. "
-              "모른다고 말하고 상대에게 되물어라. 짐작해서 답하지 마라.")
+# 모른다고 판정됐을 때 그 턴에만 붙인다.
+#
+# **시스템 프롬프트 끝에 두면 무시된다** — 판정은 8/8 로 맞는데 답은 그대로
+# 지어냈다. 그 자리 뒤로 예시 10턴과 대화 이력이 통째로 오기 때문이다.
+# §「글로 두면 설명으로 읽고, 턴으로 두면 제가 한 말로 읽는다」와 같은 일이다.
+# 그래서 사용자 발화에 붙여 **맨 끝**, 답을 뽑기 바로 앞에 둔다.
+JUDGE_NOTE = " (모르는 것이다. 모른다고 말하고 되물어라. 지어내지 마라.)"
 
 
 def unknown(session, heard):
@@ -633,9 +635,15 @@ def build_msgs(session, user_content, note=""):
         sysmsg += "\n\n[대화 중에 알게 된 것]\n" + "\n".join(KNOWN[session])
     if SUMM_TEXT.get(session):
         sysmsg += f"\n\n[지금까지 나눈 이야기]\n{SUMM_TEXT[session]}"
-    # note 는 이번 턴에만 붙는다. 맨 끝에 두는 것이 중요하다 — 앞에 두면 다른 규칙들과
-    # 섞여 하나로 읽히는데, 일반 규칙으로는 이미 세 번 졌다.
-    return ([{"role": "system", "content": sysmsg + note}]
+    # note 는 이번 턴에만 붙고, **사용자 발화 뒤에** 붙는다. 시스템 프롬프트에 두면
+    # 그 뒤로 예시와 이력이 다 오는 탓에 묻혀서 무시된다(실측). 소리 경로에서는
+    # 발화가 오디오라 글 조각을 하나 덧붙인다 — 모델이 섞어 받는 꼴이다.
+    if note:
+        c = user_content["content"]
+        user_content = {**user_content,
+                        "content": (c + [{"type": "text", "text": note}]
+                                    if isinstance(c, list) else f"{c}{note}")}
+    return ([{"role": "system", "content": sysmsg}]
             + sess_examples(session)
             + list(HIST.get(session, []))
             + [user_content])
