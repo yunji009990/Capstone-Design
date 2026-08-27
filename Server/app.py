@@ -520,6 +520,33 @@ def learn(session, heard):
         lines += fresh
         print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
 
+
+TASKS = set()                   # 배경 작업 참조. 안 잡아 두면 가비지 컬렉터가 가져간다
+
+
+def learn_later(session, heard):
+    """적립을 답변 뒤로 미룬다. **LOCK 을 놓은 뒤에** 불러야 한다.
+
+    적립 결과는 이번 턴이 아니라 다음 턴에 필요하다. 그런데 그냥 두면 답변 경로
+    한가운데서 모델을 한 번 더 쓰게 돼 첫 소리까지의 시간이 늘어난다 —
+    실측 0.70초에서 1.14~1.70초로 두 배가 됐다. 3초 넘김 0/160 으로 만들어 둔
+    여유를 갉아먹는다.
+
+    체험자가 답을 듣고 생각하는 몇 초가 통째로 비어 있으므로 그때 돌린다.
+
+    **LOCK 을 쥔 채로 부르면 안 된다.** asyncio.Lock 은 기다린 순서대로 깨우므로,
+    합성이 LOCK 을 다시 잡기 전에 이 작업이 끼어들어 순서가 뒤집힌다. 그래서
+    record() 안에서 부르지 않고 경로마다 제자리에 둔다."""
+    async def go():
+        try:
+            async with LOCK:
+                learn(session, heard)
+        except Exception as e:
+            print(f"[{session}] 적립 건너뜀 — {e}", flush=True)
+    t = asyncio.ensure_future(go())
+    TASKS.add(t)
+    t.add_done_callback(TASKS.discard)
+
 def build_msgs(session, user_content):
     """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
 
@@ -575,7 +602,7 @@ def record(session, heard, answer):
     h = HIST.setdefault(session, [])
     h += [{"role": "user", "content": heard},
           {"role": "assistant", "content": answer}]
-    learn(session, heard)        # 사용자가 말한 것만 — answer 는 넘기지 않는다
+    # 적립은 여기서 안 한다 — learn_later() 주석 참고. 경로마다 답을 내보낸 뒤에 부른다.
     if not SUMM or len(h) <= TURNS * 2:
         del h[:-TURNS*2]                 # 요약을 끄면 예전처럼 자르기만 한다
         return
@@ -622,6 +649,9 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
         msgs = build_msgs(session, {"role": "user", "content": text})
         answer = answer_for(session, msgs)
         record(session, text, answer)
+        # 여기만 동기로 적립한다. 계측기가 쓰는 길이라 이번 응답에 결과가 실려야
+        # 하고, 글 경로에는 합성이 없어 첫 소리 지연에 영향을 주지 않는다.
+        learn(session, text)
         el = time.time() - t0
     print(f"[{session}] (글) {text!r} -> {answer!r} ({el:.1f}초)", flush=True)
     # 요약과 남은 턴 수를 같이 돌려준다. 로그를 못 보는 자리에서도 접기가 제대로
@@ -638,6 +668,7 @@ async def _record_history(session: str, path: str, answer: str):
         async with LOCK:
             heard = S["pipe"].stt(path)
             record(session, heard, answer)
+            learn(session, heard)       # 이미 응답을 보낸 뒤라 미룰 것이 없다
         print(f"[{session}] (후처리) {heard!r}", flush=True)
     except Exception as e:
         print(f"[후처리 실패] {e}", flush=True)
@@ -678,6 +709,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
 
         headers = {"X-Answer": quote(answer), "X-Elapsed": f"{t3-t0:.2f}"}
         if want_heard:
+            learn_later(session, heard)     # LOCK 을 놓은 뒤라야 한다
             headers["X-Heard"] = quote(heard)
         else:
             background.add_task(_record_history, session, p, answer)
@@ -758,6 +790,8 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
                 await worker
             el = time.time() - t0
             print(f"[{session}]   완료 {el:.2f}초 {n/48000:.1f}초분", flush=True)
+            if want_heard:
+                learn_later(session, heard)  # 체험자가 답을 듣는 동안 돈다
         finally:
             if want_heard:
                 try:
