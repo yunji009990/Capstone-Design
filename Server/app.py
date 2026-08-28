@@ -493,6 +493,20 @@ LEARN_OK = re.compile(r"다\s*\.?$")
 LEARN_JUNK = [l.strip() for l in LEARN_PROMPT.splitlines()
               if l.strip() and "{heard}" not in l]
 
+# 지시문을 말만 바꿔 베낀 것과, 발화를 사실이 아니라 **설명하는** 줄.
+#
+# **이게 들어가면 대화가 통째로 망가진다.** "상대가 직접 말한 내용은 다음과 같다."
+# 가 시스템 프롬프트에 앉으면 그 뒤 내용이 전부 상대의 말로 읽히고, 모델이 상대
+# 말을 그대로 되풀이한다 — 20턴 4회차에서 두 회차가 이걸로 무너졌다.
+#
+#   내가 다음 주에 뭐 있다고 했지?  ->  "내가 다음 주에 뭐 있다고 했지?"
+#   너 이름은?                   ->  "나 이름은?"
+#
+# 오염 1줄인 회차는 기억 7~8/8, 2줄 이상인 회차는 1/8 이었다.
+LEARN_META = re.compile(r"내용은 다음|사실만|것만 적|적는다|적어라|"
+                        r"(질문|물음|발화|요청|확인)(이다|이었다|입니다)|"
+                        r"묻는 (것|질문)|묻고 있다|상대의 (발화|말)은")
+
 
 def learn(session, heard):
     """사용자 발화에서 사실을 뽑아 사전지식 옆에 쌓는다. LOCK 을 쥐고 불러야 한다.
@@ -512,6 +526,12 @@ def learn(session, heard):
     lines = KNOWN.setdefault(session, [])
     if len(heard) < LEARN_MIN or sum(len(l) for l in lines) >= LEARN_MAX:
         return
+    # **물음에서는 뽑지 않는다.** 물으면 사실이 아니라 물음을 설명한다 —
+    # "우리 예전에 강릉 갔던 거 기억나?" 에서 "강릉에 갔던 경험이 있다",
+    # "그 경험을 상대와 공유하고 싶어 한다" 가 나왔다. 앞은 물음의 전제라 사실이
+    # 아니고 뒤는 짐작이다. 물음이 사실을 나르는 일은 드물고, 놓치는 쪽이 안전하다.
+    if ASKING.search(heard):
+        return
     try:
         t0 = time.time()
         out = clean_summary(S["pipe"].chat(
@@ -525,7 +545,7 @@ def learn(session, heard):
     olds = [x.strip() for x in (sess_system(session) + "\n" + "\n".join(lines)).splitlines()
             if x.strip()]
     fresh = [l for l in (x.strip() for x in out.splitlines())
-             if len(l) >= 6 and LEARN_OK.search(l)
+             if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
              and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)
              and not any(_sim(l, p) > 0.7 for p in olds)]
     if fresh:
