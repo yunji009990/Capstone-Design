@@ -60,7 +60,16 @@ CONT  = os.environ.get("RAON_CONT", "0") == "1"   # 시작값. 실제 판단은 
 RAS   = os.environ.get("RAON_RAS", "1") == "1"
 RAS_WIN  = int(os.environ.get("RAON_RAS_WINDOW", "100"))
 RAS_THR  = float(os.environ.get("RAON_RAS_THRESHOLD", "0.35"))
-# 샘플링 파라미터. 기본값은 모델이 쓰던 값 그대로다 — 지정하지 않으면 동작이 안 바뀐다.
+# 답변 생성 온도. **아래 RAON_TEMP 와 다른 것이다** — 이건 글, 저건 소리다.
+# 문서 「하지 말 것」의 "temperature 낮추기"는 소리(지지직) 얘기라 여기와 무관하다.
+#
+# 0.7 은 근거 없이 박혀 있던 값이다. 낮추면 흔들림이 줄 것으로 보인다 — 판정기를
+# 0.1 로 돌리면 18번 중 17번 맞힌다. 대신 첫 인사가 더 획일화된다(127번에 서로
+# 다른 답이 16가지, 그중 둘이 68%). 꼬리고착도 이 온도에 기대어 잡혀 있다.
+# **재보고 정할 것.** 환경변수로 뺀 이유가 그것이다 — 재시작만으로 훑을 수 있다.
+CHAT_TEMP = float(os.environ.get("RAON_CHAT_TEMP", "0.7"))
+# 아래는 **소리 합성** 파라미터. 답변 텍스트와 무관하다.
+# 기본값은 모델이 쓰던 값 그대로다 — 지정하지 않으면 동작이 안 바뀐다.
 # temperature 는 모델 task_params 가 1.2 로 덮고 있었다(함수 기본값은 1.0).
 TEMP  = float(os.environ.get("RAON_TEMP", "1.2"))
 TOPK  = int(os.environ.get("RAON_TOP_K", "20"))
@@ -689,7 +698,7 @@ def answer_for(session, msgs, tries=2):
     prev = [_tail(m["content"]) for m in HIST.get(session, []) if m["role"] == "assistant"]
     a = ""
     for i in range(tries):
-        a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=0.7 + 0.3 * i)
+        a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         t = _tail(a)
         if not REGEN or not prev or len(t) < 8:
             return a
