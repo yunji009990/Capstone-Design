@@ -1,4 +1,4 @@
-import os, io, re, time, asyncio, difflib, shutil, tempfile, warnings
+import os, io, re, time, asyncio, difflib, shutil, tempfile, warnings, logging
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TQDM_DISABLE", "1")
 import torch, numpy as np, soundfile as sf
@@ -347,6 +347,27 @@ async def lifespan(app):
     print(f"[준비완료] VRAM {torch.cuda.memory_allocated()/1024**3:.1f}GB", flush=True)
     yield
     S["pipe"] = None
+
+# 유니티가 5초마다 상태를 물으므로 그 접근 로그가 대화를 파묻는다. 실제로 헤드셋
+# 시험 뒤에 150줄을 받아 보니 전부 폴링이었고 대화가 한 줄도 안 보였다.
+# 웹(Web/app.py)에는 진작 같은 것을 넣어 뒀는데 여기만 빠져 있었다.
+#
+# **성공한 폴링만 지운다.** 4xx·5xx 는 그대로 보여야 한다 — 토큰이 틀렸거나 세션이
+# 없어서 나는 거절은 조용히 사라지면 안 된다.
+POLLING = ("/health", "/session/current", "/status")
+
+
+class _HidePolling(logging.Filter):
+    def filter(self, record):
+        a = getattr(record, "args", None)
+        if not isinstance(a, tuple) or len(a) < 5:
+            return True
+        if not str(a[4]).startswith("2"):
+            return True
+        return not str(a[2]).split("?")[0].startswith(POLLING)
+
+
+logging.getLogger("uvicorn.access").addFilter(_HidePolling())
 
 app = FastAPI(lifespan=lifespan)
 
