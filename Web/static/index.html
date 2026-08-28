@@ -316,7 +316,7 @@ const SAMPLE = {
   v: { "#bweeks":"30", "#s_rel":"할머니", "#s_sex":"여자", "#s_hon":"할머니",
        "#s_calls":"우리 강아지", "#s_name":"지연", "#s_trait_other":"",
        "#s_missed2":"손 잡아주던 감촉", "#s_unsaid":"고맙다는 말을 못 했다",
-       "#s_wished":"잘하고 있다", "#session":"test" },
+       "#s_wished":"잘하고 있다" },
   tr: ["다 받아줌", "걱정 많음"],
   q: ["아이고 내 새끼", "밥은 먹었냐", ""],
   m: ["여름마다 시골집 마루에서 수박을 먹었다",
@@ -325,6 +325,13 @@ const SAMPLE = {
 
 $("#testfill").onclick = () => {
   Object.entries(SAMPLE.v).forEach(([k, val]) => $(k).value = val);
+  // 세션 ID 에 시각을 붙인다. 고정값("test")이면 두 번째 등록부터 설문 저장이
+  // session_id 기본키에 걸려 실패하고, 거기서 멈추는 탓에 3D 모델 작업도 안 뜬다.
+  // 대화는 되니까 조용히 지나간다 — 시험 중에 한 번 겪었다.
+  const t = new Date();
+  const p = n => String(n).padStart(2, "0");
+  $("#session").value = `test_${p(t.getMonth() + 1)}${p(t.getDate())}`
+                      + `_${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}`;
   ["#c1", "#c2", "#c3"].forEach(k => $(k).checked = true);
   document.querySelectorAll(".s_tr").forEach(e => e.checked = SAMPLE.tr.includes(e.value));
   document.querySelectorAll(".s_quirk").forEach((e, i) => e.value = SAMPLE.q[i] || "");
