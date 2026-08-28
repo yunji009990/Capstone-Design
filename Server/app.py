@@ -572,15 +572,25 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 ===== 아는 것 =====
 {known}
 ===== 끝 =====
-
+{recent}
 상대가 이렇게 말했다.
 "{heard}"
 
 이 말에 답하는 데 필요한 것이 위에 있으면 "있다", 없으면 "없다" 라고만 적어라.
 묻는 말이 아니면 "있다" 라고 적어라.
+앞서 나눈 말에 답이 있으면 "있다" 이다.
 물음이 무언가를 전제하더라도 그 전제가 위에 없으면 "없다" 이다.
 물음이 가리키는 때가 위에 적힌 때와 다르면 "없다" 이다.
 다른 말은 적지 마라."""
+
+# 판정기에 붙일 최근 대화. **없으면 이어 묻는 말을 통째로 놓친다.**
+# "그때 터미널에서 얼마나 기다렸더라", "무슨 요일이라고 했지?" 는 앞 대화가 있어야
+# 뜻이 잡히는데, 사전지식만 보여주니 무슨 소린지 몰라 "없다"로 갔다. 사전지식에
+# 답이 있는 물음이 0/5 로 떨어졌다.
+#
+# `--probe` 가 이걸 못 잡았다 — 매번 /reset 하고 물어서 물음이 전부 홀로 섰다.
+# **대화 안에서만 나는 결함이다.**
+JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -588,7 +598,11 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 # 지어냈다. 그 자리 뒤로 예시 10턴과 대화 이력이 통째로 오기 때문이다.
 # §「글로 두면 설명으로 읽고, 턴으로 두면 제가 한 말로 읽는다」와 같은 일이다.
 # 그래서 사용자 발화에 붙여 **맨 끝**, 답을 뽑기 바로 앞에 둔다.
-JUDGE_NOTE = " (모르는 것이다. 모른다고 말하고 되물어라. 지어내지 마라.)"
+# **"되물어라"는 쓰지 않는다.** 그대로 시켰더니 모델이 물음을 통째로 되풀이했다 —
+# "그때 터미널에서 얼마나 기다렸더라" 에 "그때 터미널에서 얼마나 기다렸더라?" 로
+# 답한다. 시킨 대로 한 것이다. 순서를 정해 주고, 무엇을 되물을지까지 말한다.
+JUDGE_NOTE = (" (모르는 것이다. 모른다는 말을 먼저 하고, 그 다음 상대에게 알려 달라고 해라."
+              " 물음을 그대로 되풀이하지 마라. 지어내지 마라.)")
 
 
 def unknown(session, heard):
@@ -607,9 +621,17 @@ def unknown(session, heard):
                                   "\n".join(KNOWN.get(session, []))] if x)
     if not known:
         return False
+    # 이어 묻는 말은 앞 대화가 있어야 뜻이 잡힌다. 최근 몇 턴만 붙인다 —
+    # 다 붙이면 판정 프리필이 답변만큼 커진다.
+    h = list(HIST.get(session, []))[-JUDGE_TURNS * 2:]
+    recent = ("\n===== 방금까지 나눈 말 =====\n"
+              + "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}"
+                          for m in h)
+              + "\n===== 끝 =====\n") if h else ""
     try:
         out = S["pipe"].chat(
-            [{"role": "user", "content": JUDGE_PROMPT.format(known=known, heard=heard)}],
+            [{"role": "user", "content": JUDGE_PROMPT.format(known=known, heard=heard,
+                                                             recent=recent)}],
             max_new_tokens=8, temperature=0.1)
     except Exception as e:
         print(f"[{session}] 판정 실패, 그냥 답한다 — {e}", flush=True)
