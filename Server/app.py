@@ -572,7 +572,9 @@ def unknown(session, heard):
     시작해서 "있다"를 남발한다."""
     if not JUDGE or not heard or not ASKING.search(heard):
         return False
-    known = "\n".join(x for x in [need_session(session).get("knowledge", ""),
+    # 판정기도 오늘을 알아야 한다. 사별 뒤의 일인지 가리는 자리가 여기다.
+    known = "\n".join(x for x in [f"오늘은 {today()}이다.",
+                                  need_session(session).get("knowledge", ""),
                                   "\n".join(KNOWN.get(session, []))] if x)
     if not known:
         return False
@@ -620,6 +622,27 @@ def learn_later(session, heard):
     TASKS.add(t)
     t.add_done_callback(TASKS.discard)
 
+def today():
+    """모델에게 알려줄 오늘. **프롬프트 어디에도 오늘이 없었다.**
+
+    그래서 "작년", "지난달", "요즘" 같은 말을 셈하지 못하고 사전지식에서 아무거나
+    갖다 붙였다 — "작년 여름에 우리 뭐 했지?" 에 스무 살 때 수박 얘기를 꺼낸다.
+    모델이 제 감각으로 아는 지금은 학습이 끝난 때에 멈춰 있다(대통령을 물으면
+    윤석열이라고 한다).
+
+    한 줄 넣으니 사별 뒤의 일을 묻는 물음이 4/9 에서 8/9 로 잡혔다(3회차).
+    "요즘 나 어떻게 지냈는지 알아?" 는 0/3 에서 3/3 이 됐다.
+
+    **사별 시점은 같이 넣지 않는다.** "마지막으로 함께한 것은 약 3년 전이다"를
+    넣으면 판정기가 그것을 "빈 구간이 있다"로 읽고 뭘 물어도 모른다 쪽으로 기운다.
+    아는 것도 놓치고(12/12 -> 10/12) 정작 모르는 것도 덜 잡는다(8/9 -> 6/9).
+    정보를 준 게 아니라 의심을 심는다.
+
+    등록 때 한 번 박아 넣으면 다음 날 낡으므로 매 턴 만든다."""
+    t = time.localtime()
+    return f"{t.tm_year}년 {t.tm_mon}월 {t.tm_mday}일"
+
+
 def build_msgs(session, user_content, note=""):
     """시스템(+요약) + 대화 예시 턴 + 최근 원문 + 이번 발화.
 
@@ -629,7 +652,7 @@ def build_msgs(session, user_content, note=""):
 
     대화 예시는 시스템 프롬프트 안의 글이 아니라 요약 뒤·실제 대화 앞의 턴으로
     넣는다. 글로 두면 설명으로 읽고, 턴으로 두면 제가 한 말로 읽는다."""
-    sysmsg = sess_system(session)
+    sysmsg = f"[오늘] {today()}\n\n" + sess_system(session)
     # 적립한 사실은 사전지식 바로 뒤에 둔다. 요약과 달리 접은 것이 아니라 더한 것이라
     # 원문 턴과 같이 있어도 겹치지 않는다.
     if KNOWN.get(session):
