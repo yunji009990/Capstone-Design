@@ -145,10 +145,21 @@
     <div class="note">떠오르는 장면 두세 가지면 충분합니다. 대화 중에 그분이 먼저 꺼낼 이야기가 됩니다.</div>
     <label>함께한 추억</label>
     <div class="hint" style="margin-top:-4px">숫자·이름·장소가 들어간 구체적인 장면이 좋습니다.
-      "예전에 여행 갔다"보다 "스무 살 여름에 강릉 갔다가 첫차를 놓쳐 세 시간 기다렸다".</div>
-    <input type="text" class="s_mem" placeholder="예: 둘이 처음 바다에 갔던 여름">
-    <input type="text" class="s_mem" placeholder="">
-    <input type="text" class="s_mem" placeholder="">
+      "예전에 여행 갔다"보다 "스무 살 여름에 강릉 갔다가 첫차를 놓쳐 세 시간 기다렸다".<br>
+      <b>언제쯤인지</b>도 적어 주세요. 없으면 "작년 여름에 뭐 했지?" 같은 물음에
+      엉뚱한 때의 일을 꺼냅니다.</div>
+    <div class="row" style="gap:8px; margin-top:4px">
+      <input type="text" class="s_when" placeholder="언제쯤" style="width:150px">
+      <input type="text" class="s_mem" placeholder="예: 둘이 처음 바다에 갔던 여름" style="flex:1">
+    </div>
+    <div class="row" style="gap:8px; margin-top:6px">
+      <input type="text" class="s_when" placeholder="" style="width:150px">
+      <input type="text" class="s_mem" placeholder="" style="flex:1">
+    </div>
+    <div class="row" style="gap:8px; margin-top:6px">
+      <input type="text" class="s_when" placeholder="" style="width:150px">
+      <input type="text" class="s_mem" placeholder="" style="flex:1">
+    </div>
 
     <label>사진 (선택) — 3D 모델을 만듭니다</label>
     <div class="hint" style="margin-top:-4px">정면 전신 사진 한 장. 얼굴이 또렷하고 다른 사람이 안 나온 것이 좋습니다.
@@ -308,6 +319,22 @@ $("#bweeks").oninput = () => {
 
 const vals = sel => [...document.querySelectorAll(sel)].map(e => e.value.trim()).filter(Boolean);
 
+// 추억은 시점과 장면이 짝이다. 여기서 한 문장으로 붙여 보낸다 — 사전지식은 한 줄에
+// 한 사실이라 "스무 살 무렵, 강릉에 갔다" 꼴이면 그대로 한 줄이 된다.
+//
+// 시점이 없으면 모델이 "작년 여름에 뭐 했지?" 에 스무 살 때 일을 꺼낸다. 오늘 날짜를
+// 알려주는 것으로 대부분 잡혔지만(4/9 -> 8/9) 이 문항만 남았다 — 사전지식의 그 여름이
+// 언제인지가 어디에도 없어서 모델이 견줄 데가 없다.
+function memories() {
+  const when = [...document.querySelectorAll(".s_when")].map(e => e.value.trim());
+  return [...document.querySelectorAll(".s_mem")]
+    .map((e, i) => {
+      const m = e.value.trim();
+      return m && when[i] ? `${when[i]}, ${m}` : m;
+    })
+    .filter(Boolean);
+}
+
 // ── 시험용 값 채우기 ──
 // 프롬프트를 고쳐가며 몇 번씩 등록해 보게 된다. 그때마다 같은 값을 다시 치지 않도록
 // 오른쪽 위 단추 하나로 한 벌을 넣는다. 영상·오디오와 사진은 매번 직접 넣는다.
@@ -319,8 +346,11 @@ const SAMPLE = {
        "#s_wished":"잘하고 있다" },
   tr: ["다 받아줌", "걱정 많음"],
   q: ["아이고 내 새끼", "밥은 먹었냐", ""],
+  // 추억은 시점과 짝으로 넣는다. 시점이 없으면 "작년 여름에 뭐 했지?" 를 못 거른다.
+  w: ["초등학생 때", "초등학교 3학년", "스무 살 여름"],
   m: ["여름마다 시골집 마루에서 수박을 먹었다",
-      "초등학교 3학년 때 소풍 김밥을 새벽에 싸주셨다", ""],
+      "소풍 김밥을 새벽에 싸주셨다",
+      "둘이 강릉에 갔다가 첫차를 놓쳐 터미널에서 세 시간 기다렸다"],
 };
 
 $("#testfill").onclick = () => {
@@ -335,6 +365,7 @@ $("#testfill").onclick = () => {
   ["#c1", "#c2", "#c3"].forEach(k => $(k).checked = true);
   document.querySelectorAll(".s_tr").forEach(e => e.checked = SAMPLE.tr.includes(e.value));
   document.querySelectorAll(".s_quirk").forEach((e, i) => e.value = SAMPLE.q[i] || "");
+  document.querySelectorAll(".s_when").forEach((e, i) => e.value = SAMPLE.w[i] || "");
   document.querySelectorAll(".s_mem").forEach((e, i) => e.value = SAMPLE.m[i] || "");
   tone = SAMPLE.tone; drawTones();
   $("#bweeks").dispatchEvent(new Event("input"));
@@ -644,7 +675,7 @@ function surveyPayload() {
     user_name: $("#s_name").value.trim(),
     personality_traits: [...document.querySelectorAll(".s_tr:checked")].map(e => e.value)
         .concat(vals("#s_trait_other")),
-    speech_quirks: vals(".s_quirk"), shared_memories: vals(".s_mem"),
+    speech_quirks: vals(".s_quirk"), shared_memories: memories(),
     missed_moment: $("#s_missed2").value.trim(),
     unsaid_words: $("#s_unsaid").value.trim(),
     wished_to_hear: $("#s_wished").value.trim(),
