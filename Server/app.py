@@ -526,7 +526,15 @@ LEARN_JUNK = [l.strip() for l in LEARN_PROMPT.splitlines()
 # 오염 1줄인 회차는 기억 7~8/8, 2줄 이상인 회차는 1/8 이었다.
 LEARN_META = re.compile(r"내용은 다음|사실만|것만 적|적는다|적어라|"
                         r"(질문|물음|발화|요청|확인)(이다|이었다|입니다)|"
-                        r"묻는 (것|질문)|묻고 있다|상대의 (발화|말)은")
+                        r"묻는 (것|질문)|묻고 있다|상대의 (발화|말)은|"
+                        # 받아적기가 헛돌면 뽑을 사실이 없어 발화 행위를 서술한다.
+                        # 헤드셋 시험에서 나온 것들 — 앞 규칙이 다 놓쳤다.
+                        #   이 문장은 두 번 반복되어 발화되었다.
+                        #   발화자는 첫 번째 대상을 확인하려는 의도를 밝혔다.
+                        #   확인 대상은 "the first one"으로 지칭되었다.
+                        #   상대가 방금 "예를 들어봅시다"라고 말했다.
+                        r"이 문장은|발화(자|되|했|를|가)|지칭|의도를|반복되어|"
+                        r"방금.{0,20}라고 (말했|했)")
 
 
 def learn(session, heard):
@@ -668,6 +676,29 @@ def unknown(session, heard):
     return v
 
 
+def garbled(heard):
+    """받아적기가 헛돈 것인가. 무음이나 잡음이 들어가면 STT 가 없는 말을 지어낸다.
+
+    2026-08-28 헤드셋 시험에서 나온 것들 —
+
+        '아.'   '어.'   '음.'   '. - oh,'   '. [blank_audio]'
+        "I'm going to go ahead and grab my 100% cotton, 100% organic cotton, ..."
+
+    **이게 「대화가 안 이어진다」의 정체다.** 말하지 않은 것을 STT 가 지어내고,
+    모델은 그 지어낸 말에 성실하게 답한다. 게다가 이력에 남아 그 뒤로도 계속
+    어긋나게 만든다.
+
+    답은 그대로 한다 — 체험 도중에 아무 반응이 없는 것보다 낫다. 다만 **이력과
+    적립에는 안 남긴다.** 뿌리는 유니티 쪽 VAD 라 여기서는 피해만 막는다.
+
+    한글 두 자를 못 넘기면 헛돈 것으로 본다. "예를 들어봅시다" 같은 그럴듯한
+    환각은 못 잡는다 — 글자만으로는 구별할 방법이 없다."""
+    s = (heard or "").strip()
+    if not s or re.search(r"\[[^\]]*\]", s):
+        return True
+    return len(re.findall(r"[가-힣]", s)) < 2
+
+
 TASKS = set()                   # 배경 작업 참조. 안 잡아 두면 가비지 컬렉터가 가져간다
 
 
@@ -775,6 +806,9 @@ def record(session, heard, answer):
 
     호출자가 LOCK 을 쥐고 있어야 한다 — 접을 때 모델을 한 번 더 쓴다.
     6턴을 넘기면 오래된 것을 접어 3턴만 원문으로 남긴다. 세 턴에 한 번 꼴로 돈다."""
+    if garbled(heard):
+        print(f"[{session}] 받아적기 헛돔, 기록 안 함 — {heard!r}", flush=True)
+        return
     h = HIST.setdefault(session, [])
     h += [{"role": "user", "content": heard},
           {"role": "assistant", "content": answer}]
