@@ -664,7 +664,11 @@ def unknown(session, heard):
     if not JUDGE or not heard or not ASKING.search(heard):
         return False
     if BACKREF.search(heard):
-        return False        # 앞에서 한 말을 되묻는 것 — 답은 대화에 있다
+        # 앞에서 한 말을 되묻는 것 — 답은 대화에 있다. 건너뛴 것과 "있다"로
+        # 판정한 것은 다르므로 기록에도 다르게 남긴다. 앞 값이 남아 있으면
+        # 결과를 잘못 읽는다 — 오늘 두 번 그랬다.
+        JUDGED[session] = "건너뜀"
+        return False
     # 판정기도 오늘을 알아야 한다. 사별 뒤의 일인지 가리는 자리가 여기다.
     known = "\n".join(x for x in [f"오늘은 {today()}이다.",
                                   need_session(session).get("knowledge", ""),
