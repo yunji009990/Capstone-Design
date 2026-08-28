@@ -652,33 +652,6 @@ JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
 JUDGE_NOTE = (" (모르는 것이다. 모른다는 말을 먼저 하고, 그 다음 상대에게 알려 달라고 해라."
               " 물음을 그대로 되풀이하지 마라. 지어내지 마라.)")
 
-# 인물 **자신**에 대한 물음인가. 두 번째 인칭으로 부르면 그렇다.
-SELFREF = re.compile(r"(^|\s)(너|당신)(는|은|도|의|가|이|를|을|한테|에게|랑|와|과|\s|$)")
-
-# **자기 얘기는 얼버무리게 하면 안 된다.**
-#
-# 판정기가 다섯 갈래를 다 잡았는데 "너 형제 있었나?" 만 5/6 으로 남았다. 사용자
-# 얘기와 둘 사이 얘기는 0~2/6 인데 본인 얘기만 안 잡힌다.
-#
-# 짚이는 것은 **모른다는 말 자체가 사람이 할 수 없는 말**이라는 점이다. 손자 생일을
-# 잊는 것은 자연스럽지만 자기한테 형제가 있었는지 모르는 것은 아니다. 그래서 지시를
-# 받고도 "아니, 외동이었단다" 로 나간다.
-#
-# 그리고 여기서는 **얼버무리는 것이 지어내는 것보다 나쁠 수 있다.** 할머니가
-# "내가 형제가 있었나…" 하면 고인이 아니라는 것이 그 순간 드러난다.
-#
-# 그래서 모른다고 하는 대신 **짧게 넘기고 상대 이야기로 돌리게** 한다. 사실을
-# 안 만들면서 사람다움도 안 깬다.
-JUDGE_SELF_NOTE = (" (모르는 것이다. 그 얘기는 짧게 받아넘기고 상대 이야기로 돌려라."
-                   " 당신에 대해 지어내지 마라.)")
-
-
-def judge_note(session, heard):
-    """이번 턴에 붙일 지시. 없으면 빈 문자열."""
-    if not unknown(session, heard):
-        return ""
-    return JUDGE_SELF_NOTE if SELFREF.search(heard or "") else JUDGE_NOTE
-
 
 def unknown(session, heard):
     """이 물음의 답이 사전지식에 없는가. LOCK 을 쥐고 불러야 한다.
@@ -908,7 +881,7 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
     need_session(session)
     async with LOCK:
         t0 = time.time()
-        note = judge_note(session, text)
+        note = JUDGE_NOTE if unknown(session, text) else ""
         msgs = build_msgs(session, {"role": "user", "content": text}, note)
         answer = answer_for(session, msgs)
         record(session, text, answer)
@@ -965,7 +938,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             pipe, t0 = S["pipe"], time.time()
             heard = pipe.stt(p) if early else ""
             t1 = time.time()
-            note = judge_note(session, heard)
+            note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]}, note)
             answer = answer_for(session, msgs)
@@ -1011,7 +984,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
         heard = pipe.stt(p) if early else ""
-        note = judge_note(session, heard)
+        note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
         answer = answer_for(session, msgs)
