@@ -79,6 +79,8 @@ CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 
 # 딱 첫 음절 길이다. 45개 중 7개에서 첫 낱말이 다른 말로 나온 것과 크기가 맞는다
 # ('그랬어?' -> '어렵겠어?'). 비워 두면 모델 기본값을 그대로 쓴다.
 CONT_SIL = os.environ.get("RAON_CONT_SILENCE", "")
+# 0 이면 참조 전사를 안 넘긴다. 이음매 문제가 글 때문인지 보려는 것이다.
+REF_TEXT_ON = os.environ.get("RAON_REF_TEXT", "1") == "1"
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
 S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
@@ -234,7 +236,13 @@ REF_TEXT = {}                   # 참조음성 경로 -> 전사
 
 def ref_text(voice):
     """tts_continuation 은 참조 전사가 필요한데, 없으면 합성마다 STT 를 다시 돈다.
-    참조 음성은 세션당 고정이므로 한 번만 전사해 둔다."""
+    참조 음성은 세션당 고정이므로 한 번만 전사해 둔다.
+
+    `RAON_REF_TEXT=0` 이면 빈 글을 넘긴다. 답변 첫머리에 참조 조각이 새는 것이
+    (45개 중 7개) **소리 때문인지 글 때문인지** 가르려는 시험용이다. 덧붙은 낱말
+    22개 중 9개가 참조에 실제로 있던 말이었다."""
+    if not REF_TEXT_ON:
+        return ""
     if voice not in REF_TEXT:
         t0 = time.time()
         REF_TEXT[voice] = S["pipe"].stt(voice)
