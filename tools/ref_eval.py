@@ -44,6 +44,12 @@ COND, OUT = os.path.join(ROOT, "조건"), os.path.join(ROOT, "출력")
 # 5 초는 깨질 것으로 보고 넣는다 — 실측에서 6.3 초가 같은 문장에 0/8.6/4.3 초를 냈다.
 # 45 초는 서버 권장 상한(40) 밖이라 넣는다. 경계를 안 넘기면 경계를 못 찾는다.
 LENGTHS = [5, 8, 12, 20, 30, 45]
+
+# 억양 실험 — 길이를 고정하고 말하는 방식만 바꾼다. 1차에서 길이는 귀로 구별되지
+# 않았고(상관 +0.12) 사용자가 짚은 것은 억양이었다. 조건 파일은 번호로 두고
+# 이름표는 `조건/_이름.json` 에 따로 적는다 — 뒤 단계를 안 건드리려고.
+STYLES = [("01", "낭독조", "A_낭독"), ("02", "설명조", "A_설명"), ("03", "대화체", "A_대화")]
+STYLE_SEC = 25          # 세 조건 모두 이 길이로 맞춘다
 INPUTS = ["C1", "C2", "C3", "C4", "C5"]
 ROUNDS = 3
 SR = 24000
@@ -60,8 +66,28 @@ PERSONA = """너는 예순쯤 된 사람이다. 상대를 오래 알고 지낸 �
 "그렇구나", "그랬어" 같은 말을 자주 쓴다. 존댓말은 쓰지 않는다."""
 
 
+def _label(tag):
+    """조건 번호를 사람이 읽는 이름으로. 없으면 길이 실험이라 초 단위로 본다."""
+    f = os.path.join(COND, "_이름.json")
+    if os.path.exists(f):
+        m = json.load(io.open(f, encoding="utf-8"))
+        if str(tag).zfill(2) in m:
+            return m[str(tag).zfill(2)]
+    return f"{tag}초"
+
+
 def _hdr():
     return {"X-Token": TOKEN} if TOKEN else {}
+
+
+def _base():
+    """닮음의 기준선. 억양 실험부터는 `B_기준`(대화체)을 쓴다. 1차의 `B_대조` 는
+    대본을 읽은 것이라 귀 판정의 기준으로 쓸 수 없었다 — 사용자가 "원본인데
+    내 목소리 같지 않다"고 했다."""
+    for stem in ("B_기준", "B_대조"):
+        if glob.glob(os.path.join(ROOT, stem + ".*")):
+            return _find(stem)
+    sys.exit("기준 녹음이 없습니다 (B_기준)")
 
 
 def _find(stem):
@@ -142,6 +168,33 @@ def cut():
         print(f"ref_{n:02d} {n:6.1f}초 {q:7.3f} {peak:6.3f} "
               f"{min(10.0, 0.8 / max(peak, 1e-6)):5.2f}   {note}")
     print(f"\n-> {COND}")
+
+
+def cut_style():
+    """억양 실험용. 세 녹음을 같은 길이로 잘라 조건으로 만든다.
+
+    길이 실험과 달리 원본이 셋이므로 앞부분을 떼는 대신 **각각을** 같은 길이로
+    맞춘다. 길이가 유일하게 같아야 하는 것이고, 달라야 하는 것은 말하는 방식뿐이다."""
+    os.makedirs(COND, exist_ok=True)
+    names = {}
+    print(f"{'조건':>8} {'원본':>8} {'말한시간':>9} {'쉼':>7} {'잘라낸뒤':>9}")
+    print("-" * 50)
+    for tag, label, stem in STYLES:
+        y, _ = librosa.load(_find(stem), sr=SR, mono=True)
+        said = len(y) / SR - _quiet(y) * len(y) / SR
+        if _quiet(y) >= 0.20:
+            y = _cut_silence(y)
+        if len(y) / SR < STYLE_SEC:
+            print(f"  ! {stem} 이 잘라낸 뒤 {len(y)/SR:.1f}초뿐입니다 ({STYLE_SEC}초 필요)")
+            continue
+        seg = _norm(y[:STYLE_SEC * SR])
+        sf.write(os.path.join(COND, f"ref_{tag}.wav"), seg, SR, subtype="PCM_16")
+        names[tag] = label
+        print(f"{label:>8} {stem:>8} {said:8.1f}초 {_quiet(seg):7.3f} {len(y)/SR:8.1f}초")
+    json.dump(names, io.open(os.path.join(COND, "_이름.json"), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    print()
+    print(f"-> {COND}")
 
 
 # ─────────────────────────── run ───────────────────────────
@@ -251,7 +304,7 @@ def score():
     outs = sorted(glob.glob(os.path.join(OUT, "out_*.wav")))
     if not outs:
         sys.exit("출력이 없습니다. 먼저 `run` 을 돌리세요")
-    base = _find("B_대조")
+    base = _base()
 
     rows = []
     for p in outs:
@@ -278,7 +331,7 @@ def score():
              f"조건 {seen('길이')} · 입력 {seen('입력')} · 회차 {seen('회차')} · "
              f"출력 {len(rows)}개 (기대 {len(LENGTHS)*len(INPUTS)*ROUNDS}개)", "",
              "닮음은 `B_대조`(참조로 쓰지 않은 녹음)와의 화자 임베딩 코사인이다.", "",
-             "| 참조 길이 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
+             "| 조건 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
              "|---|---|---|---|---|---|---|---|"]
     for n in LENGTHS:
         g = [r for r in rows if r["길이"] == n]
@@ -288,10 +341,10 @@ def score():
         sim = [r["닮음"] for r in g if "닮음" in r]
         med = lambda k: np.median([r[k] for r in g if k in r]) if any(k in r for r in g) else float("nan")
         lines.append(
-            f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | "
             f"{np.median(sim):.4f} | {min(sim):.4f} |" if sim else
-            f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | - | - |")
 
     lines += ["", "체감속도 정상 범위는 0.103~0.128 초/글자다. 벗어나면 쉼이 낀 것이다.", "",
@@ -299,7 +352,7 @@ def score():
     bad = [r for r in rows if r.get("판정") != "정상"]
     if bad:
         lines += ["| 파일 | 길이 | 판정 | 총 | 꼬리무음 | 재시작 |", "|---|---|---|---|---|---|"]
-        lines += [f"| {r['파일']} | {r['길이']}초 | {r['판정']} | {r['총']} | "
+        lines += [f"| {r['파일']} | {_label(r['길이'])} | {r['판정']} | {r['총']} | "
                   f"{r.get('꼬리무음','-')} | {r.get('재시작','-')} |" for r in bad]
     else:
         lines.append("없다.")
@@ -360,7 +413,7 @@ def listen(clear=False, sub=""):
             shutil.copy(p, os.path.join(LISTEN, name))
             picks.append((name, n, c))
 
-    shutil.copy(_find("B_대조"), os.path.join(LISTEN, "기준_원본목소리.wav"))
+    shutil.copy(_base(), os.path.join(LISTEN, "기준_원본목소리.wav"))
 
     with open(os.path.join(LISTEN, "_들어보기.txt"), "w", encoding="utf-8") as f:
         f.write("""참조 길이 실험 — 들어보기
@@ -385,7 +438,7 @@ def listen(clear=False, sub=""):
     with open(os.path.join(LISTEN, "_정답.txt"), "w", encoding="utf-8") as f:
         f.write("다 들으신 뒤에 여세요.\n\n")
         for name, n, c in picks:
-            f.write(f"  {name[:-4]:8} = 참조 {n}초 (입력 {c})\n")
+            f.write(f"  {name[:-4]:8} = {_label(n)} (입력 {c})\n")
 
     print(f"{len(picks)}개 + 기준 1개 -> {LISTEN}")
 
@@ -393,7 +446,7 @@ def listen(clear=False, sub=""):
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "cut":
-        cut()
+        cut_style() if "style" in sys.argv else cut()
     elif cmd == "run":
         run()
     elif cmd == "score":
