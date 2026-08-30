@@ -28,6 +28,10 @@
   .next { color:var(--dim); font-size:15px; margin-top:18px;
           border-top:1px solid var(--line); padding-top:12px; }
   .idle { color:var(--dim); }
+  .script .past  { color:#4b515c; }
+  .script .later { color:var(--dim); }
+  .script .now   { color:var(--fg); font-weight:700; }
+  .script .now::after { content:" ◀"; color:var(--hi); }
 
   .bar { display:flex; align-items:center; gap:14px; margin-top:20px; flex-wrap:wrap; }
   button { font:inherit; padding:10px 18px; border-radius:8px; border:1px solid var(--line);
@@ -117,7 +121,7 @@ ITEMS.forEach(x => { if (x.id[0] === "C") x.hint = C_HINT; });
 const TOPIC_SEC = 10;                 // 화제 하나에 이만큼 쓰면 넘어간다
 const $ = s => document.querySelector(s);
 let cur = 0, saved = {}, rec = null, chunks = [], ac = null, an = null;
-let stream = null, t0 = 0, raf = 0, tick = 0, lastWav = null;
+let stream = null, t0 = 0, raf = 0, tick = 0, lastWav = null, quietSince = 0;
 
 // ── 화면 ──────────────────────────────────────────────
 function paintSteps() {
@@ -159,11 +163,15 @@ function paintTopic(sec) {
   const it = ITEMS[cur];
   if (!it.topics) return;
   const i = Math.min(it.topics.length - 1, Math.floor(sec / TOPIC_SEC));
+  // 화제를 갈아치우지 않는다. 갈아치우면 그때마다 새 글을 읽느라 말을 멈춘다 —
+  // 1차 녹음에서 10초마다 3~4초씩 쉬어 쉼 비율이 46%가 나왔다. 전부 띄워 두고
+  // 지금 것만 밝히면 읽을 것이 없으므로 멈출 이유도 없다.
   $("#script").className = "script";
-  $("#script").textContent = `${i + 1}) ${it.topics[i][0]}`;
-  $("#lead").textContent = `“${it.topics[i][1]}”`;
-  const n = it.topics[i + 1];
-  $("#next").textContent = n ? `다음 — ${n[0]}` : "다 말했는데 50초가 안 되면 아무 얘기나 더 붙여주세요.";
+  $("#script").innerHTML = it.topics.map((t, k) =>
+    `<div class="${k === i ? "now" : k < i ? "past" : "later"}">${k + 1}) ${t[0]}</div>`).join("");
+  $("#lead").textContent = i === it.topics.length - 1 && sec > TOPIC_SEC * it.topics.length
+    ? "아무 얘기나 더 붙여주세요. 멈추지만 마세요." : "";
+  $("#next").textContent = "";
 }
 
 // ── 녹음 ──────────────────────────────────────────────
@@ -192,7 +200,7 @@ async function start() {
   rec.onstop = finish;
   rec.start();
 
-  t0 = Date.now();
+  t0 = Date.now(); quietSince = 0;
   $("#go").textContent = "■ 멈춤";
   $("#pb").hidden = true;
   $("#msg").textContent = ""; $("#msg").className = "msg";
@@ -210,6 +218,13 @@ function loop() {
   const pct = Math.min(100, rms * 320);
   $("#lvl").style.width = pct + "%";
   $("#lvl").className = pct > 92 ? "hot" : "";
+
+  // 쉬면 그 자리에서 알려준다. 안내문에 적어 두는 것보다 이쪽이 훨씬 세다.
+  if (rms > 0.012) quietSince = 0;
+  else if (!quietSince) quietSince = Date.now();
+  const hush = quietSince && Date.now() - quietSince > 700;
+  $("#msg").className = "msg" + (hush ? " bad" : "");
+  $("#msg").textContent = hush ? "▲ 쉬고 있습니다 — 이어서 말해주세요" : "";
 
   const sec = (Date.now() - t0) / 1000;
   const m = String(Math.floor(sec / 60)).padStart(2, "0");

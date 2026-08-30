@@ -21,6 +21,7 @@
   python tools/ref_eval.py listen   들어볼 파일을 블라인드로 정리한다
 """
 import glob
+import io
 import json
 import os
 import random
@@ -88,6 +89,22 @@ def _quiet(y):
     return float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
 
 
+WEBAPP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "Web", "app.py")
+
+
+def _cut_silence(y):
+    """`Web/app.py` 의 같은 이름 함수를 그 자리에서 꺼내 쓴다. 앱을 import 하면
+    FastAPI 와 DB 까지 깨어나고, 베껴 두면 저쪽이 바뀔 때 조용히 어긋난다."""
+    src = io.open(WEBAPP, encoding="utf-8").read()
+    ns = {"np": np}
+    for line in src.splitlines():
+        if line.startswith(("CUT_BIN", "CUT_KEEP", "CUT_XF")):
+            exec(line, ns)
+    exec(src[src.index("def _cut_silence"):src.index("def _to_wav24")], ns)
+    return ns["_cut_silence"](y)
+
+
 # ─────────────────────────── cut ───────────────────────────
 def cut():
     src = _find("A_참조")
@@ -96,6 +113,20 @@ def cut():
     print(f"원본 {os.path.basename(src)} — {total:.1f}초\n")
     if total < max(LENGTHS):
         print(f"  ! {max(LENGTHS)}초가 안 됩니다. 그 위 조건은 건너뜁니다.\n")
+    # 쉼은 **자른 다음에 자른다.** 조건마다 따로 자르면 잘려 나가는 양이 달라져서
+    # 길이가 유일한 변수가 아니게 된다. 원본에서 한 번만 잘라 놓고 거기서 앞부분을
+    # 떼면 모든 조건이 같은 전처리를 지나고 길이만 달라진다.
+    # 제품(`_to_wav24`)도 20%를 넘으면 자르므로 실제 경로에도 이쪽이 가깝다.
+    if _quiet(y) >= 0.20:
+        was = len(y) / SR
+        y = _cut_silence(y)
+        print(f"쉼이 20% 를 넘어 원본에서 한 번 잘라냈다 "
+              f"— {was:.1f} -> {len(y) / SR:.1f}초. 제품도 같은 일을 한다.")
+    total = len(y) / SR
+    if total < max(LENGTHS):
+        print(f"  ! {total:.1f}초뿐이라 만들 수 없는 조건이 있다: "
+              f"{[n for n in LENGTHS if n > total]}")
+    print()
     os.makedirs(COND, exist_ok=True)
 
     print(f"{'조건':>6} {'길이':>7} {'쉼비율':>7} {'peak':>6} {'게인':>5}   비고")
