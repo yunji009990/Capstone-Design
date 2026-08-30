@@ -322,13 +322,30 @@ def score():
 HEAR = ["C1", "C3"]        # 12개로 끊는다. 54개는 귀로 못 본다
 
 
-def listen(clear=False):
-    if os.path.isdir(LISTEN) and os.listdir(LISTEN):
-        if not clear:
-            sys.exit(f"{LISTEN} 가 비어 있지 않습니다.\n"
-                     f"이전 회차를 지우고 새로 담으려면 --clear 를 붙이세요")
-        for f in os.listdir(LISTEN):
-            os.remove(os.path.join(LISTEN, f))
+def listen(clear=False, sub=""):
+    """`sub` 를 주면 그 하위 폴더의 출력을 쓴다 — 회차를 보관해 두고 되짚어 볼 때."""
+    global OUT
+    if sub:
+        OUT = os.path.join(ROOT, sub, "출력")
+        if not os.path.isdir(OUT):
+            sys.exit(f"없음: {OUT}")
+        print(f"{sub} 회차를 씁니다")
+    stale = [f for f in os.listdir(LISTEN) if f != "이전"] if os.path.isdir(LISTEN) else []
+    if stale and not clear:
+        sys.exit(f"{LISTEN} 가 비어 있지 않습니다. 비우려면 --clear 를 붙이세요")
+    if stale:
+        # 지우지 않고 옮긴다. 여기에는 지난 가림 청취 자료가 들어 있고 그게
+        # 문서에 실린 결론의 근거다. 한 번 지우면 되돌릴 방법이 없다.
+        old_dir = os.path.join(LISTEN, "이전")
+        os.makedirs(old_dir, exist_ok=True)
+        for f in stale:
+            dst, n = os.path.join(old_dir, f), 1
+            while os.path.exists(dst):
+                base, ext = os.path.splitext(f)
+                dst = os.path.join(old_dir, f"{base}_{n}{ext}")
+                n += 1
+            os.replace(os.path.join(LISTEN, f), dst)
+        print(f"이전 것 {len(stale)}개를 {old_dir} 로 옮겼습니다")
     os.makedirs(LISTEN, exist_ok=True)
 
     picks = []
@@ -382,6 +399,7 @@ if __name__ == "__main__":
     elif cmd == "score":
         score()
     elif cmd == "listen":
-        listen("--clear" in sys.argv)
+        rest = [a for a in sys.argv[2:] if not a.startswith("--")]
+        listen("--clear" in sys.argv, rest[0] if rest else "")
     else:
         print(__doc__)
