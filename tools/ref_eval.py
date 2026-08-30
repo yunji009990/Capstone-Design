@@ -373,7 +373,8 @@ def score():
 
 
 # ─────────────────────────── listen ───────────────────────────
-HEAR = ["C1", "C3"]        # 12개로 끊는다. 54개는 귀로 못 본다
+HEAR = ["C1", "C3", "C5"]  # 조건이 셋이라 입력 셋이면 9개. 귀로 볼 만한 양이다.
+                           # 조건이 여섯일 때는 둘로 줄여 12개로 맞췄었다.
 
 
 def listen(clear=False, sub=""):
@@ -402,10 +403,13 @@ def listen(clear=False, sub=""):
         print(f"이전 것 {len(stale)}개를 {old_dir} 로 옮겼습니다")
     os.makedirs(LISTEN, exist_ok=True)
 
+    TAGS = sorted({os.path.basename(q)[4:6] for q in glob.glob(os.path.join(OUT, "out_*.wav"))})
     picks = []
     for gi, c in enumerate(HEAR, 1):
-        got = [(n, os.path.join(OUT, f"out_{n:02d}_{c}_1.wav")) for n in LENGTHS]
-        got = [(n, p) for n, p in got if os.path.exists(p)]
+        # 조건 태그는 파일에서 읽는다. 길이 실험이면 05/12/…, 억양 실험이면 01/02/03 —
+        # 상수에 박아 두면 실험을 갈아탈 때마다 조용히 0개가 나온다.
+        got = [(t, os.path.join(OUT, f"out_{t}_{c}_1.wav")) for t in TAGS]
+        got = [(t, q) for t, q in got if os.path.exists(q)]
         # 이름에 조건이 보이면 판정이 오염된다. 가설을 이미 말씀드린 뒤라 블라인드로 낸다.
         # 씨앗을 박아 두어야 _정답.txt 와 어긋나지 않는다.
         random.Random(20260830 + gi).shuffle(got)
@@ -417,21 +421,27 @@ def listen(clear=False, sub=""):
     shutil.copy(_base(), os.path.join(LISTEN, "기준_원본목소리.wav"))
 
     with open(os.path.join(LISTEN, "_들어보기.txt"), "w", encoding="utf-8") as f:
-        f.write("""참조 길이 실험 — 들어보기
+        f.write("""참조 음성 실험 — 들어보기
 ==================================
 
-먼저 `기준_원본목소리.wav` 를 한 번 들으세요. 닮음의 기준입니다.
+먼저 `기준_원본목소리.wav` 를 한 번 들으세요. 이게 기준입니다.
+지난번과 달리 대본을 읽은 게 아니라 평소 말투로 녹음한 것입니다.
 
 그 다음 1-가 부터 순서대로 들으시면서 아래에 적어주세요.
-같은 묶음(1-*)은 전부 같은 말에 대한 답이고, 참조 길이만 다릅니다.
+같은 묶음(1-*)은 전부 같은 말에 대한 답이고, 참조 녹음의 말투만 다릅니다.
 
-  닮음   원본과 얼마나 같은 사람으로 들리는가.  1(다른 사람) ~ 5(그 사람)
-  깨짐   말이 중간에 끊기거나, 끝나고도 계속 소리가 나거나, 지지직거리는가. O / X
+  닮음   기준과 얼마나 같은 사람으로 들리는가.  1(다른 사람) ~ 5(그 사람)
+  억양   말의 오르내림·속도·쉬는 자리가 기준과 같은가.  1(딴판) ~ 5(똑같다)
+  깨짐   중간에 끊기거나, 끝나고도 소리가 계속되거나, 지지직거리는가.  O / X
+
+닮음과 억양을 나눠 적는 것이 이번의 핵심입니다.
+지난번에 「억양이 다르다」고 하신 것을 따로 재려는 것이라서요.
+헷갈리면 억양만 적으셔도 됩니다.
 
 조건은 일부러 섞어 두었습니다. 순서에 뜻이 없습니다.
 다 들으신 뒤에 `_정답.txt` 를 여세요.
 
-        닮음(1~5)   깨짐(O/X)   메모
+        닮음(1~5)   억양(1~5)   깨짐(O/X)   메모
 """)
         for name, _, _ in picks:
             f.write(f"  {name[:-4]:8}                                \n")
