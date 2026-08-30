@@ -4,9 +4,24 @@
     {
       "name": "web",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "app:app", "--port", "8500"],
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app:app",
+        "--port",
+        "8500"
+      ],
       "cwd": "Web",
       "port": 8500
+    },
+    {
+      "name": "rec",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "tools/rec_server.py",
+        "--no-open"
+      ],
+      "port": 8600
     }
   ]
 }
