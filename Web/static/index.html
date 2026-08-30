@@ -243,7 +243,8 @@
     <div class="hint" id="modelinfo" style="display:none"></div>
     <div class="pill bad" id="refwarn" style="display:none; margin-top:10px; padding:8px 12px; border-radius:6px"></div>
     <div class="hint" id="verify" style="display:none">
-      아래는 <b>서버로 실제로 넘어간 참조 음성</b>입니다. 위에서 고른 것과 같은지 확인하세요.
+      아래는 <b>서버가 실제로 쓰는 참조 음성</b>입니다.
+      <div id="bootinfo" style="margin-top:6px"></div>
       <audio id="sentplayer" controls style="width:100%; margin-top:8px"></audio>
     </div>
   </div>
@@ -732,6 +733,7 @@ $("#publish").onclick = async () => {
     url = "/publish_direct"; fd.append("voice", dirFile, dirFile.name);
   }
   $("#publish").disabled = true;
+  $("#publish").textContent = "등록 중… 1분쯤 걸립니다";
   try {
     const r = await fetch(url, { method: "POST", body: fd });
     const jj = await r.json();
@@ -739,6 +741,13 @@ $("#publish").onclick = async () => {
     if (r.ok) {   // 실제로 넘어간 것을 되들려준다. 두 경로 모두 같은 처리를 받는다
       $("#verify").style.display = "";
       $("#sentplayer").src = "/last_ref.wav?t=" + Date.now();
+      const b = jj["1세대참조"];
+      $("#bootinfo").innerHTML = b
+        ? `올려주신 목소리로 <b>${b.sec}초짜리 참조를 새로 만들어</b> 쓰고 있습니다 `
+          + `(${b.pieces}조각). 아래 소리가 그것입니다 — 올리신 녹음과 내용은 다르지만 `
+          + `목소리는 같아야 합니다.`
+        : `올려주신 녹음을 <b>그대로</b> 참조로 쓰고 있습니다. `
+          + `(새 참조를 만들지 못했습니다. 대화에는 지장이 없습니다.)`;
       const w = (jj.sent || {}).warning;
       $("#refwarn").style.display = w ? "" : "none";
       $("#refwarn").textContent = w || "";
@@ -752,7 +761,9 @@ $("#publish").onclick = async () => {
       window.scrollTo({ top: 0 });
     }
   } catch (e) { show(String(e), true); }
-  $("#publish").disabled = false; status();
+  $("#publish").disabled = false;
+  $("#publish").textContent = "세션 시작";
+  status();
 };
 $("#endbtn").onclick = async () => {
   const r = await (await fetch("/status")).json();
