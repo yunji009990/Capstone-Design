@@ -199,6 +199,63 @@ def cut_style():
     print(f"-> {COND}")
 
 
+BOOT_SEC = 18            # 1세대 참조도 다른 조건과 같은 길이로 맞춘다
+BOOT_GAP = 0.15          # 이어붙이는 자리에 두는 쉼. 0 이면 숨 가쁘게 들린다
+
+
+def bootstrap(sub, skip=0):
+    """`sub` 회차의 출력을 이어붙여 **1세대 합성 참조**를 만든다.
+
+    사용자 발상 — 원본 녹음은 지금 대화와 아무 상관 없는 내용이라 이음매가
+    억지스럽다. 그러니 원본으로 한 번 합성해 두고, 그 소리를 참조로 쓰면
+    참조 자체가 이미 "그 사람이 다정하게 반말로 한 말"이 된다.
+
+    **되받아적기가 정확했던 것만 고른다.** 첫 낱말이 샌 것을 참조로 쓰면
+    그 결함이 다음 세대에 그대로 박힌다.
+
+    재야 할 것은 이음매가 아니라 **드리프트**다 — 복사의 복사라 원본에서
+    멀어질 수 있고, 이 제품은 "그 사람 목소리 같은가"가 전부다."""
+    import re
+    src = os.path.join(ROOT, sub, "출력")
+    G = {os.path.basename(k): v for k, v in
+         json.load(io.open(os.path.join(src, "_되받아적기.json"), encoding="utf-8")).items()}
+    first = lambda s: (re.findall(r"[가-힣]+", s or "") or [""])[0]
+
+    os.makedirs(COND, exist_ok=True)
+    names, gap = {}, np.zeros(int(BOOT_GAP * SR), dtype=np.float32)
+    print(f"{'조건':>10} {'쓴 조각':>8} {'길이':>7}   전사에 쓸 글")
+    print("-" * 78)
+    for tag, label, _ in STYLES:
+        parts, texts = [], []
+        # 회차가 아니라 **입력** 순으로 돈다. 파일명 순으로 고르면 같은 입력의
+        # 세 회차가 먼저 잡혀 "그랬어 비가 왔네"만 되풀이하는 참조가 된다.
+        cand = [os.path.join(src, f"out_{tag}_{c}_{rd}.wav")
+                for rd in range(1, ROUNDS + 1) for c in INPUTS]
+        cand = [x for x in cand if os.path.exists(x)]
+        cand = cand[skip:] + cand[:skip]      # 회차를 돌려 서로 다른 참조를 만든다
+        for q in cand:
+            want = io.open(q[:-4] + ".txt", encoding="utf-8").read().strip()
+            if first(want) != first(G.get(os.path.basename(q)) or ""):
+                continue                      # 샌 것은 안 쓴다
+            y, _ = librosa.load(q, sr=SR, mono=True)
+            y = np.trim_zeros(y, "fb")
+            if (sum(len(x) for x in parts) + len(y)) / SR > BOOT_SEC and parts:
+                break                 # 넘치면 안 넣는다. 잘라 넣지 않는다.
+            parts.append(y); texts.append(want)
+        if not parts:
+            print(f"{label:>10}   쓸 조각이 없습니다")
+            continue
+        out = _norm(np.concatenate([v for x in parts for v in (x, gap)][:-1]))
+        sf.write(os.path.join(COND, f"ref_{tag}.wav"), out, SR, subtype="PCM_16")
+        names[tag] = label + "1세대"
+        io.open(os.path.join(COND, f"ref_{tag}.txt"), "w", encoding="utf-8").write(" ".join(texts))
+        print(f"{label:>10} {len(parts):6}개 {len(out)/SR:6.1f}초   {' '.join(texts)[:44]}")
+    json.dump(names, io.open(os.path.join(COND, "_이름.json"), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    print()
+    print(f"-> {COND}")
+
+
 # ─────────────────────────── run ───────────────────────────
 def run():
     import httpx
@@ -332,6 +389,31 @@ def _spoken(paths):
     return got
 
 
+def _repeated(got):
+    """되받아적은 글 안에서 같은 말이 되풀이되는가.
+
+    소리 온도를 올리면 사람 말하는 느낌이 살아나는 대신 이게 늘어난다.
+    사용자가 "똑같은 말을 두 번 한다"고 먼저 찾았고 기존 지표는 아무것도
+    못 잡았다 — 꼬리·쉼·지지직·속도 어느 것도 되풀이를 안 본다.
+
+      '어제 산책? 비 오는데 산책했어? 기분 전환 산책했어? 기분 전환에...'
+
+    붙어 있는 되풀이(3낱말·2낱말)를 먼저 보고, 없으면 글 전체에서 같은
+    두 낱말 짝이 두 번 나오는지 본다."""
+    w = re.findall(r"[가-힣]+", got or "")
+    for n in (3, 2):
+        for i in range(len(w) - n * 2 + 1):
+            if w[i:i + n] == w[i + n:i + 2 * n]:
+                return " ".join(w[i:i + n])
+    seen = set()
+    for i in range(len(w) - 1):
+        k = " ".join(w[i:i + 2])
+        if k in seen:
+            return k
+        seen.add(k)
+    return ""
+
+
 def _same_first(want, got):
     """첫 낱말이 같은가. 뒷부분은 대체로 멀쩡하고 앞에서만 무너진다."""
     w = re.findall(r"[가-힣]+", want or "")
@@ -360,6 +442,7 @@ def score():
     said = _spoken([r["경로"] for r in rows])
     for r in rows:
         r["말바뀜"] = not _same_first(r.get("답변", ""), said.get(r["경로"]))
+        r["되풀이"] = _repeated(said.get(r["경로"]))
 
     emb = _embeddings([base] + [r["경로"] for r in rows]
                       + sorted(glob.glob(os.path.join(COND, "ref_*.wav"))))
@@ -377,8 +460,8 @@ def score():
              "닮음은 기준 녹음(참조로 쓰지 않은 것)과의 화자 임베딩 코사인이다.", "",
              "**귀 판정과 상관이 없었다(-0.10).** 이 모델은 음색으로 화자를 가리는지라",
              "억양이 달라도 같은 사람으로 본다. 사용자가 실제로 듣는 것은 억양이다.", "",
-             "| 조건 | 정상 | 깨짐 | 첫낱말 바뀜 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
-             "|---|---|---|---|---|---|---|---|---|"]
+             "| 조건 | 정상 | 깨짐 | 첫낱말 바뀜 | 되풀이 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     order = {t: i for i, t in enumerate(str(x).zfill(2) for x in LENGTHS)}
     for n in sorted({r["길이"] for r in rows}, key=lambda t: order.get(str(t).zfill(2), 99)):
         g = [r for r in rows if r["길이"] == n]
@@ -386,10 +469,10 @@ def score():
         sim = [r["닮음"] for r in g if "닮음" in r]
         med = lambda k: np.median([r[k] for r in g if k in r]) if any(k in r for r in g) else float("nan")
         lines.append(
-            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {sum(1 for r in g if r.get('되풀이'))}/{len(g)} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | "
             f"{np.median(sim):.4f} | {min(sim):.4f} |" if sim else
-            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {sum(1 for r in g if r.get('되풀이'))}/{len(g)} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | - | - |")
 
     lines += ["", "체감속도 정상 범위는 0.103~0.128 초/글자다. 벗어나면 쉼이 낀 것이다.", "",
@@ -502,6 +585,9 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "cut":
         cut_style() if "style" in sys.argv else cut()
+    elif cmd == "boot":
+        bootstrap(sys.argv[2] if len(sys.argv) > 2 else "3차_무음2",
+                  int(sys.argv[3]) if len(sys.argv) > 3 else 0)
     elif cmd == "run":
         run()
     elif cmd == "score":
