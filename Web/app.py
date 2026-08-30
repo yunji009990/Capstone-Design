@@ -610,8 +610,11 @@ def _level(y):
 
 
 MID_SAFE = 0.25      # 1~4kHz 비율이 이보다 높으면 경고
+# 길이 권장 구간. Server/app.py 의 session_start 와 같은 값이라야 한다 —
+# 거기서는 로그로만 경고해서 올리는 사람에게 안 보였다.
+REF_MIN_SEC, REF_MAX_SEC = 8, 40
 
-def _warn_text(snr, mid=None):
+def _warn_text(snr, mid=None, dur=None):
     """참조 품질 경고. **두 기준의 성격이 다르다는 점을 알고 쓸 것.**
 
     SNR 은 **길이 폭주**에만 유효하다. 통제 실험(같은 화자·내용에 핑크 잡음만
@@ -621,6 +624,10 @@ def _warn_text(snr, mid=None):
 
     1~4kHz(명료도 대역) 비율이 **지지직**을 가른다. 방송·영상용 후처리가 이 대역을
     밀어올리는데, 모델이 그런 스펙트럼을 받으면 망가진다.
+
+    길이는 **깨짐**을 가른다. 6.3초 참조는 같은 문장에 0초·8.6초·4.3초가 나왔고
+    12초는 정상이었다. 서버(`session_start`)도 같은 구간을 보지만 `print` 라
+    로그에만 남아 올리는 사람에게 안 보였다 — 여기서 응답에 실어 화면에 띄운다.
 
     **전에는 저역(0~300Hz) 30% 미만으로 경고했는데 그건 틀렸다.** 성인·근접 녹음
     12개에만 맞춘 기준이었다. 교실 원거리 녹음(아동 검사 세션)에서 저역 26.7% 짜리가
@@ -636,6 +643,12 @@ def _warn_text(snr, mid=None):
     안 돼 여러 명이 섞인 참조 하나), 14.3% 는 깨끗 · 17.3% 는 약간이라 그 사이는
     표본이 붙어 있다. 좁게 잡으면 SNR 25dB · 저역 30% 때 한 실수를 되풀이한다."""
     out = []
+    if dur is not None and dur < REF_MIN_SEC:
+        out.append(f"참조가 {dur:.1f}초로 짧습니다 (10~30초 권장). 합성이 불안정해집니다 — "
+                   f"실측에서 6.3초 참조는 같은 문장에 0초·8.6초·4.3초가 나왔습니다.")
+    elif dur is not None and dur > REF_MAX_SEC:
+        out.append(f"참조가 {dur:.1f}초로 깁니다 (10~30초 권장). "
+                   f"참조를 먼저 읽고 시작하므로 첫 소리가 그만큼 늦어집니다.")
     if mid is not None and mid >= MID_SAFE:
         out.append(f"명료도 대역이 지나치게 셉니다 (1~4kHz {mid*100:.0f}%, 25% 미만 권장). "
                    f"합성 결과에 지지직이 낄 수 있습니다. 방송·영상용으로 후처리된 "
@@ -662,8 +675,9 @@ def _quality(y, sr=24000):
     이 SNR 은 시간축 하위 분위수를 잡음 바닥으로 본다. 그래서 **계속 변하는
     배경음은 못 잡는다** — 사용자가 "목소리가 묻힐 정도"라고 한 참조가 30.0dB 로
     나왔다. 일정한 잡음에만 쓸 것."""
+    dur = len(y) / sr
     if len(y) < sr // 2:
-        return None, None, None, ""
+        return None, None, None, _warn_text(None, None, dur)
     S = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
     f = np.fft.rfftfreq(1024, 1 / sr)
     b = (f >= 200) & (f <= 6000)                 # 음성 대역만 본다
@@ -677,7 +691,7 @@ def _quality(y, sr=24000):
     r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)) if n >= 2 else np.array([0.0])
     quiet = float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
     # 파이썬 float 이어야 JSON 직렬화된다
-    return round(snr, 1), round(quiet, 3), round(mid, 3), _warn_text(snr, mid)
+    return round(snr, 1), round(quiet, 3), round(mid, 3), _warn_text(snr, mid, dur)
 
 
 @app.post("/publish_direct")
