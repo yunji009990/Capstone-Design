@@ -104,7 +104,6 @@ public class RaonVoiceClient : MonoBehaviour
     const float StartHoldSec = 0.15f;      // 이만큼 연속으로 커야 발화 시작으로 인정
     const float MinUtteranceSec = 0.4f;    // 기침·문 닫는 소리 등을 걸러낸다
     const float ResumeCooldownSec = 0.35f; // 답변 재생 직후 잔향을 다시 잡지 않도록
-    const float DeadMicSec = 3f;           // 이만큼 완전한 무신호면 죽은 장치로 본다
 
     AudioSource _audio;
     AudioClip _recClip;
@@ -113,9 +112,7 @@ public class RaonVoiceClient : MonoBehaviour
 
     readonly float[] _analysis = new float[AnalysisWindow];
     float _noiseFloor = 0.01f;
-    float _listenStart;
     bool _sawSignal;
-    readonly System.Collections.Generic.HashSet<string> _tried = new System.Collections.Generic.HashSet<string>();
     float _aboveTime;
     float _belowTime;
     float _cooldownUntil;
@@ -130,21 +127,8 @@ public class RaonVoiceClient : MonoBehaviour
             Debug.LogError("[Raon] 마이크를 찾을 수 없습니다.");
             return;
         }
-        _micDevice = PickMic(Microphone.devices);
+        _micDevice = Microphone.devices[0];
         Debug.Log($"[Raon] 마이크: {_micDevice}  (연결됨: {string.Join(" / ", Microphone.devices)})");
-    }
-
-    // 헤드셋을 쓰고 있어도 목록 첫 번째가 헤드셋이라는 보장이 없다. 이름으로 고르지 않으면
-    // 머리에 쓴 것과 다른 마이크로 녹음하고, 그 무음을 음성 인식이 지어낸다.
-    static readonly string[] MicPreference = { "Oculus", "Quest", "Headset", "헤드셋" };
-
-    /// <summary>연결된 마이크 중 헤드셋으로 보이는 것을 고른다. 없으면 목록 첫 번째.</summary>
-    public static string PickMic(string[] devices)
-    {
-        foreach (var key in MicPreference)
-            foreach (var d in devices)
-                if (d.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0) return d;
-        return devices.Length > 0 ? devices[0] : "";
     }
 
     void Start()
@@ -185,7 +169,6 @@ public class RaonVoiceClient : MonoBehaviour
         }
         _listening = true;
         _noiseFloor = minLevel;
-        _listenStart = Time.time;
         _sawSignal = false;
         Debug.Log($"[Raon] 청취 시작: {_micDevice}");
     }
@@ -225,27 +208,11 @@ public class RaonVoiceClient : MonoBehaviour
         for (int i = 0; i < _analysis.Length; i++) sum += _analysis[i] * _analysis[i];
         MicLevel = Mathf.Sqrt(sum / _analysis.Length);
 
-        // 열리기는 해도 소리가 안 흐르는 장치가 있다. Oculus 가상 마이크는 목록에
-        // 늘 보이지만 헤드셋이 실제로 연결돼야 신호가 온다. 그런 걸 이름만 보고
-        // 골라 놓으면 아무도 모르는 채로 마이크가 죽어 있다.
-        // 잡음 바닥조차 없는(완전한 0) 상태가 이어지면 다음 후보로 옮긴다.
-        if (MicLevel > 0f) { _sawSignal = true; return; }
-        if (_sawSignal || Time.time - _listenStart < DeadMicSec) return;
-        var list = Microphone.devices;
-        int at = System.Array.IndexOf(list, _micDevice);
-        for (int k = 1; k <= list.Length; k++)
-        {
-            var next = list[(at + k + list.Length) % list.Length];
-            if (next == _micDevice) break;
-            if (_tried.Contains(next)) continue;
-            _tried.Add(next);
-            Debug.LogWarning($"[Raon] {_micDevice} 에서 신호가 없습니다. {next} 로 바꿉니다.");
-            SelectMic(next);
-            return;
-        }
-        _listenStart = Time.time;   // 다 해봤다. 경고만 반복하지 않게 시각을 민다
-        Debug.LogError("[Raon] 어느 마이크에서도 신호가 없습니다. 연결과 권한을 확인하세요.");
+        if (MicLevel > 0f) _sawSignal = true;
     }
+
+    /// <summary>이 마이크에서 소리가 한 번이라도 들어왔는지. 안내에 쓴다.</summary>
+    public bool SawSignal => _sawSignal;
 
     void UpdateVad()
     {

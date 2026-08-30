@@ -1,4 +1,4 @@
-// LevelMeter.cs
+﻿// LevelMeter.cs
 // 마이크로 들어오는 소리 크기를 막대로 보여준다.
 //
 // Image 의 Filled 로 그리면 스프라이트를 잘라 쓰게 되는데, 유니티 기본 스프라이트는
@@ -74,8 +74,12 @@ public class LevelMeter : MonoBehaviour
 
         if (hint != null)
         {
-            // 마이크가 아예 안 열렸는지, 열렸는데 조용한지 구분해 준다.
+            // 마이크가 아예 안 열렸는지, 열렸는데 죽었는지, 그냥 조용한지 셋을 가른다.
+            // 가운데가 중요하다 — Oculus 가상 마이크는 헤드셋이 실제로 연결돼야
+            // 소리가 흐르는데 목록에는 늘 보이고 열리기도 한다. 잡음 바닥조차
+            // 없으면 그 경우이므로, 위에서 다른 마이크를 고르라고 알려준다.
             hint.text = !voice.IsListening ? "<color=#C4614F>마이크가 열리지 않았습니다</color>"
+                      : !voice.SawSignal ? "<color=#C4614F>이 마이크에서는 소리가 안 들어옵니다 — 위에서 다른 것을 골라보세요</color>"
                       : _peak < 0.02f ? "<color=#6B7280>소리가 들어오지 않습니다</color>"
                       : over ? "<color=#C58FA0>말이 들어옵니다</color>"
                       : "<color=#6B7280>조용합니다</color>";
