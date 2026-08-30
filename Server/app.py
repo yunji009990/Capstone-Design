@@ -75,6 +75,10 @@ TEMP  = float(os.environ.get("RAON_TEMP", "1.2"))
 TOPK  = int(os.environ.get("RAON_TOP_K", "20"))
 TOPP  = float(os.environ.get("RAON_TOP_P", "0.8"))
 CONT_FRAMES = int(os.environ.get("RAON_CONT_FRAMES", "200"))   # 200프레임 = 16초
+# 생성 초반에 무음으로 강제하는 프레임 수. 모델 기본값은 2 인데 12.5Hz 이므로 160밀리초,
+# 딱 첫 음절 길이다. 45개 중 7개에서 첫 낱말이 다른 말로 나온 것과 크기가 맞는다
+# ('그랬어?' -> '어렵겠어?'). 비워 두면 모델 기본값을 그대로 쓴다.
+CONT_SIL = os.environ.get("RAON_CONT_SILENCE", "")
 TOKEN = os.environ.get("RAON_TOKEN", "")
 
 S = {"pipe": None, "loaded_at": 0.0, "cont": CONT}
@@ -323,6 +327,8 @@ async def lifespan(app):
                  "ras_repetition_threshold": RAS_THR,
                  "temperature": TEMP, "top_k": TOPK, "top_p": TOPP,
                  "max_new_tokens": CONT_FRAMES})
+    if CONT_SIL != "":
+        cont["continuation_silence_frames"] = int(CONT_SIL)
     tp["tts_continuation"] = cont
     print(f"[설정] tts_continuation — {cont}", flush=True)
 
