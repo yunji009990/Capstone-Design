@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -126,8 +126,21 @@ public class RaonVoiceClient : MonoBehaviour
             Debug.LogError("[Raon] 마이크를 찾을 수 없습니다.");
             return;
         }
-        _micDevice = Microphone.devices[0];
-        Debug.Log($"[Raon] 마이크: {_micDevice}");
+        _micDevice = PickMic(Microphone.devices);
+        Debug.Log($"[Raon] 마이크: {_micDevice}  (연결됨: {string.Join(" / ", Microphone.devices)})");
+    }
+
+    // 헤드셋을 쓰고 있어도 목록 첫 번째가 헤드셋이라는 보장이 없다. 이름으로 고르지 않으면
+    // 머리에 쓴 것과 다른 마이크로 녹음하고, 그 무음을 음성 인식이 지어낸다.
+    static readonly string[] MicPreference = { "Oculus", "Quest", "Headset", "헤드셋" };
+
+    /// <summary>연결된 마이크 중 헤드셋으로 보이는 것을 고른다. 없으면 목록 첫 번째.</summary>
+    public static string PickMic(string[] devices)
+    {
+        foreach (var key in MicPreference)
+            foreach (var d in devices)
+                if (d.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0) return d;
+        return devices.Length > 0 ? devices[0] : "";
     }
 
     void Start()
