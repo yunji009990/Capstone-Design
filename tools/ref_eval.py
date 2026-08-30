@@ -218,7 +218,7 @@ for p in paths:
         out[p] = m.get_embedding(p).squeeze().detach().numpy().tolist()
     except Exception as e:
         out[p] = None
-json.dump(out, open(sys.argv[2], "w"), ensure_ascii=False)
+json.dump(out, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
 '''
 
 
@@ -278,7 +278,7 @@ def score():
              f"조건 {seen('길이')} · 입력 {seen('입력')} · 회차 {seen('회차')} · "
              f"출력 {len(rows)}개 (기대 {len(LENGTHS)*len(INPUTS)*ROUNDS}개)", "",
              "닮음은 `B_대조`(참조로 쓰지 않은 녹음)와의 화자 임베딩 코사인이다.", "",
-             "| 참조 길이 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 평균 | 닮음 최저 |",
+             "| 참조 길이 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
              "|---|---|---|---|---|---|---|---|"]
     for n in LENGTHS:
         g = [r for r in rows if r["길이"] == n]
@@ -290,7 +290,7 @@ def score():
         lines.append(
             f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | "
-            f"{np.mean(sim):.4f} | {min(sim):.4f} |" if sim else
+            f"{np.median(sim):.4f} | {min(sim):.4f} |" if sim else
             f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | - | - |")
 
