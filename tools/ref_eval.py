@@ -25,6 +25,7 @@ import io
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -301,6 +302,43 @@ def _cos(a, b):
     return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
+def _spoken(paths):
+    """생성된 소리를 되받아적어 답변 텍스트와 맞춰본다.
+
+    **소리의 모양만 보면 못 잡는 고장이 있다.** 45개 중 7개에서 첫 낱말이 다른
+    말로 나왔는데(`그랬어?` -> `어렵겠어?`) 꼬리무음·쉼·지지직 어느 것도 안 걸렸다.
+    사용자가 귀로 먼저 찾았다. 문서에도 적혀 있다 — "계측기를 검증할 때는 반드시
+    `/stt` 로 내용까지 볼 것."
+
+    한 번 받아적으면 `출력/_되받아적기.json` 에 남겨 두고 다시 부르지 않는다."""
+    cache = os.path.join(OUT, "_되받아적기.json")
+    got = json.load(io.open(cache, encoding="utf-8")) if os.path.exists(cache) else {}
+    if not isinstance(got, dict):        # 모양이 다르면 버리고 새로 받는다
+        got = {}
+    todo = [q for q in paths if q not in got]
+    if todo:
+        import httpx
+        print(f"  되받아적기 {len(todo)}개...")
+        for q in todo:
+            try:
+                with open(q, "rb") as f:
+                    got[q] = httpx.post(f"{RAON}/stt", headers=_hdr(),
+                                        files={"file": ("x.wav", f.read(), "audio/wav")},
+                                        timeout=120).json().get("text", "")
+            except Exception as e:
+                print(f"  ! {os.path.basename(q)} — {e}")
+                got[q] = None
+        json.dump(got, io.open(cache, "w", encoding="utf-8"), ensure_ascii=False)
+    return got
+
+
+def _same_first(want, got):
+    """첫 낱말이 같은가. 뒷부분은 대체로 멀쩡하고 앞에서만 무너진다."""
+    w = re.findall(r"[가-힣]+", want or "")
+    g = re.findall(r"[가-힣]+", got or "")
+    return bool(w) and bool(g) and w[0] == g[0]
+
+
 def score():
     outs = sorted(glob.glob(os.path.join(OUT, "out_*.wav")))
     if not outs:
@@ -315,8 +353,13 @@ def score():
             with open(p[:-4] + ".txt", encoding="utf-8") as f:
                 ans = f.read()
         a = ref_metrics.analyze(p.replace(os.sep, "/"), ans)
+        a["답변"] = ans
         a.update({"길이": int(tag), "입력": c, "회차": int(rd), "경로": p})
         rows.append(a)
+
+    said = _spoken([r["경로"] for r in rows])
+    for r in rows:
+        r["말바뀜"] = not _same_first(r.get("답변", ""), said.get(r["경로"]))
 
     emb = _embeddings([base] + [r["경로"] for r in rows]
                       + sorted(glob.glob(os.path.join(COND, "ref_*.wav"))))
@@ -328,24 +371,25 @@ def score():
     # 상수가 아니라 실제로 들어온 것을 센다. 중간에 끊긴 실행을 다 돌린 것처럼
     # 읽으면 빠진 조건을 못 알아챈다.
     seen = lambda k: len({r[k] for r in rows})
-    lines = ["# 참조 길이 실험 결과", "",
+    lines = ["# 참조 음성 실험 결과", "",
              f"조건 {seen('길이')} · 입력 {seen('입력')} · 회차 {seen('회차')} · "
-             f"출력 {len(rows)}개 (기대 {len(LENGTHS)*len(INPUTS)*ROUNDS}개)", "",
-             "닮음은 `B_대조`(참조로 쓰지 않은 녹음)와의 화자 임베딩 코사인이다.", "",
-             "| 조건 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
-             "|---|---|---|---|---|---|---|---|"]
-    for n in LENGTHS:
+             f"출력 {len(rows)}개 (기대 {seen(chr(44553)+chr(51060))*len(INPUTS)*ROUNDS}개)", "",
+             "닮음은 기준 녹음(참조로 쓰지 않은 것)과의 화자 임베딩 코사인이다.", "",
+             "**귀 판정과 상관이 없었다(-0.10).** 이 모델은 음색으로 화자를 가리는지라",
+             "억양이 달라도 같은 사람으로 본다. 사용자가 실제로 듣는 것은 억양이다.", "",
+             "| 조건 | 정상 | 깨짐 | 첫낱말 바뀜 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 중앙 | 닮음 최저 |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    order = {t: i for i, t in enumerate(str(x).zfill(2) for x in LENGTHS)}
+    for n in sorted({r["길이"] for r in rows}, key=lambda t: order.get(str(t).zfill(2), 99)):
         g = [r for r in rows if r["길이"] == n]
-        if not g:
-            continue
         ok = sum(1 for r in g if r.get("판정") == "정상")
         sim = [r["닮음"] for r in g if "닮음" in r]
         med = lambda k: np.median([r[k] for r in g if k in r]) if any(k in r for r in g) else float("nan")
         lines.append(
-            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | "
             f"{np.median(sim):.4f} | {min(sim):.4f} |" if sim else
-            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"| {_label(n)} | {ok}/{len(g)} | {len(g)-ok} | {sum(1 for r in g if r.get('말바뀜'))}/{len(g)} | {med('꼬리무음'):.2f} | "
             f"{med('체감속도'):.3f} | {med('지지직'):.2f} | - | - |")
 
     lines += ["", "체감속도 정상 범위는 0.103~0.128 초/글자다. 벗어나면 쉼이 낀 것이다.", "",
