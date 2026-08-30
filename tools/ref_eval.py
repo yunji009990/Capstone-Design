@@ -1,0 +1,356 @@
+"""참조 음성 실험 계측기 — 참조 길이가 안정성과 닮음에 어떻게 작용하는지 잰다.
+
+재는 것 둘.
+  안정성 — 같은 조건을 여러 번 돌렸을 때 매번 제대로 나오는가.
+           `ref_metrics.analyze()` 가 꼬리 무음·내부 쉼·재시작·지지직으로 판정한다.
+  닮음   — 합성된 목소리가 그 사람 같은가.
+           TitaNet 화자 임베딩 코사인. 실측으로 다른 화자 0.16 · 같은 화자 0.94 라
+           깨끗하게 갈린다.
+
+**닮음은 참조가 아니라 `B_대조` 와 견준다.** 생성된 소리를 참조 그 자체와 비교하면
+목소리가 아니라 그 파일의 녹음 특성을 재게 된다. 참조로 쓰지 않은 다른 녹음과
+견줘야 "그 사람 같은가"를 잰 것이 된다.
+
+**판정은 사람이 한다.** 여기서 나오는 숫자는 어느 조건을 들어볼지 고르는 데 쓴다.
+지지직·먹먹함·떨림은 숫자로 못 잡는다는 것이 2026-08-01 에 지표 네 개를 버리며
+확인한 것이다. `listen` 이 만드는 폴더를 귀로 들어야 결론이 난다.
+
+  python tools/ref_eval.py cut      A_참조 에서 길이 조건 파일을 만든다
+  python tools/ref_eval.py run      조건마다 등록하고 합성한다 (오래 걸린다)
+  python tools/ref_eval.py score    지표를 표로 낸다
+  python tools/ref_eval.py listen   들어볼 파일을 블라인드로 정리한다
+"""
+import glob
+import json
+import os
+import random
+import shutil
+import subprocess
+import sys
+import tempfile
+
+import librosa
+import numpy as np
+import soundfile as sf
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ref_metrics                                            # noqa: E402
+
+ROOT = os.path.expanduser("~/Desktop/테스트녹음파일/참조길이실험")
+LISTEN = os.path.expanduser("~/Desktop/테스트녹음파일/들어볼것")
+COND, OUT = os.path.join(ROOT, "조건"), os.path.join(ROOT, "출력")
+
+# 5 초는 깨질 것으로 보고 넣는다 — 실측에서 6.3 초가 같은 문장에 0/8.6/4.3 초를 냈다.
+# 45 초는 서버 권장 상한(40) 밖이라 넣는다. 경계를 안 넘기면 경계를 못 찾는다.
+LENGTHS = [5, 8, 12, 20, 30, 45]
+INPUTS = ["C1", "C2", "C3", "C4", "C5"]
+ROUNDS = 3
+SR = 24000
+
+RAON = os.environ.get("RAON_URL", "http://220.69.208.201:8000")
+TOKEN = os.environ.get("RAON_TOKEN", "23605a891e448b5aa46f82c8640b554c")
+NEMO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "Web", "extraction", "nemo_env", "Scripts", "python.exe")
+
+# 조건 사이에 달라지면 안 되는 것이라 여기 박아 둔다. 120자 미만이면 서버가 경고한다.
+PERSONA = """너는 예순쯤 된 사람이다. 상대를 오래 알고 지낸 사이라 말이 편하다.
+한 번에 한두 문장만 말한다. 길게 늘어놓지 않는다.
+상대가 한 말을 받아서 짧게 되묻거나 맞장구를 친다.
+"그렇구나", "그랬어" 같은 말을 자주 쓴다. 존댓말은 쓰지 않는다."""
+
+
+def _hdr():
+    return {"X-Token": TOKEN} if TOKEN else {}
+
+
+def _find(stem):
+    """확장자를 가리지 않고 찾는다. 휴대폰 녹음은 m4a 로 나온다."""
+    hit = [p for p in glob.glob(os.path.join(ROOT, stem + ".*"))
+           if os.path.splitext(p)[1].lower() in (".wav", ".m4a", ".mp3", ".flac", ".ogg")]
+    if not hit:
+        sys.exit(f"없음: {os.path.join(ROOT, stem)}.wav — _녹음안내.txt 를 보고 넣어주세요")
+    return hit[0]
+
+
+def _norm(y):
+    """Web/app.py `_to_wav24` 의 음량 처리와 같아야 한다. 거기가 바뀌면 여기도 바꾼다."""
+    peak = float(np.abs(y).max())
+    return y * (min(10.0, 0.8 / peak) if peak > 1e-6 else 1.0)
+
+
+def _quiet(y):
+    """쉼 비율. 0.20 을 넘으면 제품(`_cut_silence`)이 참조를 잘라낸다 — 변수가 하나 는다."""
+    w = 2400
+    n = len(y) // w
+    if n < 2:
+        return 0.0
+    r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1))
+    return float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
+
+
+# ─────────────────────────── cut ───────────────────────────
+def cut():
+    src = _find("A_참조")
+    y, _ = librosa.load(src, sr=SR, mono=True)
+    total = len(y) / SR
+    print(f"원본 {os.path.basename(src)} — {total:.1f}초\n")
+    if total < max(LENGTHS):
+        print(f"  ! {max(LENGTHS)}초가 안 됩니다. 그 위 조건은 건너뜁니다.\n")
+    os.makedirs(COND, exist_ok=True)
+
+    print(f"{'조건':>6} {'길이':>7} {'쉼비율':>7} {'peak':>6} {'게인':>5}   비고")
+    print("-" * 62)
+    for n in LENGTHS:
+        if total < n:
+            continue
+        seg = _norm(y[:n * SR])
+        q = _quiet(seg)
+        sf.write(os.path.join(COND, f"ref_{n:02d}.wav"), seg, SR, subtype="PCM_16")
+        note = "제품이라면 쉼을 잘라낸다 (변수 하나 늘어남)" if q >= 0.20 else ""
+        peak = float(np.abs(y[:n * SR]).max())
+        print(f"ref_{n:02d} {n:6.1f}초 {q:7.3f} {peak:6.3f} "
+              f"{min(10.0, 0.8 / max(peak, 1e-6)):5.2f}   {note}")
+    print(f"\n-> {COND}")
+
+
+# ─────────────────────────── run ───────────────────────────
+def run():
+    import httpx
+
+    refs = sorted(glob.glob(os.path.join(COND, "ref_*.wav")))
+    if not refs:
+        sys.exit("조건 파일이 없습니다. 먼저 `cut` 을 돌리세요")
+    ins = {c: _find(c) for c in INPUTS}
+    os.makedirs(OUT, exist_ok=True)
+
+    # 입력 발화는 조건 사이에 완전히 같아야 한다. 한 번만 24k 로 맞춰 두고 재사용한다.
+    prepped = {}
+    for c, p in ins.items():
+        y, _ = librosa.load(p, sr=SR, mono=True)
+        t = os.path.join(tempfile.gettempdir(), f"_refeval_{c}.wav")
+        sf.write(t, y, SR, subtype="PCM_16")
+        prepped[c] = t
+
+    done = fail = 0
+    for ref in refs:
+        tag = os.path.basename(ref)[4:6]
+        sess = f"reflen_{tag}"
+        with open(ref, "rb") as f:
+            r = httpx.post(f"{RAON}/session/start", headers=_hdr(),
+                           data={"persona": PERSONA, "session": sess},
+                           files={"voice": ("voice.wav", f.read(), "audio/wav")},
+                           timeout=300)
+        if r.status_code != 200:
+            print(f"[{tag}] 등록 실패 {r.status_code} — {r.text[:200]}")
+            continue
+        print(f"[{tag}] 등록됨")
+
+        for rd in range(1, ROUNDS + 1):
+            # 회차마다 이력을 비운다. 안 비우면 뒤 회차가 앞 회차의 대화를 이어받아
+            # 답변 길이가 달라지고, 조건이 아니라 턴 수를 재게 된다.
+            httpx.post(f"{RAON}/reset", headers=_hdr(), data={"session": sess}, timeout=30)
+            for c in INPUTS:
+                stem = os.path.join(OUT, f"out_{tag}_{c}_{rd}")
+                if os.path.exists(stem + ".wav"):
+                    done += 1
+                    continue
+                with open(prepped[c], "rb") as f:
+                    t = httpx.post(f"{RAON}/talk", headers=_hdr(),
+                                   data={"session": sess, "show_heard": "1"},
+                                   files={"file": ("in.wav", f.read(), "audio/wav")},
+                                   timeout=300)
+                if t.status_code != 200:
+                    print(f"  [{tag} {c} {rd}] 실패 {t.status_code}")
+                    fail += 1
+                    continue
+                from urllib.parse import unquote
+                with open(stem + ".wav", "wb") as o:
+                    o.write(t.content)
+                with open(stem + ".txt", "w", encoding="utf-8") as o:
+                    o.write(unquote(t.headers.get("X-Answer", "")))
+                done += 1
+            print(f"  [{tag}] {rd}회차 끝 — 누적 {done}개")
+    print(f"\n끝. 성공 {done} · 실패 {fail}\n-> {OUT}")
+
+
+# ─────────────────────────── score ───────────────────────────
+EMB = r'''
+import warnings, logging, os, sys, json
+warnings.filterwarnings("ignore")
+logging.getLogger("nemo_logger").setLevel(logging.ERROR)
+from nemo.collections.asr.models import EncDecSpeakerLabelModel
+m = EncDecSpeakerLabelModel.from_pretrained("titanet_large", map_location="cpu").eval()
+paths = json.load(open(sys.argv[1], encoding="utf-8"))
+out = {}
+for p in paths:
+    try:
+        out[p] = m.get_embedding(p).squeeze().detach().numpy().tolist()
+    except Exception as e:
+        out[p] = None
+json.dump(out, open(sys.argv[2], "w"), ensure_ascii=False)
+'''
+
+
+def _embeddings(paths):
+    """TitaNet 은 nemo_env 에만 있다. 별도 프로세스로 돌려 임베딩만 받아온다."""
+    if not os.path.exists(NEMO):
+        print(f"  ! nemo_env 가 없습니다 ({NEMO}) — 닮음은 건너뜁니다")
+        return {}
+    d = tempfile.gettempdir()
+    sp, ip, op = (os.path.join(d, "_refemb.py"), os.path.join(d, "_refemb_in.json"),
+                  os.path.join(d, "_refemb_out.json"))
+    with open(sp, "w", encoding="utf-8") as f:
+        f.write(EMB)
+    with open(ip, "w", encoding="utf-8") as f:
+        json.dump(paths, f, ensure_ascii=False)
+    print(f"  화자 임베딩 {len(paths)}개 계산 중 (몇 분 걸립니다)...")
+    r = subprocess.run([NEMO, sp, ip, op], capture_output=True)
+    if not os.path.exists(op):
+        print(f"  ! 임베딩 실패 — {r.stderr.decode('utf-8', 'replace')[-400:]}")
+        return {}
+    with open(op, encoding="utf-8") as f:
+        return {k: np.array(v) for k, v in json.load(f).items() if v}
+
+
+def _cos(a, b):
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def score():
+    outs = sorted(glob.glob(os.path.join(OUT, "out_*.wav")))
+    if not outs:
+        sys.exit("출력이 없습니다. 먼저 `run` 을 돌리세요")
+    base = _find("B_대조")
+
+    rows = []
+    for p in outs:
+        tag, c, rd = os.path.basename(p)[4:-4].split("_")
+        ans = ""
+        if os.path.exists(p[:-4] + ".txt"):
+            with open(p[:-4] + ".txt", encoding="utf-8") as f:
+                ans = f.read()
+        a = ref_metrics.analyze(p.replace(os.sep, "/"), ans)
+        a.update({"길이": int(tag), "입력": c, "회차": int(rd), "경로": p})
+        rows.append(a)
+
+    emb = _embeddings([base] + [r["경로"] for r in rows]
+                      + sorted(glob.glob(os.path.join(COND, "ref_*.wav"))))
+    if base in emb:
+        for r in rows:
+            if r["경로"] in emb:
+                r["닮음"] = round(_cos(emb[r["경로"]], emb[base]), 4)
+
+    # 상수가 아니라 실제로 들어온 것을 센다. 중간에 끊긴 실행을 다 돌린 것처럼
+    # 읽으면 빠진 조건을 못 알아챈다.
+    seen = lambda k: len({r[k] for r in rows})
+    lines = ["# 참조 길이 실험 결과", "",
+             f"조건 {seen('길이')} · 입력 {seen('입력')} · 회차 {seen('회차')} · "
+             f"출력 {len(rows)}개 (기대 {len(LENGTHS)*len(INPUTS)*ROUNDS}개)", "",
+             "닮음은 `B_대조`(참조로 쓰지 않은 녹음)와의 화자 임베딩 코사인이다.", "",
+             "| 참조 길이 | 정상 | 깨짐 | 꼬리무음 중앙 | 체감속도 중앙 | 지지직 중앙 | 닮음 평균 | 닮음 최저 |",
+             "|---|---|---|---|---|---|---|---|"]
+    for n in LENGTHS:
+        g = [r for r in rows if r["길이"] == n]
+        if not g:
+            continue
+        ok = sum(1 for r in g if r.get("판정") == "정상")
+        sim = [r["닮음"] for r in g if "닮음" in r]
+        med = lambda k: np.median([r[k] for r in g if k in r]) if any(k in r for r in g) else float("nan")
+        lines.append(
+            f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"{med('체감속도'):.3f} | {med('지지직'):.2f} | "
+            f"{np.mean(sim):.4f} | {min(sim):.4f} |" if sim else
+            f"| {n}초 | {ok}/{len(g)} | {len(g)-ok} | {med('꼬리무음'):.2f} | "
+            f"{med('체감속도'):.3f} | {med('지지직'):.2f} | - | - |")
+
+    lines += ["", "체감속도 정상 범위는 0.103~0.128 초/글자다. 벗어나면 쉼이 낀 것이다.", "",
+              "## 깨진 것", ""]
+    bad = [r for r in rows if r.get("판정") != "정상"]
+    if bad:
+        lines += ["| 파일 | 길이 | 판정 | 총 | 꼬리무음 | 재시작 |", "|---|---|---|---|---|---|"]
+        lines += [f"| {r['파일']} | {r['길이']}초 | {r['판정']} | {r['총']} | "
+                  f"{r.get('꼬리무음','-')} | {r.get('재시작','-')} |" for r in bad]
+    else:
+        lines.append("없다.")
+
+    lines += ["", "## 참조 자체의 닮음 (정상성 확인)", "",
+              "조건 참조가 `B_대조` 와 얼마나 닮았는지. 여기서 낮으면 자른 구간 탓이지",
+              "모델 탓이 아니다.", "", "| 조건 | 닮음 |", "|---|---|"]
+    for p in sorted(glob.glob(os.path.join(COND, "ref_*.wav"))):
+        if p in emb and base in emb:
+            lines.append(f"| {os.path.basename(p)} | {_cos(emb[p], emb[base]):.4f} |")
+
+    path = os.path.join(ROOT, "결과.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print("\n".join(lines[:14]))
+    print(f"\n-> {path}")
+
+
+# ─────────────────────────── listen ───────────────────────────
+HEAR = ["C1", "C3"]        # 12개로 끊는다. 54개는 귀로 못 본다
+
+
+def listen(clear=False):
+    if os.path.isdir(LISTEN) and os.listdir(LISTEN):
+        if not clear:
+            sys.exit(f"{LISTEN} 가 비어 있지 않습니다.\n"
+                     f"이전 회차를 지우고 새로 담으려면 --clear 를 붙이세요")
+        for f in os.listdir(LISTEN):
+            os.remove(os.path.join(LISTEN, f))
+    os.makedirs(LISTEN, exist_ok=True)
+
+    picks = []
+    for gi, c in enumerate(HEAR, 1):
+        got = [(n, os.path.join(OUT, f"out_{n:02d}_{c}_1.wav")) for n in LENGTHS]
+        got = [(n, p) for n, p in got if os.path.exists(p)]
+        # 이름에 조건이 보이면 판정이 오염된다. 가설을 이미 말씀드린 뒤라 블라인드로 낸다.
+        # 씨앗을 박아 두어야 _정답.txt 와 어긋나지 않는다.
+        random.Random(20260830 + gi).shuffle(got)
+        for si, (n, p) in enumerate(got):
+            name = f"{gi}-{'가나다라마바사'[si]}.wav"
+            shutil.copy(p, os.path.join(LISTEN, name))
+            picks.append((name, n, c))
+
+    shutil.copy(_find("B_대조"), os.path.join(LISTEN, "기준_원본목소리.wav"))
+
+    with open(os.path.join(LISTEN, "_들어보기.txt"), "w", encoding="utf-8") as f:
+        f.write("""참조 길이 실험 — 들어보기
+==================================
+
+먼저 `기준_원본목소리.wav` 를 한 번 들으세요. 닮음의 기준입니다.
+
+그 다음 1-가 부터 순서대로 들으시면서 아래에 적어주세요.
+같은 묶음(1-*)은 전부 같은 말에 대한 답이고, 참조 길이만 다릅니다.
+
+  닮음   원본과 얼마나 같은 사람으로 들리는가.  1(다른 사람) ~ 5(그 사람)
+  깨짐   말이 중간에 끊기거나, 끝나고도 계속 소리가 나거나, 지지직거리는가. O / X
+
+조건은 일부러 섞어 두었습니다. 순서에 뜻이 없습니다.
+다 들으신 뒤에 `_정답.txt` 를 여세요.
+
+        닮음(1~5)   깨짐(O/X)   메모
+""")
+        for name, _, _ in picks:
+            f.write(f"  {name[:-4]:8}                                \n")
+
+    with open(os.path.join(LISTEN, "_정답.txt"), "w", encoding="utf-8") as f:
+        f.write("다 들으신 뒤에 여세요.\n\n")
+        for name, n, c in picks:
+            f.write(f"  {name[:-4]:8} = 참조 {n}초 (입력 {c})\n")
+
+    print(f"{len(picks)}개 + 기준 1개 -> {LISTEN}")
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "cut":
+        cut()
+    elif cmd == "run":
+        run()
+    elif cmd == "score":
+        score()
+    elif cmd == "listen":
+        listen("--clear" in sys.argv)
+    else:
+        print(__doc__)
