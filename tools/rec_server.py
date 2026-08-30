@@ -68,7 +68,17 @@ async def save(name: str, request: Request):
     if len(raw) < 1000:
         raise HTTPException(400, "녹음이 비어 있습니다")
     os.makedirs(ROOT, exist_ok=True)
-    with open(os.path.join(ROOT, name + ".wav"), "wb") as f:
+    dst = os.path.join(ROOT, name + ".wav")
+    # 덮어쓰기 전에 직전 것을 옮겨 둔다. 잘못 눌러 좋은 녹음을 날리면 되돌릴
+    # 방법이 없다 — 실제로 54.3초짜리 참조가 10.6초로 덮인 적이 있다.
+    if os.path.exists(dst):
+        old_dir = os.path.join(ROOT, "이전")
+        os.makedirs(old_dir, exist_ok=True)
+        n = 1
+        while os.path.exists(os.path.join(old_dir, f"{name}_{n}.wav")):
+            n += 1
+        os.replace(dst, os.path.join(old_dir, f"{name}_{n}.wav"))
+    with open(dst, "wb") as f:
         f.write(raw)
     return {"ok": True, "bytes": len(raw)}
 

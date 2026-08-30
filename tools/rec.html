@@ -42,6 +42,7 @@
   .time { font-size:30px; font-variant-numeric:tabular-nums; min-width:110px; }
   .time.short { color:var(--rec); }
   .time.ok { color:var(--ok); }
+  .wall { color:var(--dim); font-size:13px; font-variant-numeric:tabular-nums; }
   .meter { flex:1; min-width:140px; height:12px; background:#111317;
            border-radius:6px; overflow:hidden; }
   .meter i { display:block; height:100%; width:0; background:var(--ok); }
@@ -76,7 +77,10 @@
 
     <div class="bar">
       <button class="rec" id="go">● 녹음 시작</button>
-      <div class="time" id="time">00:00</div>
+      <div>
+        <div class="time" id="time">00:00</div>
+        <div class="wall" id="wall">전체 00:00</div>
+      </div>
       <div class="meter"><i id="lvl"></i></div>
     </div>
     <div class="msg" id="msg"></div>
@@ -92,7 +96,7 @@
 
 <script>
 const ITEMS = [
-  { id:"A_참조", title:"A. 참조용 연속 녹음", min:50,
+  { id:"A_참조", title:"A. 참조용 연속 녹음", min:52,
     hint:"읽지 말고 그냥 말해주세요. 대본을 읽으면 낭독조가 참조에 박히고 합성도 낭독조로 나옵니다. " +
          "그리고 끊지 말고 이어서 — 뜸을 들이면 그 쉼이 합성 결과에 그대로 나옵니다.",
     topics:[
@@ -102,17 +106,17 @@ const ITEMS = [
       ["이번 주말에 하고 싶은 것",        "이번 주말에는…"],
       ["요즘 보고 있는 것 (드라마·영상·게임)", "요즘 보고 있는 건…"],
     ]},
-  { id:"B_대조", title:"B. 대조용", min:18,
+  { id:"B_대조", title:"B. 대조용", min:15,
     hint:"참조로 쓰지 않고 닮음의 기준선으로만 씁니다. 읽으셔도 되는데, " +
          "또박또박 낭독조로 말고 평소 말하듯 자연스럽게 읽어주세요.",
     script:"요즘 날씨가 좀 이상한 것 같아요.\n아침에는 쌀쌀한데 낮이 되면 겉옷을 벗어도 될 정도로 풀리더라고요.\n" +
            "그래서 뭘 입고 나가야 할지 매번 고민이 됩니다.\n이번 주는 계속 이런 날씨가 이어진다고 하고,\n" +
            "주말쯤에 비가 한 번 온다고 하네요." },
-  { id:"C1", title:"C1. 질문 발화", min:1.5, script:"오늘 하루 종일 비가 왔어." },
-  { id:"C2", title:"C2. 질문 발화", min:1.5, script:"아침을 늦게 먹었어." },
-  { id:"C3", title:"C3. 질문 발화", min:1.5, script:"요즘 잠을 잘 못 자." },
-  { id:"C4", title:"C4. 질문 발화", min:1.5, script:"어제 오랜만에 산책을 했어." },
-  { id:"C5", title:"C5. 질문 발화", min:1.5, script:"일이 좀 바빴어." },
+  { id:"C1", title:"C1. 질문 발화", min:1.0, script:"오늘 하루 종일 비가 왔어." },
+  { id:"C2", title:"C2. 질문 발화", min:1.0, script:"아침을 늦게 먹었어." },
+  { id:"C3", title:"C3. 질문 발화", min:1.0, script:"요즘 잠을 잘 못 자." },
+  { id:"C4", title:"C4. 질문 발화", min:1.0, script:"어제 오랜만에 산책을 했어." },
+  { id:"C5", title:"C5. 질문 발화", min:1.0, script:"일이 좀 바빴어." },
 ];
 const C_HINT = "계측기 입력입니다. 대사 그대로 읽어주세요 — 입력이라 말투는 상관없습니다. " +
                "말 끝나고 1초쯤 여유를 두고 멈추세요.";
@@ -122,6 +126,7 @@ const TOPIC_SEC = 10;                 // 화제 하나에 이만큼 쓰면 넘�
 const $ = s => document.querySelector(s);
 let cur = 0, saved = {}, rec = null, chunks = [], ac = null, an = null;
 let stream = null, t0 = 0, raf = 0, tick = 0, lastWav = null, quietSince = 0;
+let voiced = 0, lastFrame = 0;
 
 // ── 화면 ──────────────────────────────────────────────
 function paintSteps() {
@@ -136,7 +141,7 @@ function paintSteps() {
 function paint() {
   const it = ITEMS[cur];
   paintSteps();
-  $("#title").textContent = it.title + (it.min >= 10 ? ` — ${it.min}초 이상` : "");
+  $("#title").textContent = it.title + (it.min >= 10 ? ` — 말한 시간 ${it.min}초 이상` : "");
   $("#hint").textContent = it.hint || "";
   $("#pb").hidden = true;
   $("#msg").textContent = ""; $("#msg").className = "msg";
@@ -200,7 +205,7 @@ async function start() {
   rec.onstop = finish;
   rec.start();
 
-  t0 = Date.now(); quietSince = 0;
+  t0 = lastFrame = Date.now(); quietSince = 0; voiced = 0;
   $("#go").textContent = "■ 멈춤";
   $("#pb").hidden = true;
   $("#msg").textContent = ""; $("#msg").className = "msg";
@@ -226,11 +231,17 @@ function loop() {
   $("#msg").className = "msg" + (hush ? " bad" : "");
   $("#msg").textContent = hush ? "▲ 쉬고 있습니다 — 이어서 말해주세요" : "";
 
-  const sec = (Date.now() - t0) / 1000;
-  const m = String(Math.floor(sec / 60)).padStart(2, "0");
-  const s2 = String(Math.floor(sec % 60)).padStart(2, "0");
-  $("#time").textContent = `${m}:${s2}`;
-  $("#time").className = "time " + (sec >= ITEMS[cur].min ? "ok" : "short");
+  // 목표는 벽시계가 아니라 말한 시간이다. 쉼은 참조에서 어차피 잘려 나가므로
+  // 벽시계로는 얼마나 더 말해야 하는지 알 수가 없다 — 1차에서 54.3초를 채웠는데
+  // 쉼을 빼면 30.4초였고, 45초 조건이 그대로 죽었다.
+  const now = Date.now();
+  if (rms > 0.012) voiced += (now - lastFrame) / 1000;
+  lastFrame = now;
+  const clock = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:` +
+                     `${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  $("#time").textContent = clock(voiced);
+  $("#time").className = "time " + (voiced >= ITEMS[cur].min ? "ok" : "short");
+  $("#wall").textContent = `전체 ${clock((now - t0) / 1000)}`;
   raf = requestAnimationFrame(loop);
 }
 
@@ -256,8 +267,9 @@ async function finish() {
   const out = await off.startRendering();
   ac.close(); rec = null;
 
-  const sec = out.duration;
-  lastWav = wav(out.getChannelData(0), 24000);
+  const pcm = out.getChannelData(0);
+  const sec = out.duration, said = voicedSec(pcm, 24000);
+  lastWav = wav(pcm, 24000);
   $("#pb").hidden = false;
   $("#pb").src = URL.createObjectURL(lastWav);
 
@@ -269,15 +281,30 @@ async function finish() {
   }
   saved[it.id] = sec.toFixed(1);
   paintSteps();
-  if (sec < it.min) {
+  if (said < it.min) {
     $("#msg").className = "msg bad";
-    $("#msg").textContent = `저장했지만 ${sec.toFixed(1)}초입니다 — ${it.min}초 이상이 필요합니다. 다시 녹음해 주세요.`;
+    $("#msg").textContent = `저장했지만 말한 시간이 ${said.toFixed(1)}초입니다 (전체 ${sec.toFixed(1)}초) `
+      + `— ${it.min}초 이상이 필요합니다. 쉼은 참조에서 잘려 나가므로 안 셉니다. 다시 녹음해 주세요.`;
   } else {
     $("#msg").className = "msg good";
-    $("#msg").textContent = `저장됨 (${sec.toFixed(1)}초). 들어보고 괜찮으면 다음으로 넘어가세요.`;
+    $("#msg").textContent = `저장됨 — 말한 시간 ${said.toFixed(1)}초 (전체 ${sec.toFixed(1)}초). `
+      + `들어보고 괜찮으면 다음으로 넘어가세요.`;
     const nx = ITEMS.findIndex((x, i) => i > cur && !saved[x.id]);
     if (nx >= 0) setTimeout(() => { cur = nx; paint(); }, 1200);
   }
+}
+
+function voicedSec(f32, sr) {
+  // 0.1초 칸으로 나눠 말소리가 있는 칸만 센다. 저장한 뒤 최종 판정에 쓴다 —
+  // 화면의 숫자는 프레임 단위 누적이라 조금 어긋날 수 있다.
+  const w = Math.round(sr / 10);
+  let n = 0;
+  for (let i = 0; i + w <= f32.length; i += w) {
+    let e = 0;
+    for (let k = i; k < i + w; k++) e += f32[k] * f32[k];
+    if (Math.sqrt(e / w) > 0.012) n++;
+  }
+  return n / 10;
 }
 
 function wav(f32, sr) {
