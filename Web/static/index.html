@@ -47,7 +47,7 @@
   <div class="bar" id="bar">상태 확인 중…</div>
 
   <div class="steptop">
-    <span class="badge" id="steplabel">단계 1 / 9 · 시작</span>
+    <span class="badge" id="steplabel">단계 1 / 10 · 시작</span>
     <div class="prog"><div id="progbar"></div></div>
   </div>
 
@@ -75,7 +75,7 @@
 
   <!-- 목소리를 맨 앞에서 받는다. 화자 분리는 CPU 로 1분 남짓 걸리는데, 그동안
        나머지 질문에 답하게 두면 기다리는 시간이 통째로 사라진다. 고르는 것은
-       7단계에서 한다 — 그때쯤이면 결과가 나와 있다. -->
+       8단계에서 한다 — 그때쯤이면 결과가 나와 있다. -->
   <div class="card step" data-step="2" style="display:none">
     <h2>목소리</h2>
     <div class="note">목소리부터 받습니다. <b>다음</b>을 누르면 뒤에서 화자를 갈라내기 시작하고,
@@ -97,7 +97,49 @@
       한 명뿐인 녹음이면 <b>한 명 (분리 안 함)</b>을 고르세요. 가르지 않고 그대로 씁니다.</div>
   </div>
 
+  <!-- 사진은 3D 모델을 만드는 데만 쓴다. 목소리 바로 뒤에 두는 것은, 올릴 파일 둘을
+       한 자리에서 끝내야 참여자가 자료를 두 번 찾지 않기 때문이다. 없어도 넘어간다. -->
   <div class="card step" data-step="3" style="display:none">
+    <div class="titlerow"><h2>사진</h2><span class="optional">건너뛸 수 있음</span></div>
+    <div class="note">사진으로 <b>VR 안에 세울 인물의 모습</b>을 만듭니다.
+      <b>없어도 대화는 그대로 됩니다</b> — 모습만 보이지 않습니다.</div>
+
+    <div id="imgdrop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+        <circle cx="8.5" cy="10" r="1.6"></circle>
+        <path d="M21 16l-5-5-6.5 8"></path>
+      </svg>
+      <div class="lead">사진을 끌어다 놓거나 클릭해서 선택</div>
+      <div class="sm">JPG · PNG 한 장</div>
+    </div>
+
+    <div class="shot" id="shot" style="display:none">
+      <img id="s_imgprev" alt="올린 사진 미리보기">
+      <div class="info">
+        <div class="fname" id="imgname">-</div>
+        <div class="fmeta" id="imgmeta">-</div>
+        <div class="acts">
+          <button class="ghost" id="imgchange">바꾸기</button>
+          <button class="ghost" id="imgclear">지우기</button>
+        </div>
+      </div>
+    </div>
+
+    <input type="file" id="s_img" accept="image/jpeg,image/png" hidden>
+
+    <div class="tips">
+      <div class="tip"><b>정면 전신</b><span>얼굴부터 발까지 한 장에 담긴 것</span></div>
+      <div class="tip"><b>혼자 나온 것</b><span>다른 사람이 있으면 섞입니다</span></div>
+      <div class="tip"><b>또렷한 얼굴</b><span>흐리거나 어두우면 뭉갭니다</span></div>
+    </div>
+
+    <div class="hint">등록할 때 함께 보냅니다. 모델을 빚는 데 몇 분 걸리지만
+      <b>기다리지 않아도 됩니다</b> — 완성되면 체험 도중에 나타납니다.</div>
+  </div>
+
+  <div class="card step" data-step="4" style="display:none">
     <h2>기본 정보</h2>
     <div class="note">그분을 떠올릴 때 먼저 생각나는 것들을 적어 주세요.</div>
     <div class="row" style="align-items:flex-start; gap:16px">
@@ -140,7 +182,7 @@
 
   </div>
 
-  <div class="card step" data-step="4" style="display:none">
+  <div class="card step" data-step="5" style="display:none">
     <h2>추억</h2>
     <div class="note">떠오르는 장면 두세 가지면 충분합니다. 대화 중에 그분이 먼저 꺼낼 이야기가 됩니다.</div>
     <label>함께한 추억</label>
@@ -161,15 +203,9 @@
       <input type="text" class="s_mem" placeholder="" style="flex:1">
     </div>
 
-    <label>사진 (선택) — 3D 모델을 만듭니다</label>
-    <div class="hint" style="margin-top:-4px">정면 전신 사진 한 장. 얼굴이 또렷하고 다른 사람이 안 나온 것이 좋습니다.
-      등록할 때 함께 보내고, 완성되면 서버가 유니티로 넘겨줍니다.</div>
-    <input type="file" id="s_img" accept="image/jpeg,image/png" style="margin-top:4px">
-    <img id="s_imgprev" style="display:none; max-height:180px; border-radius:6px; margin-top:8px">
-
   </div>
 
-  <div class="card step" data-step="5" style="display:none">
+  <div class="card step" data-step="6" style="display:none">
     <h2>마음</h2>
     <div class="note">지금 어렵게 느껴진다면 한 칸만 채워도 괜찮아요. 어려운 칸은 비워 두셔도 됩니다.</div>
     <label>그분이 가장 그리운 순간은 언제인가요?</label>
@@ -182,13 +218,13 @@
       사용자가 스스로 말을 꺼낼 때 자연스럽게 받도록 해 두었습니다.</div>
   </div>
 
-  <div class="card step" data-step="6" style="display:none">
+  <div class="card step" data-step="7" style="display:none">
     <h2>대화 톤</h2>
     <div class="note">체험 중 인물이 어떤 어조로 응답하길 원하는지 골라 주세요.</div>
     <div id="tones"></div>
   </div>
 
-  <div class="card step" data-step="7" style="display:none">
+  <div class="card step" data-step="8" style="display:none">
     <h2>목소리 고르기</h2>
     <div class="hint" id="jobinfo"></div>
     <!-- 분리가 뒤에서 돌기 때문에 실패는 여기서야 드러난다. 6장을 되짚어
@@ -214,7 +250,7 @@
     </div>
   </div>
 
-  <div class="card step" data-step="8" style="display:none">
+  <div class="card step" data-step="9" style="display:none">
     <h2>인물 확인</h2>
     <div class="note">설문으로 만든 것입니다. <b>어색한 곳은 직접 고치세요.</b>
       특히 대화 예시가 그 사람답게 들리는지 보세요.</div>
@@ -232,7 +268,7 @@
       실제 인물의 것으로 바꾸세요.</b> 구체적인 장면 한 줄이 성격 설명 열 줄보다 낫습니다.</div>
   </div>
 
-  <div class="card step" data-step="9" style="display:none">
+  <div class="card step" data-step="10" style="display:none">
     <h2>등록</h2>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
     <div class="row">
@@ -376,9 +412,9 @@ $("#testfill").onclick = () => {
 
 // ── 단계 이동 ──
 // 설문처럼 한 화면에 한 가지만 묻는다. 긴 폼을 한꺼번에 보여주면 사람이 지친다.
-const LABELS = { 1:"시작", 2:"목소리", 3:"기본 정보", 4:"추억", 5:"마음",
-                 6:"대화 톤", 7:"목소리 고르기", 8:"인물 확인", 9:"등록" };
-const LAST = 9;
+const LABELS = { 1:"시작", 2:"목소리", 3:"사진", 4:"기본 정보", 5:"추억", 6:"마음",
+                 7:"대화 톤", 8:"목소리 고르기", 9:"인물 확인", 10:"등록" };
+const LAST = 10;
 let step = 1, personaEdited = false;
 
 $("#persona").oninput = $("#knowledge").oninput = () => { personaEdited = true; };
@@ -404,13 +440,13 @@ function blockedReason(n) {
   if (n === 1 && !($("#c1").checked && $("#c2").checked && $("#c3").checked))
     return "동의 세 가지를 모두 확인해 주세요.";
   if (n === 2 && !pending) return "영상이나 음성을 올려 주세요.";
-  if (n === 3 && !$("#s_rel").value.trim())
+  if (n === 4 && !$("#s_rel").value.trim())
     return "관계를 적어 주세요. 말투 전체가 여기서 정해집니다.";
-  if (n === 7 && mode === "direct") return null;      // 고를 것이 없다
-  if (n === 7 && !result)
+  if (n === 8 && mode === "direct") return null;      // 고를 것이 없다
+  if (n === 8 && !result)
     return jobErr ? "다시 시도하거나, 2단계로 돌아가 다른 파일을 올려 주세요."
                   : "화자를 갈라내는 중입니다. 조금만 기다려 주세요.";
-  if (n === 7 && !picked) return "쓸 목소리를 골라 주세요.";
+  if (n === 8 && !picked) return "쓸 목소리를 골라 주세요.";
   return null;
 }
 
@@ -431,7 +467,7 @@ $("#next").onclick = async () => {
   if (why) { $("#navinfo").textContent = why; return; }
   if (step === 2) start();          // 여기서 띄워 두고, 답하는 동안 뒤에서 돈다
   const n = step + 1;
-  if (n === 8 && !personaEdited) await makePersona();
+  if (n === 9 && !personaEdited) await makePersona();
   showStep(n);
 };
 $("#prev").onclick = () => showStep(step - 1);
@@ -508,7 +544,7 @@ function refresh() {
       : `참조: <b>${picked}</b> — 화자 분리가 만든 <b>조각 이어붙인</b> 음성`;
   // 목소리 장에서는 준비가 될 때까지 다음을 잠근다. 열어 두면 등록 직전에야
   // 막혀서 무엇이 모자란지 알기 어렵다.
-  const why = (step === 2 || step === 7) ? blockedReason(step) : null;
+  const why = (step === 2 || step === 8) ? blockedReason(step) : null;
   $("#next").disabled = !!why;
   $("#navinfo").textContent = why || "";
   $("#retry").style.display = (mode !== "direct" && jobErr) ? "" : "none";
@@ -687,11 +723,51 @@ function surveyPayload() {
   };
 }
 
-$("#s_img").onchange = () => {
+// 파일 입력은 숨겨 두고 드롭존이 대신 연다 — 오디오 쪽과 같은 몸짓으로 다루게 한다.
+const imgdrop = $("#imgdrop");
+
+function showShot() {
   const f = $("#s_img").files[0];
-  $("#s_imgprev").style.display = f ? "" : "none";
-  if (f) $("#s_imgprev").src = URL.createObjectURL(f);
-};
+  $("#shot").style.display = f ? "" : "none";
+  imgdrop.style.display = f ? "none" : "";
+  if (!f) { $("#s_imgprev").removeAttribute("src"); return; }
+  const size = f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + " KB"
+                                : (f.size / 1048576).toFixed(1) + " MB";
+  $("#imgname").textContent = f.name;
+  $("#imgmeta").textContent = size;
+  // 원본 크기도 보여준다 — 너무 작은 사진은 3D 가 뭉개지는데 올릴 때는 알 길이 없다.
+  const im = $("#s_imgprev");
+  im.onload = () => {
+    im.onload = null;
+    $("#imgmeta").textContent = `${size} · ${im.naturalWidth}\u00d7${im.naturalHeight}`
+      + (Math.min(im.naturalWidth, im.naturalHeight) < 512 ? " — 작습니다" : "");
+  };
+  im.src = URL.createObjectURL(f);
+}
+
+// 끌어다 놓은 것은 input 에 직접 넣어 준다. 등록할 때 files[0] 하나만 보므로
+// 고르는 경로가 둘이어도 뒤쪽 코드는 그대로다.
+function pickImage(f) {
+  if (!f) return;
+  if (!/^image\/(jpeg|png)$/.test(f.type)) {
+    $("#navinfo").textContent = "JPG 또는 PNG 파일만 됩니다.";
+    return;
+  }
+  const dt = new DataTransfer(); dt.items.add(f);
+  $("#s_img").files = dt.files;
+  $("#navinfo").textContent = "";
+  showShot();
+}
+
+$("#s_img").onchange = showShot;
+imgdrop.onclick = () => $("#s_img").click();
+$("#imgchange").onclick = () => $("#s_img").click();
+$("#imgclear").onclick = () => { $("#s_img").value = ""; showShot(); };
+["dragover", "dragenter"].forEach(e => imgdrop.addEventListener(e, ev => {
+  ev.preventDefault(); imgdrop.classList.add("on"); }));
+["dragleave", "drop"].forEach(e => imgdrop.addEventListener(e, ev => {
+  ev.preventDefault(); imgdrop.classList.remove("on"); }));
+imgdrop.addEventListener("drop", ev => pickImage(ev.dataTransfer.files[0]));
 
 // 모델은 몇 분 걸린다. 등록은 이미 끝났으니 진행 상황만 따로 알려준다.
 //
