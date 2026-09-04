@@ -809,7 +809,9 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # 둘이 겹칠 때만 죽는다 — 하나만 남기면 어느 쪽이든 열린 물음은 산다.
        # 0=둘다끔 1=둘다(옛 기본) 2=둘다+우선순위줄 3=전제만 4=때만
        "judge_r45": int(os.environ.get("RAON_JUDGE_R45", "4")),
-       "learn_mode": LEARN_MODE}
+       "learn_mode": LEARN_MODE,
+       # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
+       "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1"))}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -822,6 +824,14 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
 # 답한다. 시킨 대로 한 것이다. 순서를 정해 주고, 무엇을 되물을지까지 말한다.
 JUDGE_NOTE = (" (모르는 것이다. 모른다는 말을 먼저 하고, 그 다음 상대에게 알려 달라고 해라."
               " 물음을 그대로 되풀이하지 마라. 지어내지 마라.)")
+
+# 모른다고 판정된 턴에서 답이 실제로 얼버무렸는가. **모델이 지시를 자주 무시한다** —
+# 판정이 10/10 맞았는데 답은 6/10 에서 강릉을 갖다 붙였다. 지시를 더 세게 하는 것은
+# 이 저장소에서 실패하는 길이라, 뽑고 나서 재보고 안 걸리면 다시 뽑는다
+# (꼬리 반복을 REGEN 으로 잡는 것과 같은 방식).
+HEDGED = re.compile(r"모르|몰라|몰랐|기억(이|은)?\s*(잘\s*)?안\s*나|기억이 가물|가물|"
+                    r"생각이\s*안\s*나|글쎄|헷갈|확실하지 않|처음 듣|들은 적 없|"
+                    r"말 안 했|얘기 안 했|알려 ?(줘|주라|주렴|줄)|(말|얘기)해 ?(봐|줘|줄)")
 
 
 def unknown(session, heard):
@@ -980,7 +990,7 @@ def _tail(text):
     ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
     return ss[-1] if ss else ""
 
-def answer_for(session, msgs, tries=2):
+def answer_for(session, msgs, tries=2, must_hedge=False):
     """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
 
     실측에서 16턴부터 20턴까지 "면접 끝나면 연락해."가 다섯 턴 연속 붙었다. 모델이
@@ -994,6 +1004,10 @@ def answer_for(session, msgs, tries=2):
     a = ""
     for i in range(tries):
         a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
+        if must_hedge and DBG["hedge_regen"] and not HEDGED.search(a):
+            print(f"[{session}] 모른다 판정인데 안 얼버무렸다, 다시 뽑는다 — {a[:40]!r}", flush=True)
+            continue
         t = _tail(a)
         if not REGEN or not prev or len(t) < 8:
             return a
@@ -1059,7 +1073,7 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
         t0 = time.time()
         note = JUDGE_NOTE if unknown(session, text) else ""
         msgs = build_msgs(session, {"role": "user", "content": text}, note)
-        answer = answer_for(session, msgs)
+        answer = answer_for(session, msgs, must_hedge=bool(note))
         record(session, text, answer)
         # 여기만 동기로 적립한다. 계측기가 쓰는 길이라 이번 응답에 결과가 실려야
         # 하고, 글 경로에는 합성이 없어 첫 소리 지연에 영향을 주지 않는다.
@@ -1117,7 +1131,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]}, note)
-            answer = answer_for(session, msgs)
+            answer = answer_for(session, msgs, must_hedge=bool(note))
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
@@ -1163,7 +1177,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
         note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
-        answer = answer_for(session, msgs)
+        answer = answer_for(session, msgs, must_hedge=bool(note))
         if early:
             record(session, heard, answer)
         t1 = time.time()
