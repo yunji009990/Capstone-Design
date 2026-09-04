@@ -1002,6 +1002,10 @@ def answer_for(session, msgs, tries=2, must_hedge=False):
     때만 본다. 다시 뽑을 때는 온도를 올려야 같은 것이 또 나오지 않는다."""
     prev = [_tail(m["content"]) for m in HIST.get(session, []) if m["role"] == "assistant"]
     a = ""
+    # 얼버무림 검사는 재시도 예산을 따로 쓴다. 같이 쓰면 꼬리 반복 검사에 기회가
+    # 한 번밖에 안 남는다 — 95턴 대본에서 꼬리고착이 24 -> 58 로 뛰었다.
+    if must_hedge and DBG["hedge_regen"]:
+        tries += 1
     for i in range(tries):
         a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
