@@ -753,7 +753,10 @@ ASKING = re.compile(r"\?|기억\s*(나|해|하)|알아|아니야|뭐(야|였|지
 BACKREF = re.compile(r"(라|다|자|냐)고\s*(했|하)|랬|말했|얘기했|"
                      r"그때|아까|방금|저번|지난번")
 
-JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
+JUDGE_HEAD_A = "어떤 사람에 대해 알려진 것은 아래가 전부다."
+JUDGE_HEAD_B = "아래가 지금 아는 것 전부다."
+
+JUDGE_PROMPT = """{head}
 ===== 아는 것 =====
 {known}
 ===== 끝 =====
@@ -782,7 +785,8 @@ JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 # (같은 프로세스에서 9/10 다음에 3/10) A 를 다 돌고 B 를 돌면 드리프트가 효과로
 # 읽힌다. 교대로 걸어야 가른다. POST /dbg 로 바꾼다.
 DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
-       "judge_turns": JUDGE_TURNS}
+       "judge_turns": JUDGE_TURNS,
+       "judge_head": "A"}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -826,7 +830,8 @@ def unknown(session, heard):
               + "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}"
                           for m in h)
               + "\n===== 끝 =====\n") if h else ""
-    prompt = JUDGE_PROMPT.format(known=known, heard=heard, recent=recent)
+    head = JUDGE_HEAD_A if DBG["judge_head"] == "A" else JUDGE_HEAD_B
+    prompt = JUDGE_PROMPT.format(head=head, known=known, heard=heard, recent=recent)
     # 계측용. 무엇을 보고 그렇게 판정했는지 안 보이면 고칠 수가 없다.
     if JUDGE_RAW:
         print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
