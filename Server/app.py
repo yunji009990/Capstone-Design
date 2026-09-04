@@ -778,7 +778,12 @@ JUDGE_PROMPT = """{head}
 #
 # `--probe` 가 이걸 못 잡았다 — 매번 /reset 하고 물어서 물음이 전부 홀로 섰다.
 # **대화 안에서만 나는 결함이다.**
-JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
+# **0 이 기본이다.** 3 이었는데 판정기를 망가뜨리고 있었다 — 답이 사전지식에
+# 글자 그대로 있는 물음에서 교대 측정으로 3 은 1/12, 0 은 7/12 였다.
+# 20턴 기억 30/32 -> 31/32, 지어내기 14/36 -> 11/36 으로 회귀도 없다.
+# recent 를 넣은 원래 이유(이어 묻는 말)는 지금 BACKREF 가 건너뛰기로 처리한다.
+# 되돌리려면 RAON_JUDGE_TURNS=3.
+JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "0"))
 JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 
 # 시험용 손잡이. **재시작 없이** 바꾼다 — 판정이 회차마다 크게 흔들려서
