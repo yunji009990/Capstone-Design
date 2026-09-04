@@ -773,7 +773,12 @@ JUDGE_PROMPT = """{head}
 # 열린 물음(「뭐 했어?」)이 전부 「없다」로 가는 것이 이 둘 때문인지 가르는 중이다.
 _R45 = ["물음이 무언가를 전제하더라도 그 전제가 위에 없으면 \"없다\" 이다.",
         "물음이 가리키는 때가 위에 적힌 때와 다르면 \"없다\" 이다."]
+# 우선순위를 못박는 줄. 규칙 넷·다섯이 「없다」 방아쇠라 열린 물음(「뭐 했어?」)을
+# 전부 「없다」로 끌고 간다. 그냥 빼면 열린 물음은 0/10 -> 10/10 으로 고쳐지지만
+# 지어내기가 13/36 -> 18/36 으로 오른다. 빼는 대신 순서를 정해 준다.
+_R45_LAST = "다만 물음이 묻는 것이 위에 적혀 있으면 \"있다\" 이다."
 JUDGE_RULES45 = chr(10).join(_R45) + chr(10)
+JUDGE_RULES45B = chr(10).join(_R45 + [_R45_LAST]) + chr(10)
 
 # 판정기에 붙일 최근 대화. **없으면 이어 묻는 말을 통째로 놓친다.**
 # "그때 터미널에서 얼마나 기다렸더라", "무슨 요일이라고 했지?" 는 앞 대화가 있어야
@@ -842,7 +847,7 @@ def unknown(session, heard):
               + "\n===== 끝 =====\n") if h else ""
     head = JUDGE_HEAD_A if DBG["judge_head"] == "A" else JUDGE_HEAD_B
     prompt = JUDGE_PROMPT.format(head=head, known=known, heard=heard, recent=recent,
-                                 rules45=JUDGE_RULES45 if DBG["judge_r45"] else "")
+                                 rules45=("", JUDGE_RULES45, JUDGE_RULES45B)[DBG["judge_r45"]])
     # 계측용. 무엇을 보고 그렇게 판정했는지 안 보이면 고칠 수가 없다.
     if JUDGE_RAW:
         print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
