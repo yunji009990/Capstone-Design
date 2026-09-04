@@ -414,6 +414,17 @@ async def set_mode(cont: str = Form(...), x_token: str = Header("")):
                 await asyncio.to_thread(warm_pipe, sess_voice(CURRENT["session"]))
     return {"cont": S["cont"], "session": CURRENT["session"]}
 
+@app.post("/dbg")
+def dbg(key: str = Form(...), value: str = Form(...), x_token: str = Header("")):
+    """시험용 손잡이. 재시작 없이 바꾼다 — 교대 측정을 하려면 필요하다."""
+    auth(x_token)
+    if key not in DBG:
+        raise HTTPException(400, f"모르는 손잡이: {key}")
+    DBG[key] = type(DBG[key])(value)
+    print(f"[손잡이] {key} = {DBG[key]}", flush=True)
+    return dict(DBG)
+
+
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
     auth(x_token); HIST.pop(session, None); SUMM_TEXT.pop(session, None)
@@ -767,6 +778,11 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
 JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 
+# 시험용 손잡이. **재시작 없이** 바꾼다 — 판정이 회차마다 크게 흔들려서
+# (같은 프로세스에서 9/10 다음에 3/10) A 를 다 돌고 B 를 돌면 드리프트가 효과로
+# 읽힌다. 교대로 걸어야 가른다. POST /dbg 로 바꾼다.
+DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1"))}
+
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
 # **시스템 프롬프트 끝에 두면 무시된다** — 판정은 8/8 로 맞는데 답은 그대로
@@ -815,7 +831,7 @@ def unknown(session, heard):
         print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
     try:
         out = S["pipe"].chat([{"role": "user", "content": prompt}],
-                             max_new_tokens=8, temperature=0.1)
+                             max_new_tokens=8, temperature=DBG["judge_temp"])
     except Exception as e:
         print(f"[{session}] 판정 실패, 그냥 답한다 — {e}", flush=True)
         return False
