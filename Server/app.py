@@ -781,7 +781,8 @@ JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 # 시험용 손잡이. **재시작 없이** 바꾼다 — 판정이 회차마다 크게 흔들려서
 # (같은 프로세스에서 9/10 다음에 3/10) A 를 다 돌고 B 를 돌면 드리프트가 효과로
 # 읽힌다. 교대로 걸어야 가른다. POST /dbg 로 바꾼다.
-DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1"))}
+DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
+       "judge_turns": JUDGE_TURNS}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -820,7 +821,7 @@ def unknown(session, heard):
         return False
     # 이어 묻는 말은 앞 대화가 있어야 뜻이 잡힌다. 최근 몇 턴만 붙인다 —
     # 다 붙이면 판정 프리필이 답변만큼 커진다.
-    h = list(HIST.get(session, []))[-JUDGE_TURNS * 2:]
+    h = list(HIST.get(session, []))[-DBG["judge_turns"] * 2:] if DBG["judge_turns"] else []
     recent = ("\n===== 방금까지 나눈 말 =====\n"
               + "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}"
                           for m in h)
