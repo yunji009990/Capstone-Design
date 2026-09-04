@@ -683,7 +683,7 @@ def learn(session, heard):
         return
     try:
         t0 = time.time()
-        js = LEARN_MODE == "json"
+        js = DBG["learn_mode"] == "json"
         # 모델은 한 문장 안의 지시대명사는 잇는데 턴을 넘으면 못 잇는다(실측).
         # 프롬프트로 두 번 시켜 봤고 0/8 이었다. 그래서 코드로 이어 붙인다.
         # 사용자 발화끼리만 잇는다 — 모델 답변은 절대 안 섞는다.
@@ -808,7 +808,8 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # 0/10 -> 10/10 이 되고 지어내기도 13/36 -> 10/36 으로 준다.
        # 둘이 겹칠 때만 죽는다 — 하나만 남기면 어느 쪽이든 열린 물음은 산다.
        # 0=둘다끔 1=둘다(옛 기본) 2=둘다+우선순위줄 3=전제만 4=때만
-       "judge_r45": int(os.environ.get("RAON_JUDGE_R45", "4"))}
+       "judge_r45": int(os.environ.get("RAON_JUDGE_R45", "4")),
+       "learn_mode": LEARN_MODE}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
