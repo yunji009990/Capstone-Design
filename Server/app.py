@@ -572,7 +572,7 @@ LEARN_RAW = os.environ.get("RAON_LEARN_RAW", "0") == "1"
 # 줄 단위는 지시문 베끼기를 못 막는다 — 모델이 "…적는다."로 베끼면 LEARN_OK 를
 # 그대로 통과한다. 말투를 바꿔 가며 베끼므로 금지어를 늘리는 것으로는 안 끝난다.
 # JSON 은 지시(산문)와 출력(JSON)의 꼴이 아예 달라서 베낀 것이 파싱에서 걸린다.
-LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "line")
+LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "json")
 
 # 근거(evidence)를 함께 받는다. 원문의 이어진 조각이어야 하므로 코드가 확인할 수 있다.
 # 금지어 목록을 늘리는 대신 **원문에 근거가 있는지**를 묻는 쪽으로 뒤집은 것이다.
