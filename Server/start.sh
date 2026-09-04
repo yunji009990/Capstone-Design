@@ -9,6 +9,11 @@ export RAON_CONT=${RAON_CONT:-1}      # 1=억양까지 복제(tts_continuation),
 # 0.70 이면 66.9GB 라 지금 최대치의 1.3배 여유가 생긴다. 상한을 아예 없애지는 않는다 —
 # 폭주할 때 다른 프로세스까지 끌고 죽는 것을 막아준다.
 export RAON_MEM_FRACTION=${RAON_MEM_FRACTION:-0.70}
+# 오래 켜 두면 파편화로 VRAM 이 기어오른다. 세션마다 /reset 을 해도 그렇다.
+# probe 를 여섯 번 돌리는 같은 부하에서 39.8 -> 66.1GB (OOM) 였던 것이
+# 이걸 켜면 39.8 -> 52.9GB 로 끝난다. 중간에 내려가기도 한다 - 회수가 된다.
+# OOM 로그에서 PyTorch 가 직접 제안한 값이다.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 # 소리 온도. 코드 기본값은 1.2 인데 그러면 "국어책 읽는 느낌"이 남는다.
 # 1.6 으로 올리면 그게 크게 줄어든다 — 청취로만 드러났고 체감속도 지표는
 # 0.145 로 똑같았다. 대가는 이음매가 흔들리는 것(첫낱말 샘 7/45 -> 19/45)인데,
