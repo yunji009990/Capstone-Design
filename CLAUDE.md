@@ -51,8 +51,34 @@
 | 판정기 | `Server/app.py` `unknown()`, `JUDGE_PROMPT`, `BACKREF` |
 | 적립 | `Server/app.py` `learn()`, `LEARN_PROMPT` |
 
-`Server/` 는 실 서버(`crc_unity@220.69.208.201:~/server`)의 **사본**이다. 서버를 고치면
-여기에도 반영해 커밋해야 둘이 어긋나지 않는다.
+### 서버는 저장소가 둘이다
+
+`Server/` 는 실 서버(`crc_unity@220.69.208.201:~/server`)의 **사본**이다. 접속은
+`ssh raon` (키 `~/.ssh/capstone-auto`).
+
+서버의 `~/server` 에도 **독립 git 저장소**가 있다. 리모트가 없어 그 기계에만 있고,
+이 저장소와 이어주는 것은 아무것도 없다 — `scp` 로 사람이 옮기고 해시로 대조하는
+수밖에 없다. 실제로 2026-09-04 에 대조했더니 `modeling_raon.patch` 가 어긋나 있었다.
+
+**배포 절차**
+
+```bash
+# 1. 저장소를 먼저 고치고 커밋 (되돌릴 지점)
+# 2. 올린다
+scp Server/app.py raon:~/server/app.py
+# 3. 정지와 기동은 따로. 묶지 않는다
+ssh raon "cd ~/server; ./stop.sh"
+ssh raon "cd ~/server; ./start.sh"
+# 4. 20초 뒤 확인. 로그를 안 보면 배포한 게 아니다
+curl http://220.69.208.201:8000/health
+# 5. 서버에서도 커밋한다 — 안 하면 되돌릴 지점이 안 생긴다
+ssh raon "git -C ~/server commit -a -m '...'"
+```
+
+- **어긋났는지 보려면 해시로 대조한다** — `ssh raon "md5sum ~/server/app.py"`
+- **`sessions/` 는 절대 커밋하지 않는다** — 등록된 실존 인물의 음성·사진이다
+- **`rm` 금지, `~/models` 는 읽기만** (45GB, 백업 없음)
+- 재시작하면 **20초간 대화가 끊긴다.** 시연 중에는 하지 않는다. 등록된 인물은 살아남는다
 
 ## 4. 이 프로젝트의 하네스
 
