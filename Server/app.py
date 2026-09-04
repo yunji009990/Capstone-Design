@@ -767,9 +767,13 @@ JUDGE_PROMPT = """{head}
 이 말에 답하는 데 필요한 것이 위에 있으면 "있다", 없으면 "없다" 라고만 적어라.
 묻는 말이 아니면 "있다" 라고 적어라.
 앞서 나눈 말에 답이 있으면 "있다" 이다.
-물음이 무언가를 전제하더라도 그 전제가 위에 없으면 "없다" 이다.
-물음이 가리키는 때가 위에 적힌 때와 다르면 "없다" 이다.
-다른 말은 적지 마라."""
+{rules45}다른 말은 적지 마라."""
+
+# 규칙 넷·다섯. 둘 다 「없다」 방아쇠이고 프롬프트 끝에 붙어 있다. 사건에 대한
+# 열린 물음(「뭐 했어?」)이 전부 「없다」로 가는 것이 이 둘 때문인지 가르는 중이다.
+_R45 = ["물음이 무언가를 전제하더라도 그 전제가 위에 없으면 \"없다\" 이다.",
+        "물음이 가리키는 때가 위에 적힌 때와 다르면 \"없다\" 이다."]
+JUDGE_RULES45 = chr(10).join(_R45) + chr(10)
 
 # 판정기에 붙일 최근 대화. **없으면 이어 묻는 말을 통째로 놓친다.**
 # "그때 터미널에서 얼마나 기다렸더라", "무슨 요일이라고 했지?" 는 앞 대화가 있어야
@@ -791,7 +795,8 @@ JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 # 읽힌다. 교대로 걸어야 가른다. POST /dbg 로 바꾼다.
 DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        "judge_turns": JUDGE_TURNS,
-       "judge_head": "A"}
+       "judge_head": "A",
+       "judge_r45": 1}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -836,7 +841,8 @@ def unknown(session, heard):
                           for m in h)
               + "\n===== 끝 =====\n") if h else ""
     head = JUDGE_HEAD_A if DBG["judge_head"] == "A" else JUDGE_HEAD_B
-    prompt = JUDGE_PROMPT.format(head=head, known=known, heard=heard, recent=recent)
+    prompt = JUDGE_PROMPT.format(head=head, known=known, heard=heard, recent=recent,
+                                 rules45=JUDGE_RULES45 if DBG["judge_r45"] else "")
     # 계측용. 무엇을 보고 그렇게 판정했는지 안 보이면 고칠 수가 없다.
     if JUDGE_RAW:
         print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
