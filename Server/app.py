@@ -565,7 +565,7 @@ LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "line")
 
 # 근거(evidence)를 함께 받는다. 원문의 이어진 조각이어야 하므로 코드가 확인할 수 있다.
 # 금지어 목록을 늘리는 대신 **원문에 근거가 있는지**를 묻는 쪽으로 뒤집은 것이다.
-LEARN_PROMPT_JSON = """{prev}<발화>
+LEARN_PROMPT_JSON = """<발화>
 {heard}
 </발화>
 
@@ -575,10 +575,8 @@ LEARN_PROMPT_JSON = """{prev}<발화>
 
 - text 는 "-다." 로 끝나는 짧은 평서문으로 써라.
 - evidence 는 발화 안에서 **이어진 원문 그대로**를 따라 적어라. 고쳐 쓰지 마라.
-- <발화> 에도 <앞말> 에도 없는 사람·장소·때를 text 에 넣지 마라.
-- <앞말> 이 있으면 "거기", "그때" 같은 말이 무엇을 가리키는지 알아내는 데에만 써라.
-  <앞말> 에서 사실을 뽑지 마라. evidence 는 <발화> 안에서만 따라.
-- 가리키는 대상을 <앞말> 로도 모르겠으면 그 대상을 빼고 남는 것만 적어라.
+- 발화에 없는 사람·장소·때를 text 에 넣지 마라.
+- 가리키는 대상이 무엇인지 모르겠으면 그 대상을 빼고 남는 것만 적어라.
 - 발화가 무엇을 말했는지 **설명하지 마라.** 발화가 말한 것을 적어라.
 - 주장이 여럿이면 facts 를 여러 개로 나눠라.
 - 적을 것이 없으면 {{"facts":[]}} 만 내보내라.
@@ -595,28 +593,23 @@ LEARN_PROMPT_JSON = """{prev}<발화>
 
 발화: 그냥 좀 그래요
 {{"facts":[]}}
-
-<앞말> 이 있으면 가리키는 말을 이렇게 **풀어서** 적어라.
-
-<앞말>
-지난주에 도서관에 갔어요
-</앞말>
-발화: 거기서 책을 세 권 빌렸어요
-{{"facts":[{{"text":"도서관에서 책을 세 권 빌렸다.","evidence":"거기서 책을 세 권 빌렸어요"}}]}}"""
+"""
 
 
+
+
+DEIXIS = re.compile(r"거기|그곳|그때|그 때|그 곳|저기")
 
 
 def _prev_said(session):
-    """직전 **사용자** 발화. 지시대명사를 푸는 데만 쓴다.
+    """직전 **사용자** 발화. 지시대명사가 있을 때 앞에 이어 붙이는 데 쓴다.
 
     문서가 금지한 것은 모델 **답변**에서 사실을 뽑는 것과, 앞 턴을 통째로 맥락으로
     주는 것이다 — 지어낸 물음이 사실로 새기 때문이다. 여기는 사용자가 실제로 한
     말만 주므로 그 길이 없다. evidence 는 파서가 이번 발화 안으로 묶는다."""
     us = [m["content"] for m in list(HIST.get(session, []))[:-2]
           if m["role"] == "user" and isinstance(m["content"], str)]
-    nl = chr(10)
-    return f"<앞말>{nl}{us[-1]}{nl}</앞말>{nl}{nl}" if us else ""
+    return us[-1] if us else ""
 
 def _norm(x):
     return re.sub(r"\s+", "", x or "")
@@ -680,9 +673,16 @@ def learn(session, heard):
     try:
         t0 = time.time()
         js = LEARN_MODE == "json"
+        # 모델은 한 문장 안의 지시대명사는 잇는데 턴을 넘으면 못 잇는다(실측).
+        # 프롬프트로 두 번 시켜 봤고 0/8 이었다. 그래서 코드로 이어 붙인다.
+        # 사용자 발화끼리만 잇는다 — 모델 답변은 절대 안 섞는다.
+        src = heard
+        if js and DEIXIS.search(heard):
+            prev = _prev_said(session)
+            if prev:
+                src = prev + " " + heard
         raw = S["pipe"].chat(
-            [{"role": "user", "content": (LEARN_PROMPT_JSON.format(heard=heard, prev=_prev_said(session))
-                                        if js else LEARN_PROMPT.format(heard=heard))}],
+            [{"role": "user", "content": (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=src)}],
             max_new_tokens=160 if js else 120, temperature=0.0 if js else 0.3)
         out = "" if js else clean_summary(raw, tag="적립")
         # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
@@ -697,7 +697,7 @@ def learn(session, heard):
             if x.strip()]
     if js:
         # 근거 검증을 먼저 하고 중복 제거는 그 뒤다 — 순서를 바꾸면 성한 것이 먼저 버려진다.
-        cand = _parse_facts(raw, heard)
+        cand = _parse_facts(raw, src)
     else:
         cand = [l for l in (x.strip() for x in out.splitlines())
                 if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
