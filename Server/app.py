@@ -742,7 +742,7 @@ ASKING = re.compile(r"\?|기억\s*(나|해|하)|알아|아니야|뭐(야|였|지
 BACKREF = re.compile(r"(라|다|자|냐)고\s*(했|하)|랬|말했|얘기했|"
                      r"그때|아까|방금|저번|지난번")
 
-JUDGE_PROMPT = """아래는 지금 알고 있는 것 전부다. 나에 대한 것도 상대에 대한 것도 함께 있다.
+JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 ===== 아는 것 =====
 {known}
 ===== 끝 =====
@@ -765,6 +765,7 @@ JUDGE_PROMPT = """아래는 지금 알고 있는 것 전부다. 나에 대한 �
 # `--probe` 가 이걸 못 잡았다 — 매번 /reset 하고 물어서 물음이 전부 홀로 섰다.
 # **대화 안에서만 나는 결함이다.**
 JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
+JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -808,11 +809,13 @@ def unknown(session, heard):
               + "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}"
                           for m in h)
               + "\n===== 끝 =====\n") if h else ""
+    prompt = JUDGE_PROMPT.format(known=known, heard=heard, recent=recent)
+    # 계측용. 무엇을 보고 그렇게 판정했는지 안 보이면 고칠 수가 없다.
+    if JUDGE_RAW:
+        print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
     try:
-        out = S["pipe"].chat(
-            [{"role": "user", "content": JUDGE_PROMPT.format(known=known, heard=heard,
-                                                             recent=recent)}],
-            max_new_tokens=8, temperature=0.1)
+        out = S["pipe"].chat([{"role": "user", "content": prompt}],
+                             max_new_tokens=8, temperature=0.1)
     except Exception as e:
         print(f"[{session}] 판정 실패, 그냥 답한다 — {e}", flush=True)
         return False
