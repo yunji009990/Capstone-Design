@@ -1,0 +1,25 @@
+{
+  "model": "opus[1m]",
+  "effortLevel": "max",
+  "permissions": {
+    "allow": [
+      "Bash(codex exec:*)",
+      "Bash(codex review:*)",
+      "Bash(git -C:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(ssh raon:*)",
+      "Bash(ssh -o BatchMode=yes raon:*)",
+      "Bash(scp:*)",
+      "Bash(python \"C:/Users/user/Documents/GitHub/Capstone-Design/tools/prompt_eval.py\":*)",
+      "Bash(python \"C:/Users/user/Documents/GitHub/Capstone-Design/tools/ref_metrics.py\":*)"
+    ],
+    "deny": [
+      "Read(C:/Users/user/Documents/GitHub/Capstone-Design/Web/.env)",
+      "Read(C:/Users/user/Documents/GitHub/Capstone-Design/Survey/data/**)"
+    ]
+  }
+}

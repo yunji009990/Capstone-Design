@@ -97,3 +97,6 @@ Web/__pycache__/
 
 # MCP 스크린샷 (일회성)
 /Assets/Screenshots/
+
+# 하네스 — 서브에이전트 결과 수거함
+/.claude/work/
