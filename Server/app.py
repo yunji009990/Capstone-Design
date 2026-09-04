@@ -565,7 +565,7 @@ LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "line")
 
 # 근거(evidence)를 함께 받는다. 원문의 이어진 조각이어야 하므로 코드가 확인할 수 있다.
 # 금지어 목록을 늘리는 대신 **원문에 근거가 있는지**를 묻는 쪽으로 뒤집은 것이다.
-LEARN_PROMPT_JSON = """<발화>
+LEARN_PROMPT_JSON = """{prev}<발화>
 {heard}
 </발화>
 
@@ -576,7 +576,9 @@ LEARN_PROMPT_JSON = """<발화>
 - text 는 "-다." 로 끝나는 짧은 평서문으로 써라.
 - evidence 는 발화 안에서 **이어진 원문 그대로**를 따라 적어라. 고쳐 쓰지 마라.
 - 발화가 말하지 않은 사람·장소·때를 text 에 넣지 마라.
-- 발화에서 가리키는 대상이 무엇인지 모르면 그 대상을 빼고 남는 것만 적어라.
+- <앞말> 이 있으면 "거기", "그때" 같은 말이 무엇을 가리키는지 알아내는 데에만 써라.
+  <앞말> 에서 사실을 뽑지 마라. evidence 는 <발화> 안에서만 따라.
+- 가리키는 대상을 <앞말> 로도 모르겠으면 그 대상을 빼고 남는 것만 적어라.
 - 발화가 무엇을 말했는지 **설명하지 마라.** 발화가 말한 것을 적어라.
 - 주장이 여럿이면 facts 를 여러 개로 나눠라.
 - 적을 것이 없으면 {{"facts":[]}} 만 내보내라.
@@ -595,6 +597,18 @@ LEARN_PROMPT_JSON = """<발화>
 {{"facts":[]}}"""
 
 
+
+
+def _prev_said(session):
+    """직전 **사용자** 발화. 지시대명사를 푸는 데만 쓴다.
+
+    문서가 금지한 것은 모델 **답변**에서 사실을 뽑는 것과, 앞 턴을 통째로 맥락으로
+    주는 것이다 — 지어낸 물음이 사실로 새기 때문이다. 여기는 사용자가 실제로 한
+    말만 주므로 그 길이 없다. evidence 는 파서가 이번 발화 안으로 묶는다."""
+    us = [m["content"] for m in list(HIST.get(session, []))[:-2]
+          if m["role"] == "user" and isinstance(m["content"], str)]
+    nl = chr(10)
+    return f"<앞말>{nl}{us[-1]}{nl}</앞말>{nl}{nl}" if us else ""
 
 def _norm(x):
     return re.sub(r"\s+", "", x or "")
@@ -659,7 +673,8 @@ def learn(session, heard):
         t0 = time.time()
         js = LEARN_MODE == "json"
         raw = S["pipe"].chat(
-            [{"role": "user", "content": (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=heard)}],
+            [{"role": "user", "content": (LEARN_PROMPT_JSON.format(heard=heard, prev=_prev_said(session))
+                                        if js else LEARN_PROMPT.format(heard=heard))}],
             max_new_tokens=160 if js else 120, temperature=0.0 if js else 0.3)
         out = "" if js else clean_summary(raw, tag="적립")
         # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
