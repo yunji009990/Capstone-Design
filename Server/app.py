@@ -1,4 +1,4 @@
-import os, io, re, time, asyncio, difflib, shutil, tempfile, warnings, logging
+import os, io, re, json, time, asyncio, difflib, shutil, tempfile, warnings, logging
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TQDM_DISABLE", "1")
 import torch, numpy as np, soundfile as sf
@@ -548,10 +548,75 @@ LEARN_META = re.compile(r"내용은 다음|사실만|것만 적|적는다|적어
                         #   확인 대상은 "the first one"으로 지칭되었다.
                         #   상대가 방금 "예를 들어봅시다"라고 말했다.
                         r"이 문장은|발화(자|되|했|를|가)|지칭|의도를|반복되어|"
-                        r"방금.{0,20}라고 (말했|했)")
+                        r"방금.{0,20}라고 (말했|했)|"
+                        # 발화를 사실이 아니라 **서술**하는 꼴. JSON 시험에서 나왔다.
+                        #   월미도에 함께 간 사실이 언급되었다.
+                        #   구체적인 날짜나 동행자는 포함되지 않았다.
+                        r"언급(되|됐|했|한|함)|서술(되|했|함)|진술(되|했|함)|"
+                        r"포함되(지|어|었)|드러난다|나타난다|밝혔다|표현(되|했|함)")
 
 
 LEARN_RAW = os.environ.get("RAON_LEARN_RAW", "0") == "1"
+# 적립 방식. line = 줄 단위(옛것), json = 근거 붙인 JSON(새것).
+# 줄 단위는 지시문 베끼기를 못 막는다 — 모델이 "…적는다."로 베끼면 LEARN_OK 를
+# 그대로 통과한다. 말투를 바꿔 가며 베끼므로 금지어를 늘리는 것으로는 안 끝난다.
+# JSON 은 지시(산문)와 출력(JSON)의 꼴이 아예 달라서 베낀 것이 파싱에서 걸린다.
+LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "line")
+
+# 근거(evidence)를 함께 받는다. 원문의 이어진 조각이어야 하므로 코드가 확인할 수 있다.
+# 금지어 목록을 늘리는 대신 **원문에 근거가 있는지**를 묻는 쪽으로 뒤집은 것이다.
+LEARN_PROMPT_JSON = """<발화>
+{heard}
+</발화>
+
+위 발화가 주장하는 사건이나 상태를 JSON 하나로만 내보내라.
+
+{{"facts":[{{"text":"기억할 문장","evidence":"발화에서 그대로 딴 조각"}}]}}
+
+- text 는 "-다." 로 끝나는 짧은 평서문으로 써라.
+- evidence 는 발화 안에서 **이어진 원문 그대로**를 따라 적어라. 고쳐 쓰지 마라.
+- 발화가 말하지 않은 사람·장소·때를 text 에 넣지 마라.
+- 발화에서 가리키는 대상이 무엇인지 모르면 그 대상을 빼고 남는 것만 적어라.
+- 발화가 무엇을 말했는지 **설명하지 마라.** 발화가 말한 것을 적어라.
+- 주장이 여럿이면 facts 를 여러 개로 나눠라.
+- 적을 것이 없으면 {{"facts":[]}} 만 내보내라.
+- JSON 밖에 아무것도 쓰지 마라."""
+
+
+
+def _norm(x):
+    return re.sub(r"\s+", "", x or "")
+
+
+def _parse_facts(raw, heard):
+    """JSON 에서 사실만 골라낸다. 근거가 원문에 없으면 버린다.
+
+    금지어를 늘리는 대신 **원문에 근거가 있는가**를 묻는다. 지시문을 베끼면
+    근거 조각이 발화에 없으므로 여기서 걸린다."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return []
+    try:
+        facts = json.loads(m.group())["facts"]
+    except Exception:
+        return []
+    hn, out = _norm(heard), []
+    for f in facts if isinstance(facts, list) else []:
+        if not isinstance(f, dict):
+            continue
+        t, e = (f.get("text") or "").strip(), (f.get("evidence") or "").strip()
+        # 근거는 원문의 이어진 조각이어야 한다.
+        if len(t) < 6 or not e or _norm(e) not in hn:
+            continue
+        # 낱말 대조는 하지 않는다 — 한국어 활용을 못 견뎌 성한 것을 버렸다
+        # ("같이"->"함께", "갔었"->"갔다"). 근거가 원문에 있는지만 본다.
+        # 없는 정보를 붙이는 실패는 아직 관측되지 않았다. 보이면 그때 막는다.
+        if not any(w[:2] in _norm(e) for w in re.findall(r"[가-힣]{2,}", t)):
+            continue
+        if LEARN_META.search(t):
+            continue
+        out.append(t if t.endswith(".") else t + ".")
+    return out
 
 
 def learn(session, heard):
@@ -580,10 +645,11 @@ def learn(session, heard):
         return
     try:
         t0 = time.time()
+        js = LEARN_MODE == "json"
         raw = S["pipe"].chat(
-            [{"role": "user", "content": LEARN_PROMPT.format(heard=heard)}],
-            max_new_tokens=120, temperature=0.3)
-        out = clean_summary(raw, tag="적립")
+            [{"role": "user", "content": (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=heard)}],
+            max_new_tokens=160 if js else 120, temperature=0.0 if js else 0.3)
+        out = "" if js else clean_summary(raw, tag="적립")
         # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
         if LEARN_RAW:
             print(f"[{session}] 적립raw — {heard!r} -> {(raw or '').strip()[:300]!r}", flush=True)
@@ -594,10 +660,14 @@ def learn(session, heard):
     # 하면 두 줄이 된다. 글자로만 거른다 — 뜻으로 거르려면 또 모델을 써야 한다.
     olds = [x.strip() for x in (sess_system(session) + "\n" + "\n".join(lines)).splitlines()
             if x.strip()]
-    fresh = [l for l in (x.strip() for x in out.splitlines())
-             if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
-             and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)
-             and not any(_sim(l, p) > 0.7 for p in olds)]
+    if js:
+        # 근거 검증을 먼저 하고 중복 제거는 그 뒤다 — 순서를 바꾸면 성한 것이 먼저 버려진다.
+        cand = _parse_facts(raw, heard)
+    else:
+        cand = [l for l in (x.strip() for x in out.splitlines())
+                if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
+                and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)]
+    fresh = [l for l in cand if not any(_sim(l, p) > 0.7 for p in olds)]
     if fresh:
         lines += fresh
         print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
