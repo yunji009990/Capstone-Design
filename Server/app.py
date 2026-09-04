@@ -551,6 +551,9 @@ LEARN_META = re.compile(r"내용은 다음|사실만|것만 적|적는다|적어
                         r"방금.{0,20}라고 (말했|했)")
 
 
+LEARN_RAW = os.environ.get("RAON_LEARN_RAW", "0") == "1"
+
+
 def learn(session, heard):
     """사용자 발화에서 사실을 뽑아 사전지식 옆에 쌓는다. LOCK 을 쥐고 불러야 한다.
 
@@ -577,9 +580,13 @@ def learn(session, heard):
         return
     try:
         t0 = time.time()
-        out = clean_summary(S["pipe"].chat(
+        raw = S["pipe"].chat(
             [{"role": "user", "content": LEARN_PROMPT.format(heard=heard)}],
-            max_new_tokens=120, temperature=0.3), tag="적립")
+            max_new_tokens=120, temperature=0.3)
+        out = clean_summary(raw, tag="적립")
+        # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
+        if LEARN_RAW:
+            print(f"[{session}] 적립raw — {heard!r} -> {(raw or '').strip()[:300]!r}", flush=True)
     except Exception as e:
         print(f"[{session}] 적립 실패, 넘어간다 — {e}", flush=True)
         return
