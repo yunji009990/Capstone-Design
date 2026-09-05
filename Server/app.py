@@ -810,6 +810,8 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # 0=둘다끔 1=둘다(옛 기본) 2=둘다+우선순위줄 3=전제만 4=때만
        "judge_r45": int(os.environ.get("RAON_JUDGE_R45", "4")),
        "learn_mode": LEARN_MODE,
+       # 답변 LLM. "raon" 이거나 OpenAI 모델 이름.
+       "llm": os.environ.get("RAON_LLM", "raon"),
        # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
        "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1"))}
 
@@ -990,6 +992,44 @@ def _tail(text):
     ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
     return ss[-1] if ss else ""
 
+
+# ── 답변 LLM 을 갈아끼운다 (시험용) ────────────────────────────────
+# Raon 은 STT->LLM->TTS 를 다 하지만 **답변과 합성은 이미 따로 호출**이라
+# 여기만 갈아끼우면 LLM 만 바꿀 수 있다. 받아적기와 합성은 그대로 Raon 이 한다.
+#
+# 키는 저장소에 두지 않는다. `~/.openai_key` 에서 읽는다(600, ~/server 밖).
+OPENAI_KEY = ""
+try:
+    with open(os.path.expanduser("~/.openai_key")) as _f:
+        OPENAI_KEY = _f.read().strip()
+except Exception:
+    pass
+
+
+def _flat(c):
+    """오디오 경로가 섞인 content 를 글만 남겨 평평하게 만든다."""
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+    return str(c or "")
+
+
+def openai_answer(msgs, model):
+    """OpenAI 로 답을 뽑는다. 실패하면 예외를 올려 호출자가 Raon 으로 되돌린다."""
+    import urllib.request
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": m["role"], "content": _flat(m["content"])} for m in msgs],
+        "max_completion_tokens": TOKENS,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)["choices"][0]["message"]["content"].strip()
+
+
 def answer_for(session, msgs, tries=2, must_hedge=False):
     """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
 
@@ -1006,7 +1046,15 @@ def answer_for(session, msgs, tries=2, must_hedge=False):
     # CUDA OOM 이 났다(상한 66.48GB). 다시 뽑기 한 번이 그만큼 무겁다.
     # 대신 마지막 회에는 얼버무림 검사를 건너뛰어 꼬리 검사가 반드시 한 번은 돌게 한다.
     for i in range(tries):
-        a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        llm = DBG["llm"]
+        if llm == "raon":
+            a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        else:
+            try:
+                a = openai_answer(msgs, llm)
+            except Exception as e:
+                print(f"[{session}] {llm} 실패, Raon 으로 되돌린다 — {e}", flush=True)
+                a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
         if (must_hedge and DBG["hedge_regen"] and i < tries - 1
                 and not HEDGED.search(a)):
