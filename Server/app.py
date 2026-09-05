@@ -832,7 +832,10 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # 적립만 갈아끼운다. 답변 뒤로 미뤄져 지연에 안 걸리는 자리다.
        "learn_llm": os.environ.get("RAON_LEARN_LLM", "raon"),
        # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
-       "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1"))}
+       "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1")),
+       # 격려 클리셰가 걸리면 다시 뽑는다. **기본은 꺼 둔다** — 지연을 늘리므로
+       # 3초 관문으로 재보고 정한다. GPT 교체를 2/60 으로 떨어뜨린 그 관문이다.
+       "cheer_regen": int(os.environ.get("RAON_CHEER_REGEN", "0"))}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -853,6 +856,21 @@ JUDGE_NOTE = (" (모르는 것이다. 모른다는 말을 먼저 하고, 그 다
 HEDGED = re.compile(r"모르|몰라|몰랐|기억(이|은)?\s*(잘\s*)?안\s*나|기억이 가물|가물|"
                     r"생각이\s*안\s*나|글쎄|헷갈|확실하지 않|처음 듣|들은 적 없|"
                     r"말 안 했|얘기 안 했|알려 ?(줘|주라|주렴|줄)|(말|얘기)해 ?(봐|줘|줄)")
+
+# 격려 클리셰. **이 저장소가 여섯 가지로 쳐서 못 잡고 접은 항목이다** — 금지형 규칙,
+# 페르소나 지시, 본보기 쌍 세 벌, 코드로 다시 뽑기, 꼬리 문장 떼기(지표 다섯이
+# 좋아지고 대화가 토막 났다).
+#
+# 이번엔 GPT 를 오프라인 라벨러로 써서 **꼴을 특정했다.** 핵심은 감정 인정이 아니라
+# 뒤에 붙는 **능력 보증·응원 절**이다. 계측기가 격려로 표시한 10턴을 100% 잡고
+# 격려 아닌 턴은 하나도 안 잡는 것을 확인하고 넣었다.
+#
+# **자르지 않는다.** 걸리면 다시 뽑는다 — 꼬리를 자르면 대화가 토막 난다.
+CHEER = re.compile(
+    r"잘할\s*(거|수)|잘\s*할\s*(거|수)|충분히\s*잘|잘\s*해\s*낼|"
+    r"넌\s*(잘|충분|할)|너\s*정도면|너라면|잘\s*해왔|잘하고\s*있어|"
+    r"응원(할게|해)|파이팅|화이팅|평소처럼\s*하면|"
+    r"다\s*잘\s*될|잘\s*될\s*거")
 
 
 def unknown(session, heard):
@@ -1076,10 +1094,14 @@ def answer_for(session, msgs, tries=2, must_hedge=False):
                 print(f"[{session}] {llm} 실패, Raon 으로 되돌린다 — {e}", flush=True)
                 a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
-        if (must_hedge and DBG["hedge_regen"] and i < tries - 1
-                and not HEDGED.search(a)):
-            print(f"[{session}] 모른다 판정인데 안 얼버무렸다, 다시 뽑는다 — {a[:40]!r}", flush=True)
-            continue
+        # 마지막 회에는 검사를 건너뛴다 — 예산을 나눠 쓰면 꼬리 반복 검사가 굶는다.
+        if i < tries - 1:
+            if must_hedge and DBG["hedge_regen"] and not HEDGED.search(a):
+                print(f"[{session}] 모른다 판정인데 안 얼버무렸다, 다시 뽑는다 — {a[:40]!r}", flush=True)
+                continue
+            if DBG["cheer_regen"] and CHEER.search(a):
+                print(f"[{session}] 격려 클리셰, 다시 뽑는다 — {a[:40]!r}", flush=True)
+                continue
         t = _tail(a)
         if not REGEN or not prev or len(t) < 8:
             return a
