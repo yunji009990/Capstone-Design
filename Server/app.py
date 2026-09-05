@@ -692,9 +692,22 @@ def learn(session, heard):
             prev = _prev_said(session)
             if prev:
                 src = prev + " " + heard
-        raw = S["pipe"].chat(
-            [{"role": "user", "content": (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=src)}],
-            max_new_tokens=160 if js else 120, temperature=0.0 if js else 0.3)
+        pr = (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=src)
+        # 적립은 답변 뒤로 미뤄져 있어 첫 소리 지연에 안 걸린다. GPT 를 넣어도
+        # 안전한 유일한 자리라 여기만 갈아끼울 수 있게 뒀다.
+        if DBG["learn_llm"] == "raon":
+            raw = S["pipe"].chat([{"role": "user", "content": pr}],
+                                 max_new_tokens=160 if js else 120,
+                                 temperature=0.0 if js else 0.3)
+        else:
+            try:
+                raw = openai_answer([{"role": "user", "content": pr}], DBG["learn_llm"])
+            except Exception as e:
+                DBG["llm_fallbacks"] += 1
+                print(f"[{session}] 적립 {DBG['learn_llm']} 실패, Raon 으로 — {e}", flush=True)
+                raw = S["pipe"].chat([{"role": "user", "content": pr}],
+                                     max_new_tokens=160 if js else 120,
+                                     temperature=0.0 if js else 0.3)
         out = "" if js else clean_summary(raw, tag="적립")
         # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
         if LEARN_RAW:
@@ -816,6 +829,8 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # chat-latest 셋이 404 를 내고 Raon 으로 되돌아갔는데 그걸 모르고 쟀다.
        # 측정 앞뒤로 이 값을 보고 늘었으면 그 회차는 버린다.
        "llm_fallbacks": 0,
+       # 적립만 갈아끼운다. 답변 뒤로 미뤄져 지연에 안 걸리는 자리다.
+       "learn_llm": os.environ.get("RAON_LEARN_LLM", "raon"),
        # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
        "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1"))}
 
