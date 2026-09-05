@@ -812,6 +812,10 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        "learn_mode": LEARN_MODE,
        # 답변 LLM. "raon" 이거나 OpenAI 모델 이름.
        "llm": os.environ.get("RAON_LLM", "raon"),
+       # 폴백 횟수. **계측기가 실패를 가리면 유령 숫자를 잰다** —
+       # chat-latest 셋이 404 를 내고 Raon 으로 되돌아갔는데 그걸 모르고 쟀다.
+       # 측정 앞뒤로 이 값을 보고 늘었으면 그 회차는 버린다.
+       "llm_fallbacks": 0,
        # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
        "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1"))}
 
@@ -1053,6 +1057,7 @@ def answer_for(session, msgs, tries=2, must_hedge=False):
             try:
                 a = openai_answer(msgs, llm)
             except Exception as e:
+                DBG["llm_fallbacks"] += 1
                 print(f"[{session}] {llm} 실패, Raon 으로 되돌린다 — {e}", flush=True)
                 a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
