@@ -1061,6 +1061,36 @@ def _flat(c):
     return str(c or "")
 
 
+def _as_text(msgs, heard):
+    """소리로 온 발화를 받아적은 글로 갈아끼운다.
+
+    **이게 없으면 OpenAI 에는 빈 발화가 간다.** 2026-09-06 헤드셋에서 GPT 가 매 턴
+    "말이 없네", "왜 말이 없니" 라고 답한 것이 이것이다. `/talk_stream` 은 발화를
+    `{"type": "audio", ...}` 로 넣는데 `_flat()` 이 `"text"` 키를 뽑으므로 오디오
+    조각에서는 빈 문자열이 나온다. 판정이 걸린 턴은 note 한 줄만 갔다.
+
+    **글 경로(`/chat`)에서는 안 드러난다** — content 가 이미 문자열이다. 손잡이를
+    만들 때 글로만 재서 못 봤다.
+
+    Raon 은 오디오를 그대로 알아들으므로 이 갈아끼우기는 OpenAI 경로에만 건다."""
+    out = list(msgs)
+    for i in range(len(out) - 1, -1, -1):
+        if out[i]["role"] != "user":
+            continue
+        c = out[i]["content"]
+        if isinstance(c, list) and any(isinstance(x, dict) and x.get("type") == "audio"
+                                       for x in c):
+            if not heard:
+                # 받아적기를 껐으면 보낼 글이 없다. 예외를 올려 Raon 으로 되돌린다 —
+                # 빈 발화를 보내느니 되돌리는 쪽이 낫고, 폴백으로 세어져 밖에서 보인다.
+                raise RuntimeError("소리로 온 발화인데 받아적은 글이 없다")
+            note = "".join(x.get("text", "") for x in c
+                           if isinstance(x, dict) and x.get("type") == "text")
+            out[i] = {**out[i], "content": heard + note}
+        break
+    return out
+
+
 def openai_answer(msgs, model):
     """OpenAI 로 답을 뽑는다. 실패하면 예외를 올려 호출자가 Raon 으로 되돌린다."""
     import urllib.request
@@ -1076,7 +1106,7 @@ def openai_answer(msgs, model):
         return json.load(r)["choices"][0]["message"]["content"].strip()
 
 
-def answer_for(session, msgs, tries=2, must_hedge=False):
+def answer_for(session, msgs, tries=2, must_hedge=False, heard=""):
     """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
 
     실측에서 16턴부터 20턴까지 "면접 끝나면 연락해."가 다섯 턴 연속 붙었다. 모델이
@@ -1097,7 +1127,7 @@ def answer_for(session, msgs, tries=2, must_hedge=False):
             a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
         else:
             try:
-                a = openai_answer(msgs, llm)
+                a = openai_answer(_as_text(msgs, heard), llm)
             except Exception as e:
                 DBG["llm_fallbacks"] += 1
                 print(f"[{session}] {llm} 실패, Raon 으로 되돌린다 — {e}", flush=True)
@@ -1234,7 +1264,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
             note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]}, note)
-            answer = answer_for(session, msgs, must_hedge=bool(note))
+            answer = answer_for(session, msgs, must_hedge=bool(note), heard=heard)
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
@@ -1280,7 +1310,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
         note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
-        answer = answer_for(session, msgs, must_hedge=bool(note))
+        answer = answer_for(session, msgs, must_hedge=bool(note), heard=heard)
         if early:
             record(session, heard, answer)
         t1 = time.time()
