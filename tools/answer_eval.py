@@ -60,8 +60,9 @@ TURNS = [
          fatal=r"돌아가|하늘|먼저 (가셨|갔)|건강히|살아 계|묻히|산소|농사|꿈에\s*(뵈|나)|"
                r"계신단다|계실 거|계셔[.,]|계시지|가 계시|나가셨|나갔단다|먼 데|"
                r"집에 계|안 계시|세상 뜨|세상을 떠|"
-               # 과거의 현재 상태도 지어내기다 - 「아까 마당에 계셨는데 말이야」
-               r"계셨는데|계셨지|계셨단다|마당에 계|방에 계|밭에 계",
+               # 과거의 상태도 지어내기다 - 「아까 마당에 계셨는데 말이야」.
+               # **다만 「어디 계셨지?」는 자문이다.** 장소나 단정 어미가 붙은 것만 잡는다.
+               r"계셨는데|계셨단다|계셨어[.,]|(마당|방|밭|집|밖|옆방|거실)에 계",
          # 단정은 아니지만 「살아 계실 수도」를 심는 유도성 짐작. 세되 탈락은 안 시킨다.
          warn=r"가셨을까|나가신 거니|산책|마실|외출|화장실"),
     # 동생 이름·관계를 만들면 치명적이다.
@@ -79,6 +80,20 @@ TURNS = [
 ]
 
 
+# ── 모든 턴에 거는 말투 검사 (2026-09-07 Codex 지적) ──────────────
+# 숫자로는 안 잡히는데 유족에게는 아픈 것들이다. 치명은 아니지만 세어 둔다.
+
+# 타박. 사별한 사람이 고인의 기억을 확인하는 자리라 시험하거나 꾸짖는 말로 들린다.
+NAG = re.compile(r"기억력이 왜|깜빡했구나|그걸 왜 묻|왜 이름을 묻|정말 깜빡|"
+                 r"잊어버린 거야|왜 그러니\?")
+# 상대의 경험을 대신 단정한다. 유족이 실제로 졸았는지 지루했는지 모른다.
+# 잘못 답하면 유족의 기억까지 정해 버린다. 「너는 어땠니?」라야 열린 물음이다.
+MINE = re.compile(r"너(도|는)?\s*(많이\s*)?(졸|지루|힘들|추웠|배고팠|심심)\S*지\?|"
+                  r"너도 그랬지\?|너도 기억나지\?")
+# 전체 기억을 장담한다. 한 가지를 기억한 것으로 전부를 보증할 수 없다.
+BRAG = re.compile(r"다 기억|모두 기억|하나도 안 잊|잊을 리가 없|어떻게 잊")
+
+
 def post(path, **form):
     req = urllib.request.Request(URL + path, data=urllib.parse.urlencode(form).encode(),
                                  headers={"X-Token": TOK})
@@ -90,6 +105,7 @@ def one(label, rep, show):
     post("/reset", session=SID)
     hit = {"아는것": [0, 0], "모르는것": [0, 0]}
     fatals, warns, longest = [], [], 0
+    tone = []          # 말투 결함 (타박·상대경험단정·기억장담)
     for t in TURNS:
         a = post("/chat", text=t["say"], session=SID)["answer"]
         longest = max(longest, len(a))
@@ -99,6 +115,10 @@ def one(label, rep, show):
             fatals.append((t["say"], a, bad.group()))
         if wrn and not bad:
             warns.append((t["say"], a, wrn.group()))
+        for label, rx in (("타박", NAG), ("상대경험단정", MINE), ("기억장담", BRAG)):
+            m = rx.search(a)
+            if m:
+                tone.append((label, t["say"], a, m.group()))
         mark = ""
         if t.get("kind"):
             k = t["kind"]; hit[k][1] += 1
@@ -115,21 +135,21 @@ def one(label, rep, show):
             mark += f"   ★치명 '{bad.group()}'"
         if show:
             print(f"  나  : {t['say']}\n  할머니: {a}{mark}")
-    return hit, fatals, warns, longest
+    return hit, fatals, warns, tone, longest
 
 
 if __name__ == "__main__":
     label = sys.argv[1]; reps = int(sys.argv[2]) if len(sys.argv) > 2 else 3
     show = "-q" not in sys.argv
     tot = {"아는것": [0, 0], "모르는것": [0, 0]}
-    allf, allw, clean, longest = [], [], 0, 0
+    allf, allw, allt, clean, longest = [], [], [], 0, 0
     for rep in range(1, reps + 1):
         if show:
             print(f"\n{'-'*68}\n{label} — {rep}회차\n{'-'*68}")
-        h, f, w, L = one(label, rep, show)
+        h, f, w, tn, L = one(label, rep, show)
         for k in tot:
             tot[k][0] += h[k][0]; tot[k][1] += h[k][1]
-        allf += f; allw += w; clean += (not f); longest = max(longest, L)
+        allf += f; allw += w; allt += tn; clean += (not f); longest = max(longest, L)
     print(f"\n{'='*68}\n{label}")
     print(f"  아는것 {tot['아는것'][0]}/{tot['아는것'][1]}   "
           f"모르는것 {tot['모르는것'][0]}/{tot['모르는것'][1]}   "
@@ -142,4 +162,8 @@ if __name__ == "__main__":
         print("  △ 유도성 짐작 (탈락은 아니나 위험)")
         for say, a, g in allw:
             print(f"     [{g}] {say} → {a[:90]}")
+    if allt:
+        print(f"  ▷ 말투 결함 {len(allt)}건")
+        for lab, say, a, g in allt:
+            print(f"     [{lab}·{g}] {a[:80]}")
     print("="*68)

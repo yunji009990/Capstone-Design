@@ -4,7 +4,9 @@
 목소리는 지금 세션의 것을 그대로 쓴다 - 실존 인물의 음성이라 내려받지 않는다.
 페르소나·사전지식만 갈아끼운다.
 
-    python3 register.py <persona.md> <knowledge.md> [세션ID]
+    python3 register.py <persona.md> <knowledge.md> [rules.md|-] [세션ID]
+
+rules 를 「-」로 주거나 생략하면 서버의 BASE_RULES 를 쓴다.
 """
 import sys, json, uuid, urllib.request
 
@@ -30,9 +32,15 @@ def form(fields, files):
 def main():
     persona = open(sys.argv[1], encoding="utf-8").read()
     knowledge = open(sys.argv[2], encoding="utf-8").read()
-    sid = sys.argv[3] if len(sys.argv) > 3 else "test_0906_150338"
+    rules = ""
+    if len(sys.argv) > 3 and sys.argv[3] != "-":
+        rules = open(sys.argv[3], encoding="utf-8").read()
+    sid = sys.argv[4] if len(sys.argv) > 4 else "test_0906_150338"
+    fields = {"persona": persona, "knowledge": knowledge, "session": sid}
+    if rules.strip():
+        fields["rules"] = rules
     body, ctype = form(
-        {"persona": persona, "knowledge": knowledge, "session": sid},
+        fields,
         {"voice": ("voice.wav", open(VOICE, "rb").read(), "audio/wav")})
     req = urllib.request.Request(URL + "/session/start", data=body,
                                  headers={"X-Token": TOK, "Content-Type": ctype})

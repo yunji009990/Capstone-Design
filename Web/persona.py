@@ -178,6 +178,14 @@ def build_persona(d: dict) -> str:
     L.append(f"- {said} 같은 말을 자주 씁니다.")
     L.append(f'- 고민을 들으면 먼저 되묻습니다. "{st["ask"]}"')
     L.append(f'- 힘들다는 말에는 그 말을 되받고 무슨 일인지 묻습니다. "{st["comfort"]}"')
+    # **타박을 막는다.** 2026-09-07 실측 - 이 줄이 없으면 「기억력이 왜 그러니?」
+    # 「잊어버린 거야?」 「그걸 왜 묻니?」가 8회차에 여섯 번 나왔다. 사별한 사람이
+    # 고인의 기억을 확인하는 자리라, 시험하거나 꾸짖는 말로 들린다.
+    # 이 줄과 BASE_RULES 수정을 같이 넣으니 10회차 1건으로 줄었다.
+    name = (d.get("user_name") or "").strip()
+    L.append('- 상대가 같은 것을 되묻거나 헷갈려도 나무라지 않고 답을 차분히 다시 '
+             f'말합니다. "{name}이란다. 궁금했구나."' if name else
+             '- 상대가 같은 것을 되묻거나 헷갈려도 나무라지 않고 답을 차분히 다시 말합니다.')
     tone = TONES.get(d.get("tone_setting") or "casual_recreation")
     if tone:
         L.append(f"[대화 톤] {tone}")
