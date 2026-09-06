@@ -263,6 +263,16 @@ def tail(text):
     ss = sentences(text)
     return ss[-1] if ss else ""
 
+def head(text):
+    """첫 문장. **꼬리만 보고 있었다.**
+
+    2026-09-06 헤드셋 대화에서 네 턴 연속 "아이고, 우리 강아지. 그래도 잘 버텨서
+    고마워." 가 나왔는데 계측기가 못 봤다. 꼬리고착은 마지막 문장만 재고, 여기
+    고착된 것은 **머리**였다. 사용자가 "난 강아지가 아닌데" 라고 한 다음 턴에도
+    같은 머리가 붙었다."""
+    ss = sentences(text)
+    return ss[0] if ss else ""
+
 def wrong_name(answer):
     """사용자를 AI 쪽 이름(준호)으로 부르는 것만 센다.
 
@@ -275,7 +285,16 @@ def examples(persona):
     return [l.split(":", 1)[1].strip() for l in persona.splitlines()
             if re.match(r"^\s*(친구|나|상대)\s*:", l)]
 
-def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
+def nickname(knowledge):
+    """사전지식이 정한 애칭. `build_knowledge()` 가 이 꼴로 만든다.
+
+    **「호명」 칸은 이름만 센다**(`answer.count(USER_NAME)`). 그래서 "우리 강아지"
+    처럼 이름이 아닌 호칭은 매 턴 나와도 0 으로 찍혔다. 호명의 뜻을 바꾸면 문서에
+    적힌 10.0 -> 2.5 와 비교가 끊기므로, 고치지 않고 칸을 따로 낸다."""
+    m = re.search(r'당신은 사용자를 "([^"]+)"라고 부른다', knowledge or "")
+    return m.group(1) if m else ""
+
+def score(answer, prev_answers, prev_questions, prev_tails, prev_heads, exs, nick, want):
     qs, ss = questions(answer), sentences(answer)
     return {
         "글자수":   len(answer),
@@ -287,6 +306,9 @@ def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
         "호칭오류": wrong_name(answer),
         # 실측에서 15턴 중 10턴이 "민수야"로 시작했다. 친구는 매번 이름을 안 부른다.
         "호명":     answer.count(USER_NAME),
+        # 이름이 아닌 호칭("우리 강아지"). 페르소나는 "대부분은 부르지 않는다"고
+        # 적어 두는데 실제로는 매 턴 부른다. nickname() 주석 참고.
+        "애칭":     answer.count(nick) if nick else 0,
         # "충분히 잘할 수 있을 거야" 류. 네 턴 연속 나오면 친구가 아니라 상담사다.
         "격려":     len(CHEER.findall(answer)),
         # 규칙은 "한 문장, 길어도 두 문장. 40자 안팎"이다. 셋을 넘으면 어긴 것으로 센다.
@@ -295,6 +317,12 @@ def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
         # 자연스러운 대화라서 뺀다 — 여덟 자 넘는 꼬리가 겹칠 때만 붕괴로 센다.
         "꼬리고착": int(len(tail(answer)) >= 8
                      and max([sim(tail(answer), t) for t in prev_tails] or [0]) >= 0.6),
+        # 꼬리와 같은 기준으로 머리를 잰다. "응." "그래." 같은 짧은 첫마디는
+        # 반복이 아니라 자연스러운 대화라 여덟 자를 넘을 때만 본다.
+        # **한 문장짜리 답은 세지 않는다** — 머리와 꼬리가 같은 문장이라 꼬리고착과
+        # 겹쳐서 위반이 두 번 잡힌다. 두 문장 이상일 때만 새 정보다.
+        "머리고착": int(len(ss) > 1 and len(head(answer)) >= 8
+                     and max([sim(head(answer), h) for h in prev_heads] or [0]) >= 0.6),
         "예시베낌": round(max([sim(answer, e) for e in exs] or [0]), 2),
         "답변반복": round(max([sim(answer, a) for a in prev_answers] or [0]), 2),
         "질문반복": round(max([sim(q, p) for q in qs for p in prev_questions] or [0]), 2),
@@ -303,7 +331,8 @@ def score(answer, prev_answers, prev_questions, prev_tails, exs, want):
         "기억":     None if not want else int(any(w in answer for w in want)),
     }
 
-VIOLATIONS = ["존댓말", "상담원", "정체노출", "기호", "호칭오류", "길이초과", "꼬리고착"]
+VIOLATIONS = ["존댓말", "상담원", "정체노출", "기호", "호칭오류", "길이초과",
+              "꼬리고착", "머리고착"]
 
 # ── 서버 ────────────────────────────────────────────────────────────
 def post(path, data=None, files=None, timeout=300):
@@ -322,9 +351,9 @@ def register(persona, knowledge, rules):
     if out.get("warning"):
         print(f"  [경고] {out['warning']}")
 
-def run_once(name, exs, rep):
+def run_once(name, exs, nick, rep):
     post("/reset", data={"session": SID})
-    rows, prev_a, prev_q, prev_t, summary, learned = [], [], [], [], "", []
+    rows, prev_a, prev_q, prev_t, prev_h, summary, learned = [], [], [], [], [], "", []
     for i, (say, want) in enumerate(SCRIPT, 1):
         r = post("/chat", data={"text": say, "session": SID}).json()
         ans = r["answer"]
@@ -335,7 +364,7 @@ def run_once(name, exs, rep):
         row = {"변형": name, "회차": rep, "턴": i, "질문": say, "답변": ans,
                "초": r["elapsed"], "남은턴": r["turns"], "요약": r["summary"],
                "적립": list(r.get("learned") or [])}
-        row.update(score(ans, prev_a, prev_q, prev_t, exs, want))
+        row.update(score(ans, prev_a, prev_q, prev_t, prev_h, exs, nick, want))
         rows.append(row)
         mark = "" if row["기억"] is None else ("  기억 O" if row["기억"] else "  기억 X")
         flags = "".join(f" [{k}]" for k in VIOLATIONS if row[k])
@@ -350,6 +379,7 @@ def run_once(name, exs, rep):
         prev_a.append(ans)
         prev_q += questions(ans)
         prev_t.append(tail(ans))
+        prev_h.append(head(ans))
     return rows
 
 def read(name, kind):
@@ -361,13 +391,15 @@ def run_variant(name, reps):
     knowledge = read(name, "knowledge")
     rules     = read(name, "rules")
     exs = examples(persona)
+    nick = nickname(knowledge)
     print(f"\n{'='*70}\n{name} — 페르소나 {len(persona)}자 / 사전지식 {len(knowledge)}자"
-          f" / 규칙 {len(rules) or '서버 기본값'}\n{'='*70}")
+          f" / 규칙 {len(rules) or '서버 기본값'}"
+          f"{f' / 애칭 {nick!r}' if nick else ' / 애칭 없음'}\n{'='*70}")
     register(persona, knowledge, rules)
     rows = []
     for rep in range(1, reps + 1):
         print(f"\n-- {rep}회차 --")
-        rows += run_once(name, exs, rep)
+        rows += run_once(name, exs, nick, rep)
     return rows
 
 # ── 정리 ────────────────────────────────────────────────────────────
@@ -377,7 +409,8 @@ def summarize(rows):
         rs = [r for r in rows if r["변형"] == name]
         mem = [r for r in rs if r["기억"] is not None]
         d = {"턴": len(rs)}
-        for k in ["글자수", "문장수", "예시베낌", "답변반복", "질문반복", "되묻기", "호명", "격려"]:
+        for k in ["글자수", "문장수", "예시베낌", "답변반복", "질문반복", "되묻기",
+                  "호명", "애칭", "격려"]:
             d[k] = round(statistics.mean(r[k] for r in rs), 2)
         for k in VIOLATIONS:
             d[k] = sum(1 for r in rs if r[k])
@@ -393,7 +426,7 @@ def summarize(rows):
     return out
 
 def table(summary):
-    cols = ["턴", "글자수", "문장수", "되묻기", "호명", "격려", "기억",
+    cols = ["턴", "글자수", "문장수", "되묻기", "호명", "애칭", "격려", "기억",
             "예시베낌", "답변반복", "질문반복"] \
            + VIOLATIONS + [c for c in summary[next(iter(summary))] if c.startswith(("앞", "뒤"))]
     w = max(max(len(n) for n in summary) + 2, 10)
