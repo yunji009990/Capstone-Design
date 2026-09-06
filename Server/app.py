@@ -1091,19 +1091,43 @@ def _as_text(msgs, heard):
     return out
 
 
+# 답변 LLM 의 주소. **로컬 모델도 같은 자리에 꽂는다** — vLLM·llama.cpp 는 OpenAI
+# 호환 엔드포인트를 내므로 주소만 바꾸면 코드가 그대로다. 시험 장치(DBG["llm"])도
+# 그대로 쓴다. 로컬이면 키가 필요 없으니 빈 값이어도 된다.
+LLM_URL = os.environ.get("RAON_LLM_URL", "https://api.openai.com/v1/chat/completions")
+# 서버마다 다른 여분 필드. **OpenAI 에 보내면 400 이 나므로 기본값은 비어 있다.**
+# vLLM 에 EXAONE 을 올릴 때 추론을 끄는 자리가 여기다 —
+#   RAON_LLM_EXTRA='{"chat_template_kwargs": {"enable_thinking": false}}'
+# EXAONE 4.5 는 enable_thinking 기본이 참이라, 안 끄면 추론 토큰이 예산을 먹고
+# 빈 답이 나온다(gpt-5.5 에서 겪은 것과 같다).
+try:
+    LLM_EXTRA = json.loads(os.environ.get("RAON_LLM_EXTRA", "") or "{}")
+except Exception as _e:
+    print(f"[설정] RAON_LLM_EXTRA 를 못 읽었다, 무시한다 — {_e}", flush=True)
+    LLM_EXTRA = {}
+
+
 def openai_answer(msgs, model):
-    """OpenAI 로 답을 뽑는다. 실패하면 예외를 올려 호출자가 Raon 으로 되돌린다."""
+    """OpenAI 호환 엔드포인트로 답을 뽑는다. 실패하면 예외를 올려 호출자가 Raon 으로 되돌린다."""
     import urllib.request
     body = json.dumps({
         "model": model,
         "messages": [{"role": m["role"], "content": _flat(m["content"])} for m in msgs],
         "max_completion_tokens": TOKENS,
+        **LLM_EXTRA,
     }).encode()
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions", data=body,
+        LLM_URL, data=body,
         headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)["choices"][0]["message"]["content"].strip()
+        out = json.load(r)["choices"][0]["message"]["content"]
+    # **빈 답이 그대로 TTS 로 가면 안 된다.** gpt-5.5 가 추론 토큰으로 예산(TOKENS)을
+    # 다 써서 본문 0자를 낸 적이 있다. 예외가 아니라 정상 응답이라 폴백 카운터에도
+    # 안 잡혔다. 여기서 올려 Raon 으로 되돌리고 세어지게 한다.
+    out = (out or "").strip()
+    if not out:
+        raise RuntimeError(f"{model} 이 빈 답을 냈다 (추론 토큰이 예산을 먹었을 수 있다)")
+    return out
 
 
 def answer_for(session, msgs, tries=2, must_hedge=False, heard=""):
