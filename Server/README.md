@@ -18,6 +18,7 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 | `app.py` | FastAPI 서버. `/talk`, `/talk_stream`, `/tts`, `/stt`, `/reset`, `/health` |
 | `modeling_raon.patch` | 모델 파일(`modeling_raon.py`)에 넣은 프레임 단위 스트리밍 훅 |
 | `start.sh` / `stop.sh` / `status.sh` | 기동 · 종료 · 상태 확인 |
+| `vllm_start.sh` | **답변 LLM 서버(포트 8001).** 이 기계의 함정 다섯이 주석에 있다 |
 | `*.bak` | 우리가 손대기 전 원본 |
 
 **기본 인물도 기본 음성도 없습니다.** 인물은 웹(`Web/`)에서만 등록되고, 등록되지
@@ -77,6 +78,43 @@ B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 
 이 함정에 2026-09-04 하루에만 세 번 빠졌다. 판정기 온도·머리글·창을 순차로 재서
 잘못 기각했다가 교대로 다시 재서 뒤집었다.
 
+## 서버는 둘입니다 (2026-09-07 부터)
+
+**Raon 은 받아적기와 목소리 복제만 하고, 답변 글은 따로 올린 LLM 이 만듭니다.**
+근거는 `docs/음성대화_작업현황.md` §6 「0순위 — 답변 LLM 을 밖으로 뺀다」.
+
+```
+포트 8000   Raon        받아적기 · 판정 · 적립 · 목소리 복제
+포트 8001   vLLM        답변 글 (google/gemma-4-31B-it-qat-w4a16-ct)
+```
+
+**기동 순서가 있습니다 — vLLM 을 먼저, Raon 을 나중에.** Raon 이 뜰 때
+`RAON_LLM_URL` 을 한 번 읽기 때문입니다.
+
+```bash
+# 1) 답변 LLM. **별도 venv 입니다** — Raon 의 venv 에 vLLM 을 넣으면
+#    transformers 버전이 꼬여 Raon 이 죽습니다.
+cd ~; MODEL=/home/crc_unity/models/gemma-4-31B-qat   nohup ./vllm_start.sh > vllm.log 2>&1 &
+#    1~2분 걸립니다. curl http://127.0.0.1:8001/v1/models 로 확인
+
+# 2) Raon
+cd ~/server
+RAON_JUDGE=0 RAON_LLM_URL=http://127.0.0.1:8001/v1/chat/completions RAON_LLM_EXTRA='{"chat_template_kwargs":{"enable_thinking":false}}' ./start.sh
+
+# 3) 답변 LLM 고르기 (재시작 없이 바뀝니다)
+curl -H "X-Token: $TOK" -F key=llm -F value=exaone http://127.0.0.1:8000/dbg
+```
+
+- `--served-model-name exaone` 이라 이름이 `exaone` 이지만 **올라가는 것은 `MODEL` 이
+  가리키는 모델**입니다. 시험하며 갈아끼우려고 이름을 고정해 뒀습니다
+- **`RAON_LLM_EXTRA` 로 추론을 끕니다.** 안 끄면 영어 사고가 답변에 그대로 섞여
+  TTS 로 읽힙니다
+- **vLLM 은 재부팅되면 안 뜹니다.** 자동 기동 절차는 아직 없습니다
+- **이 기계는 공용입니다** — `uc` 사용자가 6.2GB 를 상시 씁니다. 가용은 95GB 가 아니라 89GB
+
+**되돌리려면 셋을 같이 되돌립니다** — `DBG["llm"]=raon`, `RAON_JUDGE=1`,
+`RAON_MEM_FRACTION=0.70`. 하나만 되돌리면 죽거나 지어냅니다.
+
 ## 서버를 새로 셋업하거나 복구할 때
 
 ```bash
@@ -84,8 +122,7 @@ B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 
 # 2. 모델 파일에 스트리밍 훅 재적용
 patch ~/models/AX-K2-Raon-Speech/modeling_raon.py < ~/server/modeling_raon.patch
 rm -rf ~/hf_home/modules/transformers_modules/AX_hyphen_K2_hyphen_Raon_hyphen_Speech
-# 3. 기동
-cd ~/server && ./start.sh
+# 3. 기동 (위 「서버는 둘입니다」 순서대로)
 ```
 
 2번의 캐시 삭제가 중요합니다. transformers는 `trust_remote_code` 파일을
