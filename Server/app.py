@@ -1067,6 +1067,13 @@ def _flat(c):
     return str(c or "")
 
 
+def need_heard():
+    """소리로 온 발화라도 미리 받아적어야 하는가.
+
+    밖의 답변 LLM 은 소리를 못 받는다. Raon 을 쓸 때만 건너뛸 수 있다."""
+    return DBG["llm"] != "raon"
+
+
 def _as_text(msgs, heard):
     """소리로 온 발화를 받아적은 글로 갈아끼운다.
 
@@ -1284,7 +1291,12 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
     # 답을 만들기 전에 글이 있어야 하므로, 자막을 안 보내더라도 먼저 받아적는다.
     # 묶어 두면 자막 스위치 하나가 지어내기 27/36 을 되살린다 — 운영자 화면에서
     # 끌 수 있는 스위치라 더 위험하다.
-    early = want_heard or JUDGE
+    #
+    # **밖의 답변 LLM 을 쓰면 받아적기가 선택이 아니다.** 그쪽은 소리를 못 받아서
+    # 글이 없으면 답을 아예 못 만든다. 2026-09-07 헤드셋 시연에서 자막을 끈 채로
+    # 여덟 턴을 갔더니 여덟 번 다 Raon 으로 되돌아갔다 — 화면에는 답이 나오니
+    # 아무도 몰랐고, 로그를 봐야 보였다. 판정기만 보던 조건을 넓힌다.
+    early = want_heard or JUDGE or need_heard()
     deferred = False
     try:
         async with LOCK:
@@ -1330,8 +1342,9 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
         t.write(raw); p = t.name
 
-    # 자막을 안 보내더라도 판정기가 켜져 있으면 먼저 받아적는다 — /talk 주석 참고.
-    early = want_heard or JUDGE
+    # 자막을 안 보내더라도 판정기나 밖의 LLM 이 글을 필요로 하면 먼저 받아적는다
+    # — /talk 주석 참고.
+    early = want_heard or JUDGE or need_heard()
 
     # 답변 텍스트는 헤더로 먼저 나가야 하므로 여기서 확정한다
     async with LOCK:
