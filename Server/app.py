@@ -251,7 +251,7 @@ def ref_text(voice):
         return ""
     if voice not in REF_TEXT:
         t0 = time.time()
-        REF_TEXT[voice] = S["pipe"].stt(voice)
+        REF_TEXT[voice] = stt(voice)
         print(f"[참조전사] {time.time()-t0:.1f}초 — {REF_TEXT[voice]!r}", flush=True)
     return REF_TEXT[voice]
 
@@ -307,7 +307,7 @@ def synth(text, voice, tries=2):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
             t.write(data); tmp = t.name
         try:
-            heard = pipe.stt(tmp)
+            heard = stt(tmp)
         finally:
             os.unlink(tmp)
         if _sim(heard, text) >= 0.4:
@@ -454,7 +454,7 @@ async def stt_ep(file: UploadFile = File(...), x_token: str = Header("")):
         t.write(raw); p = t.name
     try:
         async with LOCK:
-            return {"text": S["pipe"].stt(p)}
+            return {"text": stt(p)}
     finally:
         os.unlink(p)
 
@@ -835,6 +835,9 @@ DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
        # chat-latest 셋이 404 를 내고 Raon 으로 되돌아갔는데 그걸 모르고 쟀다.
        # 측정 앞뒤로 이 값을 보고 늘었으면 그 회차는 버린다.
        "llm_fallbacks": 0,
+       # 받아적기 폴백. LLM 쪽과 같은 이유로 센다 — 밖의 STT 가 조용히 죽고
+       # Raon 이 대신 받아적으면, 후보를 재는 줄 알고 Raon 을 재게 된다.
+       "stt_fallbacks": 0,
        # 적립만 갈아끼운다. 답변 뒤로 미뤄져 지연에 안 걸리는 자리다.
        "learn_llm": os.environ.get("RAON_LEARN_LLM", "raon"),
        # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
@@ -1067,6 +1070,65 @@ def _flat(c):
     return str(c or "")
 
 
+# ── 받아적기 이음매 ──────────────────────────────────────────────
+# **답변 LLM 과 같은 방식으로 뺀다.** 여기도 사실상 표준이 있다 —
+# faster-whisper-server·Speaches·vLLM 이 다 OpenAI 의
+# `/v1/audio/transcriptions` 를 낸다. 주소만 바꾸면 코드가 그대로다.
+#
+# 기본값은 비어 있고, 그러면 Raon 이 받아적는다. **지금까지와 똑같다.**
+#
+# 왜 지금 내는가 — 2026-09-06 부터 **받아적은 글이 답변의 유일한 재료**다.
+# 그런데 Raon STT 의 정확도를 잰 적이 한 번도 없다. 이 이음매가 있어야 같은
+# 음성으로 후보들을 나란히 재 볼 수 있다.
+#
+# **합성 쪽은 이렇게 못 뺀다** — `/v1/audio/speech` 에는 참조 음성을 실을 자리가
+# 없어서 목소리 복제가 표준에 없다. 그쪽 이음매는 우리가 정해야 한다.
+STT_URL = os.environ.get("RAON_STT_URL", "")
+STT_MODEL = os.environ.get("RAON_STT_MODEL", "whisper-1")
+
+
+def _multipart(fields, filename, blob):
+    """OpenAI 호환 서버가 받는 multipart 한 덩어리."""
+    import uuid
+    b = uuid.uuid4().hex
+    out = []
+    for k, v in fields.items():
+        out += [b"--" + b.encode(),
+                f'Content-Disposition: form-data; name="{k}"'.encode(),
+                b"", v.encode()]
+    out += [b"--" + b.encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"'.encode(),
+            b"Content-Type: audio/wav", b"", blob,
+            b"--" + b.encode() + b"--", b""]
+    return b"\r\n".join(out), b
+
+
+def stt(path):
+    """음성 파일 하나를 글로. 주소가 없으면 Raon 이 한다.
+
+    **실패하면 Raon 으로 되돌린다.** 받아적기가 비면 답변도 못 만든다."""
+    if not STT_URL:
+        return S["pipe"].stt(path)
+    try:
+        import urllib.request
+        with open(path, "rb") as f:
+            blob = f.read()
+        body, b = _multipart({"model": STT_MODEL, "language": "ko"}, "a.wav", blob)
+        req = urllib.request.Request(
+            STT_URL, data=body,
+            headers={"Authorization": f"Bearer {OPENAI_KEY}",
+                     "Content-Type": f"multipart/form-data; boundary={b}"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            out = (json.load(r).get("text") or "").strip()
+        if not out:
+            raise RuntimeError("받아적은 글이 비었다")
+        return out
+    except Exception as e:
+        DBG["stt_fallbacks"] += 1
+        print(f"[받아적기] 밖의 STT 실패, Raon 으로 되돌린다 — {e}", flush=True)
+        return S["pipe"].stt(path)
+
+
 def need_heard():
     """소리로 온 발화라도 미리 받아적어야 하는가.
 
@@ -1263,7 +1325,7 @@ async def _record_history(session: str, path: str, answer: str):
     """응답을 보낸 뒤 사용자 발화를 받아적어 히스토리를 채운다."""
     try:
         async with LOCK:
-            heard = S["pipe"].stt(path)
+            heard = stt(path)
             record(session, heard, answer)
             learn(session, heard)       # 이미 응답을 보낸 뒤라 미룰 것이 없다
         print(f"[{session}] (후처리) {heard!r}", flush=True)
@@ -1301,7 +1363,7 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
     try:
         async with LOCK:
             pipe, t0 = S["pipe"], time.time()
-            heard = pipe.stt(p) if early else ""
+            heard = stt(p) if early else ""
             t1 = time.time()
             note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
@@ -1349,7 +1411,7 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     # 답변 텍스트는 헤더로 먼저 나가야 하므로 여기서 확정한다
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
-        heard = pipe.stt(p) if early else ""
+        heard = stt(p) if early else ""
         note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
