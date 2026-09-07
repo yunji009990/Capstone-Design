@@ -33,16 +33,23 @@ export RAON_TEMP=${RAON_TEMP:-1.6}
 # 생성 초반 무음 프레임. 비우면 모델 기본값(2). 0 으로 두면 참조가 통째로 샌다.
 export RAON_CONT_SILENCE=${RAON_CONT_SILENCE:-}
 export RAON_TOKEN=23605a891e448b5aa46f82c8640b554c
-# 답변 LLM 의 주소. **기본값은 OpenAI 라 지금까지와 같다.** 로컬 vLLM 을 쓰려면
-# 기동할 때 앞에 붙인다 (start.sh 를 고치지 않는다 — 시험 중에는 오가야 한다):
+# ── 답변 LLM ──────────────────────────────────────────────────────
+# **손으로 붙이던 것을 기본값으로 옮겼다 (2026-09-07).** 전에는 이 셋을 명령줄에
+# 붙여 띄웠는데, 그러면 재시작 한 번에 Raon + 판정기로 조용히 되돌아간다.
+# 실제로 그렇게 죽었다 — 답은 나오는데 Raon 이 만든 것이라 아무도 몰랐고,
+# 되살아난 판정기가 다시 뽑기를 부르며 20턴도 못 가 CUDA OOM 이 났다.
+# 밖으로 뺀 것이 결론인 이상 기본값이 결론이어야 한다.
 #
-#   RAON_LLM_URL=http://127.0.0.1:8001/v1/chat/completions \
-#   RAON_LLM_EXTRA='{"chat_template_kwargs":{"enable_thinking":false}}' ./start.sh
+# **되돌리려면 셋을 같이 되돌린다** — 하나만 되돌리면 죽거나 지어낸다:
+#   RAON_LLM=raon RAON_JUDGE=1 RAON_MEM_FRACTION=0.70 ./start.sh
 #
-# EXAONE 4.5 는 enable_thinking 기본이 참이다. 안 끄면 추론 토큰이
-# max_completion_tokens 를 먹고 빈 답이 나온다.
-export RAON_LLM_URL=${RAON_LLM_URL:-https://api.openai.com/v1/chat/completions}
-export RAON_LLM_EXTRA=${RAON_LLM_EXTRA:-}
+# vLLM(8001)이 먼저 떠 있어야 한다. vllm_start.sh 참고.
+# enable_thinking 은 꺼 둔다 — 켜면 추론 토큰이 max_completion_tokens 를
+# 먹고 빈 답이 나온다.
+export RAON_LLM=${RAON_LLM:-exaone}
+export RAON_JUDGE=${RAON_JUDGE:-0}
+export RAON_LLM_URL=${RAON_LLM_URL:-http://127.0.0.1:8001/v1/chat/completions}
+export RAON_LLM_EXTRA=${RAON_LLM_EXTRA:-'{"chat_template_kwargs":{"enable_thinking":false}}'}
 if [ -f server.pid ] && ps -p $(cat server.pid) >/dev/null 2>&1; then
   echo "이미 실행 중 (PID $(cat server.pid))"; exit 0
 fi
