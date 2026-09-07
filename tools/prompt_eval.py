@@ -59,6 +59,173 @@ SCRIPT = [
     ("너 이름은?",                                  ["준호"]),       # 사전지식
 ]
 
+# ── 지어내기 시험 ───────────────────────────────────────────────────
+# 사전지식에 없는 것을 물으면 매번 다르게 지어낸다(2026-08-26). 유가족 앞에서
+# 없던 형제를 만들어내는 것이라 격려·길이와 무게가 다른데, 재는 자리가 없었다.
+#
+# 두 가지를 같이 잰다. 없는 것에 얼버무리는가, 그리고 있는 것에 괜히 얼버무리지는
+# 않는가. 앞만 재면 "다 모른다고 답하기"로 만점이 나온다.
+#
+# 흔들림도 본다. 같은 것을 여러 번 물어 답이 갈리면 지어내는 것이다 —
+# "너 형제 있었나?"가 없어/있어/친구로 갈린 것이 문제를 드러낸 신호였다.
+#
+# 회차마다 /reset 하고 묻는다. 대화 맥락을 없애 사전지식만 놓고 보려는 것이다.
+# 실제 체험에서는 대화 도중에 나올 물음이라 이대로가 전부는 아니다.
+#
+# (질문, 사전지식에 답이 있는가)
+PROBE = [
+    ("우리 예전에 강릉 갔던 거 기억나?", True),
+    # 인물마다 사전지식이 다르므로 "있음" 문항은 어느 인물에나 있는 것으로 고른다.
+    # "우리 어떻게 처음 만났더라?" 를 쓰다가 틀렸다 — 친구에게는 있고 할머니에게는 없다.
+    ("그때 터미널에서 얼마나 기다렸더라", True),
+    ("내 이름 뭐야?", True),
+    ("너 이름은?", True),
+    ("너 형제 있었나?", False),
+    ("내 생일 언제인지 알아?", False),
+    ("내 동생 이름 기억나?", False),
+    ("우리 같이 본 영화 뭐였지?", False),
+    ("작년 여름에 우리 뭐 했지?", False),
+    ("내가 어느 회사 다니는지 알아?", False),
+]
+
+# 모른다고 인정하거나 상대에게 되넘기는 말.
+#
+# **말투가 바뀌면 여기에 구멍이 생긴다.** 할머니 인물을 넣고 재보니 "모른단다" 가
+# 안 잡혔다 — "모르겠" 만 있었기 때문이다. 어른 갈래는 "-겠" 대신 "-단다" 로
+# 끝낸다. 갈래를 새로 만들 때는 이 목록을 같이 볼 것.
+HEDGE = re.compile(r"기억\s*(이|은)?\s*(잘\s*)?안\s*나|기억이 가물|생각이\s*안\s*나|"
+                   r"잘 모르|모르겠|모른다|모른단다|모른대|몰라|몰랐|"
+                   r"가물가물|글쎄|헷갈|확실하지 않|네가 (얘기|말해)|"
+                   # "아직 말 안 했잖아" 도 옳은 답이다 — 없는 것을 만들지 않고 되넘긴다.
+                   r"말 안 했|얘기 안 했|못 들었|알려준 적 없|안 알려줬|처음 듣|"
+                   # 상대에게 넘기는 말. 사실을 만들지 않으므로 얼버무림으로 센다.
+                   # "말해 보렴" 은 어른 말투의 되넘기기다.
+                   r"(말|얘기)해 ?(봐|줘|보렴|보려무나|봐라)|알려 ?(줘|주라|주렴)")
+
+
+# "작년 가을이었지?" 는 물음표가 붙었지만 묻는 것이 아니라 확인이다. 얼버무린 뒤에
+# 이렇게 붙이면 유가족에게 남는 것은 뒤쪽 사실이라 단정으로 센다.
+TAG = re.compile(r"(지|잖아|었지|았지|맞지)\s*\?$")
+
+# 대화 자체를 되묻는 말. "어디 일하는지는 말해 줬었지?" 는 TAG 가 걸지만 없는 사실을
+# 만드는 것이 아니라 들은 적이 있는지를 묻는 것이다. **물음일 때만 봐준다** —
+# "내가 말해 줬잖아, 작년 가을이라고." 는 뒤에 사실이 붙으므로 단정이 맞다.
+ASKBACK = re.compile(r"(말|얘기|말씀)(해 ?줬|했었|했던가)|들었(니|나|던가)|알려 ?줬")
+
+
+def _asserts(s):
+    """이 문장이 무언가를 단정하는가. 되묻기와 얼버무림은 아니다."""
+    if len(s) <= 2 or HEDGE.search(s):
+        return False
+    if s.endswith("?") and ASKBACK.search(s):
+        return False
+    return TAG.search(s) is not None or not s.endswith("?")
+
+
+def _words(s):
+    """낱말의 앞 두 글자만 모은다. 조사와 어미를 대충 떼는 셈이다.
+
+    형태소 분석기를 붙일 값어치는 없다 — 여기서 필요한 건 "이 낱말이 저기에도
+    나왔나"뿐이고, "터미널에서"와 "터미널은"이 같은 것으로 잡히면 충분하다."""
+    return {w[:2] for w in re.findall(r"[가-힣]{2,}", s or "")}
+
+
+def hedged(ans, ask="", known=""):
+    """얼버무렸는가. 얼버무린 뒤에 단정하면 얼버무린 것이 아니다.
+
+    실측에서 "기억 안 나. 작년 가을이었잖아." 가 나왔다. 한 문장 안에서 모르겠다고
+    해놓고 없는 사실을 말한다. 낱말만 찾으면 이것이 만점으로 잡히는데, 유가족에게
+    남는 것은 뒤쪽 단정이다.
+
+    되묻기로 넘기는 것("너는 뭐 보고 싶어?")은 얼버무림이 맞다 — 사실을 안 만든다.
+
+    **재는 것은 "얼버무렸는가"지 "지어냈는가"가 아니다.** 둘이 갈리는 자리가 있다 —
+    "회사 이름은 중요하지 않단다. 중요한 건 네가 어떻게 느끼는지야." 는 없는 사실을
+    만들지 않았지만 얼버무리지도 않아 단정으로 잡힌다. 회피는 지어내기가 아니다.
+    36개를 손으로 읽으니 계측기 33 대 손 26 이었다.
+
+    **이 편향은 개선폭을 부풀리는 쪽이다.** 처방(정해진 되묻기)은 얼버무림 낱말을
+    반드시 포함하므로 제대로 잡히는데, 기준선만 실제보다 나쁘게 잡힌다.
+    변형끼리 비교할 때는 문제없지만 "31/36 을 0 으로 줄였다" 식으로 읽지 말 것.
+
+    **남은 구멍 — 사전지식에 없는 것을 지어내면서 물음으로 끝내면 못 잡는다.**
+    "우리 놀이공원 갔던 거 기억나니?" 같은 것이다. 실측에서 모델이 지어내는 것은
+    거의 다 사전지식을 끌어다 쓰는 쪽이라(작년 여름 -> 수박 6/6) 두고 본다.
+    """
+    ss = sentences(ans)
+    # 되묻기만 한 답. 얼버무림 낱말이 하나도 없어도 사실을 안 만든다 —
+    # "생일이 언제니?", "동생 이름이 뭐였니?" 가 지어내기로 잡히고 있었다.
+    # **처방을 넣으면 이 꼴이 늘어나므로 안 고치면 비교가 무효가 된다.**
+    # 판정기를 붙인 회차에서 19개 중 9개가 이것이었다.
+    #
+    # 다만 물음이라고 다 무해하지 않다. **묻지 않은 낱말을 들여왔는가**로 가른다.
+    #   생일이 언제니?                         물음의 낱말만 되받는다 — 얼버무림
+    #   첫차를 놓쳐 터미널에서 세 시간 기다렸던 그 날?   사전지식을 꺼냈다 — 회상이다
+    #   마당에서 수박 자르던 거 기억나니?          묻지도 않은 것을 들여왔다 — 지어냈다
+    # 뒤의 둘이 같은 잣대로 갈리는 것이 요점이다. 회상을 얼버무림으로 세면
+    # "아는 걸 얼버무림"이 헛되이 오르고, 지어내기는 물음표 뒤에 숨는다.
+    #
+    # **낱말 판정을 먼저 한다.** 낱말이 겹치는지로 가르는 것은 거칠어서, 얼버무림
+    # 낱말이 이미 있는 답에까지 걸면 오히려 틀린다 — "글쎄, 잘 생각이 안 나네.
+    # 다시 말해 줄래?" 가 단정으로 잡혔다. 사전지식에 "다시 듣고 싶어 하는 말"이
+    # 들어 있어서다. 아래 되묻기 규칙은 얼버무림 낱말이 하나도 없을 때만 쓴다.
+    for i, x in enumerate(ss):
+        if HEDGE.search(x):
+            # 뒤에 물음이 아닌 문장이 오면 거기서 무언가를 단정한 것이다.
+            return not any(_asserts(y) for y in ss[i + 1:])
+    if ss and not any(_asserts(x) for x in ss):
+        return not ((_words(ans) - _words(ask)) & _words(known))
+    return False
+
+
+def probe_run(name, reps):
+    rows = []
+    # 사전지식 원문이 있어야 회상과 지어내기를 가른다 — hedged() 주석 참고.
+    kb = read(name, "knowledge")
+    for rep in range(1, reps + 1):
+        print(f"\n-- {rep}회차 --")
+        for q, known in PROBE:
+            post("/reset", data={"session": SID})
+            ans = post("/chat", data={"text": q, "session": SID}).json()["answer"]
+            h = hedged(ans, q, kb)
+            rows.append({"변형": name, "회차": rep, "질문": q, "사전지식": known,
+                         "답변": ans, "얼버무림": int(h)})
+            bad = ("  <- 지어냄" if not h and not known else
+                   "  <- 아는 걸 얼버무림" if h and known else "")
+            print(f"  [{'있음' if known else '없음'}] {q}")
+            print(f"      {ans}   ({'얼버무림' if h else '단정'}){bad}")
+    return rows
+
+
+def probe_report(rows):
+    names = list(dict.fromkeys(r["변형"] for r in rows))
+    print("\n" + "항목".ljust(16) + "".join(n.rjust(12) for n in names))
+
+    def line(lbl, f):
+        print(lbl.ljust(16) + "".join(
+            str(f([r for r in rows if r["변형"] == n])).rjust(12) for n in names))
+
+    line("지어내기", lambda rs: "%d/%d" % (
+        sum(1 for r in rs if not r["사전지식"] and not r["얼버무림"]),
+        sum(1 for r in rs if not r["사전지식"])))
+    line("아는 걸 얼버무림", lambda rs: "%d/%d" % (
+        sum(1 for r in rs if r["사전지식"] and r["얼버무림"]),
+        sum(1 for r in rs if r["사전지식"])))
+
+    def wobble(rs):
+        v = []
+        for q, _ in PROBE:
+            a = [r["답변"] for r in rs if r["질문"] == q]
+            if len(a) > 1:
+                v.append(statistics.mean(sim(x, y)
+                                         for i, x in enumerate(a) for y in a[i + 1:]))
+        return round(statistics.mean(v), 2) if v else "-"
+
+    line("답 일치도", wobble)
+    print("\n지어내기 0 이 목표. 아는 걸 얼버무림도 0 이어야 한다 — 하나만 보면 속는다.")
+    print("답 일치도는 같은 질문에 같은 답을 하는가다. 낮으면 즉석에서 만드는 것이다.")
+
+
 # ── 채점 ────────────────────────────────────────────────────────────
 POLITE = re.compile(r"(습니다|입니다|세요|셔요|해요|예요|이에요|네요|는데요|거든요|"
                     r"더라고요|잖아요|군요|나요|가요|시죠|죠)(?=[\s.,!?)\"']|$)")
@@ -151,12 +318,17 @@ def register(persona, knowledge, rules):
 
 def run_once(name, exs, rep):
     post("/reset", data={"session": SID})
-    rows, prev_a, prev_q, prev_t, summary = [], [], [], [], ""
+    rows, prev_a, prev_q, prev_t, summary, learned = [], [], [], [], "", []
     for i, (say, want) in enumerate(SCRIPT, 1):
         r = post("/chat", data={"text": say, "session": SID}).json()
         ans = r["answer"]
+        # 요약과 적립을 턴마다 남긴다. 되묻기를 틀렸을 때 "그 사실이 눈앞에 있었나"를
+        # 나중에 따져보려면 이게 있어야 한다 — 있는데 안 쓴 것과 요약이 버린 것은
+        # 처방이 전혀 다르다. 적립은 **무엇이 쌓였나**보다 **없는 턴에 안 쌓였나**를
+        # 봐야 한다. 빈손으로 못 돌아오면 매 턴 지어낸다.
         row = {"변형": name, "회차": rep, "턴": i, "질문": say, "답변": ans,
-               "초": r["elapsed"], "남은턴": r["turns"]}
+               "초": r["elapsed"], "남은턴": r["turns"], "요약": r["summary"],
+               "적립": list(r.get("learned") or [])}
         row.update(score(ans, prev_a, prev_q, prev_t, exs, want))
         rows.append(row)
         mark = "" if row["기억"] is None else ("  기억 O" if row["기억"] else "  기억 X")
@@ -165,6 +337,10 @@ def run_once(name, exs, rep):
         if r["summary"] != summary:
             summary = r["summary"]
             print(f"      ── 요약 ──\n      " + summary.replace("\n", "\n      "))
+        if row["적립"] != learned:
+            for l in row["적립"][len(learned):]:
+                print(f"      ── 적립 ── {l}")
+            learned = row["적립"]
         prev_a.append(ans)
         prev_q += questions(ans)
         prev_t.append(tail(ans))
@@ -202,7 +378,8 @@ def summarize(rows):
         d["기억"] = f"{sum(r['기억'] for r in mem)}/{len(mem)}"
         # 뒤로 갈수록 규칙이 풀리는지 본다. 앞 절반과 뒤 절반을 가른다.
         half = len(SCRIPT) // 2
-        for lbl, sel in [("앞10턴", lambda r: r["턴"] <= half), ("뒤10턴", lambda r: r["턴"] > half)]:
+        for lbl, sel in [(f"앞{half}턴", lambda r: r["턴"] <= half),
+                         (f"뒤{half}턴", lambda r: r["턴"] > half)]:
             part = [r for r in rs if sel(r)]
             d[lbl + "위반"] = sum(1 for r in part for k in VIOLATIONS if r[k])
             d[lbl + "글자"] = round(statistics.mean(r["글자수"] for r in part), 1)
@@ -212,7 +389,7 @@ def summarize(rows):
 def table(summary):
     cols = ["턴", "글자수", "문장수", "되묻기", "호명", "격려", "기억",
             "예시베낌", "답변반복", "질문반복"] \
-           + VIOLATIONS + ["앞10턴위반", "뒤10턴위반", "앞10턴글자", "뒤10턴글자"]
+           + VIOLATIONS + [c for c in summary[next(iter(summary))] if c.startswith(("앞", "뒤"))]
     w = max(max(len(n) for n in summary) + 2, 10)
     print("\n" + "항목".ljust(12) + "".join(n.rjust(w) for n in summary))
     for c in cols:
@@ -224,7 +401,22 @@ def main():
     ap.add_argument("variants", nargs="*")
     ap.add_argument("-n", "--reps", type=int, default=1)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--probe", action="store_true",
+                    help="대화 대신 지어내기를 잰다. 사전지식에 있는 것과 "
+                         "없는 것을 섞어 묻고 얼버무리는지 본다")
+    ap.add_argument("--turns", type=int, default=0,
+                    help="대본을 이 턴에서 자른다. 되묻기 지점을 쪼개지 않게 고를 것")
+    ap.add_argument("--long", action="store_true",
+                    help="100턴 대본으로 돌린다(tools/script_long.py). "
+                         "20·50·95턴에서 같은 것을 되물어 거리별로 본다")
     a = ap.parse_args()
+    global SCRIPT
+
+    if a.long:
+        from script_long import SCRIPT as LONG
+        SCRIPT = LONG
+    if a.turns:
+        SCRIPT = SCRIPT[:a.turns]
 
     if a.list or not a.variants:
         for p in sorted(PROMPT.glob("*.persona.md")):
@@ -236,14 +428,19 @@ def main():
     HDR["X-Token"] = token()
     rows = []
     for v in a.variants:
-        rows += run_variant(v, a.reps)
+        if a.probe:
+            print(f"\n{'='*70}\n{v} — 지어내기 시험\n{'='*70}")
+            register(read(v, "persona"), read(v, "knowledge"), read(v, "rules"))
+            rows += probe_run(v, a.reps)
+        else:
+            rows += run_variant(v, a.reps)
 
     WORK.mkdir(exist_ok=True)
-    stamp = time.strftime("%Y%m%d_%H%M%S")
+    stamp = time.strftime("%Y%m%d_%H%M%S") + ("_probe" if a.probe else "")
     (WORK / f"{stamp}.json").write_text(
-        json.dumps({"요약": summarize(rows), "턴": rows}, ensure_ascii=False, indent=2),
-        encoding="utf-8")
-    table(summarize(rows))
+        json.dumps({"턴": rows} if a.probe else {"요약": summarize(rows), "턴": rows},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    probe_report(rows) if a.probe else table(summarize(rows))
     print(f"\n기록: tools/_work/{stamp}.json")
 
 if __name__ == "__main__":

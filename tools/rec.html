@@ -1,0 +1,355 @@
+<!-- 참조 음성 실험 1차 녹음용 한 장짜리 도구. tools/rec_server.py 가 띄운다.
+     실험이 끝나면 rec_server.py 와 함께 지운다. -->
+<meta charset="utf-8">
+<title>참조 음성 녹음</title>
+<style>
+  :root { --bg:#16181d; --card:#1e2128; --line:#2e323b; --fg:#e6e8ec;
+          --dim:#8b929e; --ok:#4ade80; --rec:#f87171; --hi:#60a5fa; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6
+         "Malgun Gothic","맑은 고딕",system-ui,sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:24px 20px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:14px; margin-bottom:20px; }
+
+  .steps { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
+  .step { padding:6px 12px; border:1px solid var(--line); border-radius:20px;
+          background:var(--card); cursor:pointer; font-size:14px; color:var(--dim); }
+  .step.on { border-color:var(--hi); color:var(--fg); }
+  .step.done { border-color:var(--ok); color:var(--ok); }
+
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:22px; margin-bottom:16px; }
+  .title { font-size:18px; font-weight:700; }
+  .hint { color:var(--dim); font-size:14px; margin-top:6px; }
+
+  .script { font-size:26px; line-height:1.7; margin:22px 0 8px; white-space:pre-wrap; }
+  .lead { color:var(--hi); font-size:20px; margin-top:10px; }
+  .next { color:var(--dim); font-size:15px; margin-top:18px;
+          border-top:1px solid var(--line); padding-top:12px; }
+  .idle { color:var(--dim); }
+  .script .past  { color:#4b515c; }
+  .script .later { color:var(--dim); }
+  .script .now   { color:var(--fg); font-weight:700; }
+  .script .now::after { content:" ◀"; color:var(--hi); }
+
+  .bar { display:flex; align-items:center; gap:14px; margin-top:20px; flex-wrap:wrap; }
+  button { font:inherit; padding:10px 18px; border-radius:8px; border:1px solid var(--line);
+           background:#272b33; color:var(--fg); cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--hi); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.rec { background:var(--rec); border-color:var(--rec); color:#1a1a1a; font-weight:700; }
+  .time { font-size:30px; font-variant-numeric:tabular-nums; min-width:110px; }
+  .time.short { color:var(--rec); }
+  .time.ok { color:var(--ok); }
+  .wall { color:var(--dim); font-size:13px; font-variant-numeric:tabular-nums; }
+  .meter { flex:1; min-width:140px; height:12px; background:#111317;
+           border-radius:6px; overflow:hidden; }
+  .meter i { display:block; height:100%; width:0; background:var(--ok); }
+  .meter i.hot { background:var(--rec); }
+
+  .msg { margin-top:14px; font-size:14px; min-height:22px; }
+  .msg.bad { color:var(--rec); }
+  .msg.good { color:var(--ok); }
+  select { font:inherit; background:#272b33; color:var(--fg); border:1px solid var(--line);
+           border-radius:8px; padding:8px 10px; max-width:100%; }
+  .foot { color:var(--dim); font-size:13px; margin-top:24px; line-height:1.8; }
+  audio { width:100%; margin-top:14px; }
+</style>
+
+<div class="wrap">
+  <h1>참조 음성 녹음</h1>
+  <div class="sub">억양 실험 — 길이는 다 같고 <b>말하는 방식만</b> 다릅니다. 큰 숫자가 <b>초록색</b>이 되면 멈추셔도 됩니다.
+    조용한 방에서, 마이크 20~30cm, 7개 모두 같은 자리 같은 장비로.</div>
+
+  <div class="card" style="padding:14px 18px">
+    마이크 &nbsp;<select id="mic"></select>
+  </div>
+
+  <div class="steps" id="steps"></div>
+
+  <div class="card">
+    <div class="title" id="title"></div>
+    <div class="hint" id="hint"></div>
+    <div class="script idle" id="script"></div>
+    <div class="lead" id="lead"></div>
+    <div class="next" id="next"></div>
+
+    <div class="bar">
+      <button class="rec" id="go">● 녹음 시작</button>
+      <div>
+        <div class="time" id="time">00:00</div>
+        <div class="wall" id="wall">전체 00:00</div>
+      </div>
+      <div class="meter"><i id="lvl"></i></div>
+    </div>
+    <div class="msg" id="msg"></div>
+    <audio id="pb" controls hidden></audio>
+  </div>
+
+  <div class="foot">
+    브라우저가 24kHz 모노 wav 로 만들어 보냅니다. 파일명과 저장 위치는 알아서 됩니다.<br>
+    잡음 제거 · 에코 제거 · 자동 음량은 <b>꺼서</b> 녹음합니다 —
+    브라우저가 손댄 소리는 합성이 망가지는 원인이 됩니다.
+  </div>
+</div>
+
+<script>
+const ITEMS = [
+  // 억양 실험. 길이는 다 같게 두고 **말하는 방식만** 바꾼다. 1차에서 길이는
+  // 귀로 구별되지 않았고(상관 +0.12), 사용자가 실제로 짚은 것은 억양이었다.
+  { id:"A_낭독", title:"① 낭독조", min:20,
+    hint:"뉴스 읽듯 또박또박 읽어주세요. 일부러 딱딱하게 — 나쁜 쪽 본보기입니다. 숫자가 초록색이 되면 남은 문장은 안 읽으셔도 됩니다.",
+    script:"오늘은 아침부터 하늘이 흐렸습니다. 창문을 열어보니 바람이 제법 차가웠습니다.\n" +
+           "지난주까지만 해도 반팔을 입고 다녔는데, 이번 주부터는 겉옷이 필요할 것 같습니다.\n" +
+           "일기예보에서는 이번 주말에 비가 온다고 했습니다. 우산을 미리 챙겨두어야겠습니다.\n" +
+           "환절기에는 감기에 걸리기 쉬우니 다들 건강에 유의하시기 바랍니다.\n" +
+           "따뜻한 차를 한 잔 마시면 몸이 조금은 풀릴 것입니다.\n" +
+           "아침저녁으로 기온 차가 크니 외출하실 때 옷차림에 신경을 쓰시는 것이 좋겠습니다.\n" +
+           "다음 주에는 날씨가 다시 따뜻해진다고 하니 조금만 더 견뎌보시기 바랍니다." },
+
+  { id:"A_설명", title:"② 설명조 (존댓말)", min:20,
+    hint:"누군가에게 요즘 어떻게 지내는지 설명하듯, 존댓말로. 읽지 말고 말해주세요. " +
+         "지난번에 저절로 이렇게 녹음됐던 그 말투입니다.",
+    topics:[["요즘 하고 있는 일", "요즘은 이런 걸 하고 있는데요…"],
+            ["요즘 신경 쓰이는 것", "요즘 좀 신경 쓰이는 게…"],
+            ["앞으로 할 것", "앞으로는…"]] },
+
+  { id:"A_대화", title:"③ 대화체 (반말·다정하게)", min:20,
+    hint:"★ 제품이 노리는 말투입니다. 친한 사람이 오랜만에 전화했다고 치고 반말로 " +
+         "편하게 말해주세요. 존댓말이 섞이면 다시 해주세요.",
+    topics:[["안부부터", "야 오랜만이다. 나야 뭐…"],
+            ["요즘 뭐 하고 지내는지", "요즘은 그냥…"],
+            ["상대 안부 묻기", "너는 요즘 어때? 밥은…"]] },
+
+  { id:"B_기준", title:"기준 (대화체로)", min:16,
+    hint:"닮음을 잴 때의 기준선입니다. ③과 같은 말투로 다른 내용을 말해주세요. " +
+         "여기가 낭독조면 비교가 어긋납니다 — 지난번에 그렇게 했다가 " +
+         "「원본인데 내 목소리 같지 않다」가 나왔습니다.",
+    topics:[["오늘 뭐 했는지", "오늘은 그냥…"],
+            ["요즘 뭐가 제일 귀찮은지", "요즘 제일 귀찮은 건…"]] },
+
+  { id:"C1", title:"C1. 질문 발화", min:1.0, script:"오늘 하루 종일 비가 왔어." },
+  { id:"C2", title:"C2. 질문 발화", min:1.0, script:"아침을 늦게 먹었어." },
+  { id:"C3", title:"C3. 질문 발화", min:1.0, script:"요즘 잠을 잘 못 자." },
+  { id:"C4", title:"C4. 질문 발화", min:1.0, script:"어제 오랜만에 산책을 했어." },
+  { id:"C5", title:"C5. 질문 발화", min:1.0, script:"일이 좀 바빴어." },
+];
+const C_HINT = "계측기 입력입니다. 대사 그대로 읽어주세요 — 입력이라 말투는 상관없습니다. " +
+               "말 끝나고 1초쯤 여유를 두고 멈추세요.";
+ITEMS.forEach(x => { if (x.id[0] === "C") x.hint = C_HINT; });
+
+const TOPIC_SEC = 10;                 // 화제 하나에 이만큼 쓰면 넘어간다
+const $ = s => document.querySelector(s);
+let cur = 0, saved = {}, rec = null, chunks = [], ac = null, an = null;
+let stream = null, t0 = 0, raf = 0, tick = 0, lastWav = null, quietSince = 0;
+let voiced = 0, lastFrame = 0;
+
+// ── 화면 ──────────────────────────────────────────────
+function paintSteps() {
+  $("#steps").innerHTML = ITEMS.map((x, i) =>
+    `<div class="step ${i === cur ? "on" : ""} ${saved[x.id] ? "done" : ""}" data-i="${i}">
+       ${saved[x.id] ? "✓ " : ""}${x.id}${saved[x.id] ? ` <small>${saved[x.id]}초</small>` : ""}
+     </div>`).join("");
+  [...document.querySelectorAll(".step")].forEach(e =>
+    e.onclick = () => { if (!rec) { cur = +e.dataset.i; paint(); } });
+}
+
+function paint() {
+  const it = ITEMS[cur];
+  paintSteps();
+  $("#title").textContent = it.title + (it.min >= 10 ? ` — 말한 시간 ${it.min}초 이상` : "");
+  $("#hint").textContent = it.hint || "";
+  $("#pb").hidden = true;
+  $("#msg").textContent = ""; $("#msg").className = "msg";
+  lastWav = null;
+  if (it.topics) {
+    $("#script").className = "script idle";
+    $("#script").textContent = it.topics.map((t, i) => `${i + 1}) ${t[0]}`).join("\n");
+    $("#lead").textContent = "";
+    $("#next").textContent = "녹음을 시작하면 화제가 10초마다 저절로 넘어갑니다. 그대로 따라가세요.";
+  } else {
+    $("#script").className = "script";
+    $("#script").textContent = it.script;
+    $("#lead").textContent = "";
+    $("#next").textContent = "";
+  }
+  if (saved[it.id]) {
+    $("#msg").className = "msg good";
+    $("#msg").textContent = `저장됨 (${saved[it.id]}초). 다시 녹음하면 덮어씁니다.`;
+    $("#pb").hidden = false; $("#pb").src = `/play/${it.id}?t=${Date.now()}`;
+  }
+}
+
+function paintTopic(sec) {
+  const it = ITEMS[cur];
+  if (!it.topics) return;
+  const i = Math.min(it.topics.length - 1, Math.floor(sec / TOPIC_SEC));
+  // 화제를 갈아치우지 않는다. 갈아치우면 그때마다 새 글을 읽느라 말을 멈춘다 —
+  // 1차 녹음에서 10초마다 3~4초씩 쉬어 쉼 비율이 46%가 나왔다. 전부 띄워 두고
+  // 지금 것만 밝히면 읽을 것이 없으므로 멈출 이유도 없다.
+  $("#script").className = "script";
+  $("#script").innerHTML = it.topics.map((t, k) =>
+    `<div class="${k === i ? "now" : k < i ? "past" : "later"}">${k + 1}) ${t[0]}</div>`).join("");
+  $("#lead").textContent = i === it.topics.length - 1 && sec > TOPIC_SEC * it.topics.length
+    ? "아무 얘기나 더 붙여주세요. 멈추지만 마세요." : "";
+  $("#next").textContent = "";
+}
+
+// ── 녹음 ──────────────────────────────────────────────
+async function mics() {
+  try { (await navigator.mediaDevices.getUserMedia({ audio:true })).getTracks().forEach(t => t.stop()); }
+  catch (e) { $("#msg").className = "msg bad"; $("#msg").textContent = "마이크 권한이 필요합니다: " + e.message; return; }
+  const ds = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+  $("#mic").innerHTML = ds.map(d => `<option value="${d.deviceId}">${d.label || d.deviceId}</option>`).join("");
+}
+
+async function start() {
+  const it = ITEMS[cur];
+  // 브라우저 처리를 전부 끈다. 방송용으로 손댄 스펙트럼이 합성을 망가뜨린다는 것이
+  // 이 프로젝트에서 하루를 태워 얻은 결론이다.
+  stream = await navigator.mediaDevices.getUserMedia({ audio: {
+    deviceId: $("#mic").value ? { exact: $("#mic").value } : undefined,
+    echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+
+  ac = new AudioContext();
+  an = ac.createAnalyser(); an.fftSize = 1024;
+  ac.createMediaStreamSource(stream).connect(an);
+
+  chunks = [];
+  rec = new MediaRecorder(stream);
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = finish;
+  rec.start();
+
+  t0 = lastFrame = Date.now(); quietSince = 0; voiced = 0;
+  $("#go").textContent = "■ 멈춤";
+  $("#pb").hidden = true;
+  $("#msg").textContent = ""; $("#msg").className = "msg";
+  paintTopic(0);
+  tick = setInterval(() => paintTopic((Date.now() - t0) / 1000), 500);
+  loop();
+}
+
+function loop() {
+  const buf = new Uint8Array(an.frequencyBinCount);
+  an.getByteTimeDomainData(buf);
+  let s = 0;
+  for (const v of buf) s += (v - 128) * (v - 128);
+  const rms = Math.sqrt(s / buf.length) / 128;
+  const pct = Math.min(100, rms * 320);
+  $("#lvl").style.width = pct + "%";
+  $("#lvl").className = pct > 92 ? "hot" : "";
+
+  // 쉬면 그 자리에서 알려준다. 안내문에 적어 두는 것보다 이쪽이 훨씬 세다.
+  if (rms > 0.012) quietSince = 0;
+  else if (!quietSince) quietSince = Date.now();
+  const hush = quietSince && Date.now() - quietSince > 700;
+  $("#msg").className = "msg" + (hush ? " bad" : "");
+  $("#msg").textContent = hush ? "▲ 쉬고 있습니다 — 이어서 말해주세요" : "";
+
+  // 목표는 벽시계가 아니라 말한 시간이다. 쉼은 참조에서 어차피 잘려 나가므로
+  // 벽시계로는 얼마나 더 말해야 하는지 알 수가 없다 — 1차에서 54.3초를 채웠는데
+  // 쉼을 빼면 30.4초였고, 45초 조건이 그대로 죽었다.
+  const now = Date.now();
+  if (rms > 0.012) voiced += (now - lastFrame) / 1000;
+  lastFrame = now;
+  const clock = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:` +
+                     `${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  $("#time").textContent = clock(voiced);
+  $("#time").className = "time " + (voiced >= ITEMS[cur].min ? "ok" : "short");
+  $("#wall").textContent = `전체 ${clock((now - t0) / 1000)}`;
+  raf = requestAnimationFrame(loop);
+}
+
+function stop() {
+  clearInterval(tick); cancelAnimationFrame(raf);
+  rec.stop();
+  stream.getTracks().forEach(t => t.stop());
+  $("#lvl").style.width = "0";
+}
+
+async function finish() {
+  const it = ITEMS[cur];
+  $("#go").textContent = "● 녹음 시작";
+  $("#msg").className = "msg";
+  $("#msg").textContent = "변환 중…";
+
+  const raw = await new Blob(chunks).arrayBuffer();
+  const decoded = await ac.decodeAudioData(raw);
+  // 24kHz 모노까지 브라우저가 맞춘다. 서버가 ffmpeg 을 부를 일이 없어진다.
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 24000), 24000);
+  const src = off.createBufferSource();
+  src.buffer = decoded; src.connect(off.destination); src.start();
+  const out = await off.startRendering();
+  ac.close(); rec = null;
+
+  const pcm = out.getChannelData(0);
+  const sec = out.duration, said = voicedSec(pcm, 24000);
+  lastWav = wav(pcm, 24000);
+  $("#pb").hidden = false;
+  $("#pb").src = URL.createObjectURL(lastWav);
+
+  const r = await fetch(`/save/${it.id}`, { method:"POST", body:lastWav });
+  if (!r.ok) {
+    $("#msg").className = "msg bad";
+    $("#msg").textContent = "저장 실패: " + await r.text();
+    return;
+  }
+  saved[it.id] = sec.toFixed(1);
+  paintSteps();
+  if (said < it.min) {
+    $("#msg").className = "msg bad";
+    $("#msg").textContent = `저장했지만 말한 시간이 ${said.toFixed(1)}초입니다 (전체 ${sec.toFixed(1)}초) `
+      + `— ${it.min}초 이상이 필요합니다. 쉼은 참조에서 잘려 나가므로 안 셉니다. 다시 녹음해 주세요.`;
+  } else {
+    $("#msg").className = "msg good";
+    $("#msg").textContent = `저장됨 — 말한 시간 ${said.toFixed(1)}초 (전체 ${sec.toFixed(1)}초). `
+      + `들어보고 괜찮으면 다음으로 넘어가세요.`;
+    const nx = ITEMS.findIndex((x, i) => i > cur && !saved[x.id]);
+    if (nx >= 0) setTimeout(() => { cur = nx; paint(); }, 1200);
+  }
+}
+
+function voicedSec(f32, sr) {
+  // 0.1초 칸으로 나눠 말소리가 있는 칸만 센다. 저장한 뒤 최종 판정에 쓴다 —
+  // 화면의 숫자는 프레임 단위 누적이라 조금 어긋날 수 있다.
+  const w = Math.round(sr / 10);
+  let n = 0;
+  for (let i = 0; i + w <= f32.length; i += w) {
+    let e = 0;
+    for (let k = i; k < i + w; k++) e += f32[k] * f32[k];
+    if (Math.sqrt(e / w) > 0.012) n++;
+  }
+  return n / 10;
+}
+
+function wav(f32, sr) {
+  const b = new ArrayBuffer(44 + f32.length * 2), v = new DataView(b);
+  const put = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  put(0, "RIFF"); v.setUint32(4, 36 + f32.length * 2, true); put(8, "WAVE");
+  put(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  put(36, "data"); v.setUint32(40, f32.length * 2, true);
+  let o = 44;
+  for (let i = 0; i < f32.length; i++, o += 2) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([b], { type:"audio/wav" });
+}
+
+$("#go").onclick = () => rec ? stop() : start().catch(e => {
+  $("#msg").className = "msg bad"; $("#msg").textContent = "마이크를 열 수 없습니다: " + e.message;
+});
+
+(async () => {
+  saved = await (await fetch("/list")).json();
+  const nx = ITEMS.findIndex(x => !saved[x.id]);
+  cur = nx < 0 ? 0 : nx;
+  paint();
+  await mics();          // paint() 뒤라야 한다 - 먼저 부르면 권한 오류를 paint 가 지운다
+  if (!$("#mic").options.length && !$("#msg").textContent)
+    $("#mic").innerHTML = "<option value=''>(기본 마이크)</option>";
+})();
+</script>

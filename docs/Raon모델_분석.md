@@ -18,12 +18,42 @@ bf16 로 VRAM 약 40GB.
 
 ### 문서에 있는 것 / 없는 것
 
-**있는 것** — 기술 보고서에서 건진 유일한 수치:
+**있는 것** (2026-08-26 기술 보고서·모델 카드 재확인):
+
+| | |
+|---|---|
+| 텍스트 백본 | A.X K2 Light 20B-A3B **MoE**, 48층, hidden 2,048 |
+| 음성 인코더 | 자체 학습 **AuT** ~317M, 24층, **12.5Hz** 토큰율 |
+| 음성 코덱 | **Mimi** 계열 ~96M, RVQ **32단** 중 **앞 16단만** 생성에 씀 |
+| 화자 인코더 | frozen **SpeechBrain ECAPA** (`spkrec-ecapa-voxceleb`) |
+| 문맥 창 | **131,072 토큰** |
+| 학습 | 정제 음성·텍스트 **138만 시간** |
 
 > 화자 정체성 제어를 위해 화자 임베딩으로 조건화하며, **목표 음성의 2~8초 무작위 청크**를
 > 인코딩하여 LLM 입력 시퀀스에 삽입
 
 즉 `tts()` 의 화자 조건화는 **2~8초로 학습**됐다. 참조가 길다고 좋은 게 아니다.
+(SpeechChat 쪽은 10초를 쓴다.)
+
+**코드 16개의 정체가 보고서에 있다** — 우리가 코드를 읽고 "프레임당 코드 그룹 16개,
+RAS 는 첫 번째에만 적용"이라고 적은 것의 근거다.
+
+> at each generation step, the model predicts 16 codec tokens, consisting of
+> **1 semantic token at the first residual depth and 15 acoustic tokens** at the
+> subsequent depths
+
+**첫 번째가 의미, 나머지 15개가 음향이다.** RAS 가 첫 번째만 다시 뽑는다는 것은
+**의미를 바꿔놓고 소리는 그대로 둔다**는 뜻이다. §6 의 "나머지 15개와 어긋난다"가
+이것이다.
+
+**문맥 창 131,072 토큰은 따로 볼 것 — 그런데 여기가 병목이 아니다.**
+원래는 6턴마다 요약으로 접었는데 **2026-08-26 에 껐다.** 접는 이유로 적혀 있던
+"대화가 길어지면 말투 규칙이 흐려진다"가 재보니 재현되지 않았고, 접는 쪽이 기억을
+62/64 에서 50/64 로 떨어뜨렸다. 지금은 `RAON_MAX_TURNS=30` 까지 원문 그대로 넘긴다.
+
+**30 의 근거는 토큰이 아니라 VRAM 이다.** 토큰만 세면 3,600턴이 들어가지만 어텐션
+행렬이 문맥 길이의 제곱으로 커져 54턴에 60.8GB, 70턴에 OOM 이다. 자세한 것은
+작업현황 문서 §4.
 
 **없는 것 (중요)** — 모델 카드·GitHub README·기술 보고서·OpenTTS 논문 어디에도 없다:
 
@@ -415,6 +445,19 @@ sampled_ids = apply_repetition_aware_sampling(..., logits=logits, ...)
 `top_k=20` 이 사라져 코드북 전체에서 뽑고, **첫 번째 코드 그룹만** 바뀌므로 나머지
 15개 그룹과 어긋난다. 고치려면 `logits=processed_logits` 한 단어. 다만 RAS 를 꺼도
 지지직은 그대로였으므로 **이건 지지직과 별개의 개선 항목**이다.
+
+**자리는 `modeling_raon.py:6258`.** 바로 위 6252 가 `F.softmax(processed_logits, ...)` 로
+필터 거친 것을 쓰는데 RAS 만 원본을 받는다.
+
+```python
+6255            if ras_enabled and audio_codes.shape[1] > 0:
+6256                sampled_ids = apply_repetition_aware_sampling(
+6257                    sampled_ids=sampled_ids,
+6258                    logits=logits,          # ← processed_logits
+```
+
+`Server/modeling_raon.patch` 에 훅으로 넣어 뒀다. 모델을 다시 받으면 스트리밍 훅과
+함께 이것도 다시 발라야 한다.
 
 ### 6.6 "늘어진다"의 절반은 반복이 아니라 무음이다 (2026-08-01)
 

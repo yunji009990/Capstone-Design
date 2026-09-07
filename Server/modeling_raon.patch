@@ -1,5 +1,14 @@
 --- /home/crc_unity/models/AX-K2-Raon-Speech/modeling_raon.py.bak	2026-07-31 23:07:32.975094395 +0900
 +++ /home/crc_unity/models/AX-K2-Raon-Speech/modeling_raon.py	2026-07-31 23:07:32.982978432 +0900
+@@ -6255,7 +6255,7 @@
+         if ras_enabled and audio_codes.shape[1] > 0:
+             sampled_ids = apply_repetition_aware_sampling(
+                 sampled_ids=sampled_ids,
+-                logits=logits,
++                logits=processed_logits,
+                 audio_codes=audio_codes,
+                 window_size=ras_window_size,
+                 repetition_threshold=ras_repetition_threshold,
 @@ -7983,6 +7983,36 @@
              if generated_audio_frame_count <= continuation_silence_frames:
                  audio_codes[:, -1] = silence_codes

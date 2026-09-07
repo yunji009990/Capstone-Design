@@ -24493,7 +24493,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &758970662
 Transform:
   m_ObjectHideFlags: 0
@@ -35194,7 +35194,7 @@ MonoBehaviour:
   voice: {fileID: 1370936791}
   spawner: {fileID: 1664740136}
   experience: {fileID: 0}
-  vrCamera: {fileID: 0}
+  vrCamera: {fileID: 1946675496}
   captureWidth: 1280
   refreshSec: 0.25
 --- !u!114 &1061131067

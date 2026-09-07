@@ -9,6 +9,14 @@ export RAON_CONT=${RAON_CONT:-1}      # 1=억양까지 복제(tts_continuation),
 # 0.70 이면 66.9GB 라 지금 최대치의 1.3배 여유가 생긴다. 상한을 아예 없애지는 않는다 —
 # 폭주할 때 다른 프로세스까지 끌고 죽는 것을 막아준다.
 export RAON_MEM_FRACTION=${RAON_MEM_FRACTION:-0.70}
+# 소리 온도. 코드 기본값은 1.2 인데 그러면 "국어책 읽는 느낌"이 남는다.
+# 1.6 으로 올리면 그게 크게 줄어든다 — 청취로만 드러났고 체감속도 지표는
+# 0.145 로 똑같았다. 대가는 이음매가 흔들리는 것(첫낱말 샘 7/45 -> 19/45)인데,
+# 참조를 1세대 합성으로 쓰면 3/45 로 잡힌다. 자세한 것은
+# docs/음성대화_작업현황.md 3순위의 네 칸 표.
+export RAON_TEMP=${RAON_TEMP:-1.6}
+# 생성 초반 무음 프레임. 비우면 모델 기본값(2). 0 으로 두면 참조가 통째로 샌다.
+export RAON_CONT_SILENCE=${RAON_CONT_SILENCE:-}
 export RAON_TOKEN=23605a891e448b5aa46f82c8640b554c
 if [ -f server.pid ] && ps -p $(cat server.pid) >/dev/null 2>&1; then
   echo "이미 실행 중 (PID $(cat server.pid))"; exit 0

@@ -6,6 +6,7 @@
 
 실행:  python -m uvicorn app:app --port 8500
 """
+import glob
 import io
 import json
 import logging
@@ -18,6 +19,7 @@ import time
 import uuid
 
 import httpx
+from urllib.parse import unquote
 import librosa
 import numpy as np
 import soundfile as sf
@@ -467,6 +469,128 @@ def file(job: str, path: str):
     return FileResponse(p, media_type=mt)
 
 
+
+BOOTSTRAP = os.environ.get("RAON_BOOTSTRAP", "1") == "1"
+PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "probe")
+BOOT_SEC, BOOT_MIN, BOOT_GAP = 18, 8, 0.15
+# 소리 온도 1.6 에서는 첫낱말이 새는 비율이 40% 쯤이라 한 바퀴로는 조각이
+# 모자란다(실측 5개 중 2개, 7.8초). 같은 입력을 회차만 바꿔 다시 돈다.
+BOOT_ROUNDS = 3
+
+
+def _first_word(s):
+    """첫 한글 낱말. 정규식을 안 쓰는 이유는 이 파일이 re 를 import 하지 않아서다."""
+    out = ""
+    for ch in (s or ""):
+        if "가" <= ch <= "힣":
+            out += ch
+        elif out:
+            break
+    return out
+
+
+def _bootstrap(session, persona, knowledge):
+    """등록한 참조로 몇 마디 만들어 보고, **그 소리를 새 참조로 바꿔 단다.**
+
+    올려받은 녹음은 지금 대화와 아무 상관 없는 내용이라, 모델이 그 뒤를 이어
+    말하려다 첫머리에 참조 조각을 흘린다. 한 번 합성한 소리를 참조로 쓰면
+    참조 자체가 이미 "그 사람이 그 말투로 한 말"이라 이음매가 자연스러워진다 —
+    소리 온도 1.6 기준으로 45개 중 19개가 3개로 줄었다. 덤으로 참조 전사가
+    정확해진다(합성 0.86~0.95, 원본 구어체는 STT 가 무너진다).
+
+    지켜야 할 것 셋. 셋 다 실패해 보고 얻었다 —
+      1. **문장 경계에서 끊는다.** 말 도중에 자르면 모델이 그 문장을 마저
+         말한다. `...기분 전환도 되고` 에서 잘린 참조는 15/15 전부 그 말로
+         시작했다. 넘치는 조각은 잘라 넣지 않고 버린다.
+      2. **되받아적기가 맞는 조각만 쓴다.** 샌 것을 참조로 쓰면 그 결함이
+         다음 세대에 박힌다.
+      3. **입력을 골고루, 회차를 돌려가며 쓴다.** 같은 말만 담으면 되풀이하는
+         참조가 되고, 한 바퀴로는 조각이 모자란다.
+
+    **실패해도 등록은 살아 있어야 한다.** 못 만들면 원본 참조를 그대로 둔다.
+    다만 그때도 탐색용으로 오간 말은 지운다 — 안 지우면 실제 체험이 그 뒤를
+    이어받는다. 근거는 `docs/음성대화_작업현황.md` 3순위의 네 칸 표.
+    """
+    if not BOOTSTRAP:
+        return None
+    probes = sorted(glob.glob(os.path.join(PROBE, "*.wav")))
+    if not probes:
+        return None
+
+    def wipe():
+        try:
+            httpx.post(f"{RAON_URL}/reset", headers=_headers(),
+                       data={"session": session}, timeout=30)
+        except Exception:
+            pass
+
+    def secs(parts):
+        return sum(len(x) for x in parts) / 24000
+
+    try:
+        parts, texts = [], []
+        for _round in range(BOOT_ROUNDS):
+            if secs(parts) >= BOOT_SEC:
+                break
+            wipe()          # 회차마다 비운다. 안 그러면 답이 앞 회차를 물고 간다
+            for q in probes:
+                if secs(parts) >= BOOT_SEC:
+                    break
+                with open(q, "rb") as f:
+                    t = httpx.post(f"{RAON_URL}/talk", headers=_headers(),
+                                   data={"session": session, "show_heard": "0"},
+                                   files={"file": ("in.wav", f.read(), "audio/wav")},
+                                   timeout=180)
+                if t.status_code != 200:
+                    continue
+                want = unquote(t.headers.get("X-Answer", ""))
+                got = httpx.post(f"{RAON_URL}/stt", headers=_headers(),
+                                 files={"file": ("x.wav", t.content, "audio/wav")},
+                                 timeout=120).json().get("text", "")
+                if not want or _first_word(want) != _first_word(got):
+                    continue                    # 샌 것은 참조로 안 쓴다
+                y, _sr = sf.read(io.BytesIO(t.content))
+                if y.ndim > 1:
+                    y = y.mean(axis=1)
+                y = np.trim_zeros(np.asarray(y, dtype=np.float32), "fb")
+                if parts and (secs(parts) + len(y) / 24000) > BOOT_SEC:
+                    break                       # 넘치면 안 넣는다. 잘라 넣지 않는다
+                parts.append(y)
+                texts.append(want)
+
+        if secs(parts) < BOOT_MIN:
+            print(f"[1세대참조] {session}: {secs(parts):.1f}초뿐이라 건너뜀 "
+                  f"({len(parts)}조각)", flush=True)
+            wipe()
+            return None
+
+        gap = np.zeros(int(BOOT_GAP * 24000), dtype=np.float32)
+        y = np.concatenate([v for x in parts for v in (x, gap)][:-1])
+        peak = float(np.abs(y).max())
+        y = y * (min(10.0, 0.8 / peak) if peak > 1e-6 else 1.0)
+        buf = io.BytesIO()
+        sf.write(buf, y, 24000, format="WAV", subtype="PCM_16")
+
+        r = httpx.post(f"{RAON_URL}/session/start", headers=_headers(),
+                       data={"persona": persona, "knowledge": knowledge, "session": session},
+                       files={"voice": ("voice.wav", buf.getvalue(), "audio/wav")},
+                       timeout=180)
+        if r.status_code != 200:
+            print(f"[1세대참조] {session}: 재등록 실패 {r.status_code}", flush=True)
+            wipe()
+            return None
+        with open(LAST_REF, "wb") as o:
+            o.write(buf.getvalue())
+        sec = round(len(y) / 24000, 2)
+        print(f"[1세대참조] {session}: {len(parts)}조각 {sec}초 — "
+              f"{' '.join(texts)[:60]}", flush=True)
+        return {"pieces": len(parts), "sec": sec}
+    except Exception as e:
+        print(f"[1세대참조] {session}: 건너뜀 — {e}", flush=True)
+        wipe()
+        return None
+
+
 @app.post("/publish")
 async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form(""),
                   persona: str = Form(...), knowledge: str = Form(""),
@@ -496,9 +620,11 @@ async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = 
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     out = r.json()
+    boot = _bootstrap(out["session"], persona, knowledge)
     img = await image.read() if image is not None and image.filename else b""
     _record_and_model(out["session"], survey, img, image.filename if image else "")
-    return {**out, "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
+    return {**out, "1세대참조": boot,
+            "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
 
 
 CUT_BIN, CUT_KEEP, CUT_XF = 0.02, 0.12, 0.01
@@ -610,8 +736,11 @@ def _level(y):
 
 
 MID_SAFE = 0.25      # 1~4kHz 비율이 이보다 높으면 경고
+# 길이 권장 구간. Server/app.py 의 session_start 와 같은 값이라야 한다 —
+# 거기서는 로그로만 경고해서 올리는 사람에게 안 보였다.
+REF_MIN_SEC, REF_MAX_SEC = 8, 40
 
-def _warn_text(snr, mid=None):
+def _warn_text(snr, mid=None, dur=None):
     """참조 품질 경고. **두 기준의 성격이 다르다는 점을 알고 쓸 것.**
 
     SNR 은 **길이 폭주**에만 유효하다. 통제 실험(같은 화자·내용에 핑크 잡음만
@@ -621,6 +750,10 @@ def _warn_text(snr, mid=None):
 
     1~4kHz(명료도 대역) 비율이 **지지직**을 가른다. 방송·영상용 후처리가 이 대역을
     밀어올리는데, 모델이 그런 스펙트럼을 받으면 망가진다.
+
+    길이는 **깨짐**을 가른다. 6.3초 참조는 같은 문장에 0초·8.6초·4.3초가 나왔고
+    12초는 정상이었다. 서버(`session_start`)도 같은 구간을 보지만 `print` 라
+    로그에만 남아 올리는 사람에게 안 보였다 — 여기서 응답에 실어 화면에 띄운다.
 
     **전에는 저역(0~300Hz) 30% 미만으로 경고했는데 그건 틀렸다.** 성인·근접 녹음
     12개에만 맞춘 기준이었다. 교실 원거리 녹음(아동 검사 세션)에서 저역 26.7% 짜리가
@@ -636,6 +769,12 @@ def _warn_text(snr, mid=None):
     안 돼 여러 명이 섞인 참조 하나), 14.3% 는 깨끗 · 17.3% 는 약간이라 그 사이는
     표본이 붙어 있다. 좁게 잡으면 SNR 25dB · 저역 30% 때 한 실수를 되풀이한다."""
     out = []
+    if dur is not None and dur < REF_MIN_SEC:
+        out.append(f"참조가 {dur:.1f}초로 짧습니다 (10~30초 권장). 합성이 불안정해집니다 — "
+                   f"실측에서 6.3초 참조는 같은 문장에 0초·8.6초·4.3초가 나왔습니다.")
+    elif dur is not None and dur > REF_MAX_SEC:
+        out.append(f"참조가 {dur:.1f}초로 깁니다 (10~30초 권장). "
+                   f"참조를 먼저 읽고 시작하므로 첫 소리가 그만큼 늦어집니다.")
     if mid is not None and mid >= MID_SAFE:
         out.append(f"명료도 대역이 지나치게 셉니다 (1~4kHz {mid*100:.0f}%, 25% 미만 권장). "
                    f"합성 결과에 지지직이 낄 수 있습니다. 방송·영상용으로 후처리된 "
@@ -662,8 +801,9 @@ def _quality(y, sr=24000):
     이 SNR 은 시간축 하위 분위수를 잡음 바닥으로 본다. 그래서 **계속 변하는
     배경음은 못 잡는다** — 사용자가 "목소리가 묻힐 정도"라고 한 참조가 30.0dB 로
     나왔다. 일정한 잡음에만 쓸 것."""
+    dur = len(y) / sr
     if len(y) < sr // 2:
-        return None, None, None, ""
+        return None, None, None, _warn_text(None, None, dur)
     S = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
     f = np.fft.rfftfreq(1024, 1 / sr)
     b = (f >= 200) & (f <= 6000)                 # 음성 대역만 본다
@@ -677,7 +817,7 @@ def _quality(y, sr=24000):
     r = np.sqrt((y[:n * w].reshape(n, w) ** 2).mean(axis=1)) if n >= 2 else np.array([0.0])
     quiet = float((r < r.max() * 0.05).mean()) if r.max() > 0 else 0.0
     # 파이썬 float 이어야 JSON 직렬화된다
-    return round(snr, 1), round(quiet, 3), round(mid, 3), _warn_text(snr, mid)
+    return round(snr, 1), round(quiet, 3), round(mid, 3), _warn_text(snr, mid, dur)
 
 
 @app.post("/publish_direct")
@@ -702,9 +842,11 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
     if r.status_code != 200:
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     out = r.json()
+    boot = _bootstrap(out["session"], persona, knowledge)
     img = await image.read() if image is not None and image.filename else b""
     _record_and_model(out["session"], survey, img, image.filename if image else "")
-    return {**out, "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
+    return {**out, "1세대참조": boot,
+            "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
 
 @app.get("/last_ref.wav")

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -112,6 +112,7 @@ public class RaonVoiceClient : MonoBehaviour
 
     readonly float[] _analysis = new float[AnalysisWindow];
     float _noiseFloor = 0.01f;
+    bool _sawSignal;
     float _aboveTime;
     float _belowTime;
     float _cooldownUntil;
@@ -127,7 +128,7 @@ public class RaonVoiceClient : MonoBehaviour
             return;
         }
         _micDevice = Microphone.devices[0];
-        Debug.Log($"[Raon] 마이크: {_micDevice}");
+        Debug.Log($"[Raon] 마이크: {_micDevice}  (연결됨: {string.Join(" / ", Microphone.devices)})");
     }
 
     void Start()
@@ -168,6 +169,7 @@ public class RaonVoiceClient : MonoBehaviour
         }
         _listening = true;
         _noiseFloor = minLevel;
+        _sawSignal = false;
         Debug.Log($"[Raon] 청취 시작: {_micDevice}");
     }
 
@@ -205,7 +207,12 @@ public class RaonVoiceClient : MonoBehaviour
         float sum = 0f;
         for (int i = 0; i < _analysis.Length; i++) sum += _analysis[i] * _analysis[i];
         MicLevel = Mathf.Sqrt(sum / _analysis.Length);
+
+        if (MicLevel > 0f) _sawSignal = true;
     }
+
+    /// <summary>이 마이크에서 소리가 한 번이라도 들어왔는지. 안내에 쓴다.</summary>
+    public bool SawSignal => _sawSignal;
 
     void UpdateVad()
     {
