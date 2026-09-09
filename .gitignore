@@ -100,3 +100,10 @@ Web/__pycache__/
 
 # 하네스 — 서브에이전트 결과 수거함
 /.claude/work/
+
+# 비밀 값 — 절대 커밋 금지 (Tripo API 키, 관리자 비밀번호, 설문 접근 코드)
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
+.env
+**/.env
+!**/.env.example
