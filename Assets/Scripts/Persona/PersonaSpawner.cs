@@ -22,6 +22,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using GLTFast;
 using UnityEngine;
@@ -72,6 +73,45 @@ public class PersonaSpawner : MonoBehaviour
     // 있어야 의자에 맞는 자세를 잡는다.
     [Tooltip("굳힐 시점(초). 0 이면 클립 시작. 자세가 어색하면 조금 올려 본다.")]
     public float freezeTimeSec = 0f;
+
+    [Header("텍스처")]
+    // glTFast 는 기본값으로 밉맵을 만들지 않는다(ImportSettings.GenerateMipMaps).
+    // 밉맵 없는 2K 얼굴 텍스처는 VR 에서 조금만 멀어져도 픽셀이 지글거려서,
+    // 생성 품질과 상관없이 "뭉개져 보인다". 만드는 비용은 로드 때 한 번뿐이다.
+    [Tooltip("텍스처 밉맵 생성. VR 에서 지글거림이 크게 줄어든다. 로드가 조금 느려진다.")]
+    public bool generateMipMaps = true;
+
+    [Tooltip("비등방성 필터링 레벨. 비스듬히 보이는 면의 선명도. 1 이면 끔.")]
+    [Range(1, 16)] public int anisotropicFilterLevel = 8;
+
+    [Header("머티리얼 보정")]
+    // 사진에서 만든 GLB 는 metallic/roughness 맵이 사실상 쓸 수 없는 값이다.
+    // 피부가 금속으로 잡히거나 젖은 플라스틱처럼 번들거려서, 형태가 멀쩡해도
+    // 시체처럼 보인다. glTF 규격상 최종값은 factor × 텍스처 채널이라, 맵을 그대로
+    // 두면 factor 를 아무리 낮춰도 맵의 얼룩이 남는다. 그래서 맵을 떼고 값을 준다.
+    [Tooltip("로드 직후 모든 머티리얼을 무광 피부 쪽으로 되돌린다.")]
+    public bool sanitizeMaterials = true;
+
+    [Tooltip("금속성. 사람 피부는 0 이다.")]
+    [Range(0f, 1f)] public float metallic = 0f;
+
+    [Tooltip("거칠기. 1 에 가까울수록 무광. 피부는 0.8 언저리.")]
+    [Range(0f, 1f)] public float roughness = 0.85f;
+
+    [Tooltip("metallic/roughness 텍스처를 떼어낸다. 켜야 위 두 값이 그대로 먹는다.")]
+    public bool dropMetallicRoughnessMap = true;
+
+    [Tooltip("노멀맵 세기. 생성된 노멀은 과장돼 있어 피부가 우둘투둘해진다. 0 이면 끈다.")]
+    [Range(0f, 2f)] public float normalStrength = 0.5f;
+
+    [Tooltip("AO 세기. 알베도에 그늘이 이미 구워져 있어 겹치면 얼굴이 지저분해진다.")]
+    [Range(0f, 1f)] public float occlusionStrength = 0.3f;
+
+    [Tooltip("알베도 밝기 배수. 색이 어둡게 뜰 때 1.1~1.3 으로 올려 본다.")]
+    [Range(0.5f, 2f)] public float albedoBrightness = 1f;
+
+    [Tooltip("자체발광을 끈다. 생성물에 엉뚱한 emissive 가 실려 색이 뜨는 경우가 있다.")]
+    public bool killEmissive = true;
 
     [Header("대기")]
     [Tooltip("모델이 아직 없을 때 다시 물어보는 간격(초). 생성에 몇 분 걸린다.")]
@@ -219,7 +259,18 @@ public class PersonaSpawner : MonoBehaviour
     async Task SpawnAsync(string sid, byte[] glb)
     {
         var gltf = new GltfImport();
-        if (!await gltf.LoadGltfBinary(glb))
+
+        // 밉맵과 필터링은 임포트 시점에만 정할 수 있다. 텍스처가 만들어진
+        // 뒤에는 못 바꾼다 — 읽기 불가 상태로 GPU 에 올라가 재생성이 안 된다.
+        var settings = new ImportSettings
+        {
+            GenerateMipMaps = generateMipMaps,
+            AnisotropicFilterLevel = Mathf.Max(1, anisotropicFilterLevel),
+            // ApplyPose 가 Animation 컴포넌트를 찾으므로 legacy 로 받아야 한다.
+            AnimationMethod = AnimationMethod.Legacy,
+        };
+
+        if (!await gltf.Load(glb, null, settings))
         {
             Debug.LogError("[PersonaSpawner] GLB 해석 실패");
             return;
@@ -239,6 +290,7 @@ public class PersonaSpawner : MonoBehaviour
         }
 
         if (applyPoseAnimation) ApplyPose(_spawnedInstance);
+        if (sanitizeMaterials) SanitizeMaterials(_spawnedInstance);
 
         // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
         // 달라서, 순서가 뒤바뀌면 앉은 인물을 선 키에 맞춰 키워버린다.
@@ -290,6 +342,111 @@ public class PersonaSpawner : MonoBehaviour
             anim.Play();
             if (verboseLog)
                 Debug.Log($"[PersonaSpawner] 자세 재생: {anim.clip.name} 루프");
+        }
+    }
+
+    // ── 머티리얼 보정 ─────────────────────────────────────────
+    //
+    // glTFast 가 URP 에서 만드는 머티리얼은 glTF 규격 이름을 그대로 쓴다
+    // (baseColorFactor, metallicFactor …). 빌트인 RP 로 떨어지면 유니티 표준
+    // 이름(_Metallic, _Glossiness …)이 된다. 어느 쪽이 올지는 실행해 봐야
+    // 알기 때문에 양쪽 이름을 다 확인하고, 있는 것만 건드린다.
+    static readonly int P_BaseColor     = Shader.PropertyToID("baseColorFactor");
+    static readonly int P_Metallic      = Shader.PropertyToID("metallicFactor");
+    static readonly int P_Roughness     = Shader.PropertyToID("roughnessFactor");
+    static readonly int P_MetalRoughMap = Shader.PropertyToID("metallicRoughnessTexture");
+    static readonly int P_NormalScale   = Shader.PropertyToID("normalTexture_scale");
+    static readonly int P_OcclusionStr  = Shader.PropertyToID("occlusionTexture_strength");
+    static readonly int P_Emissive      = Shader.PropertyToID("emissiveFactor");
+
+    static readonly int P_BaseColorStd  = Shader.PropertyToID("_BaseColor");
+    static readonly int P_ColorStd      = Shader.PropertyToID("_Color");
+    static readonly int P_MetallicStd   = Shader.PropertyToID("_Metallic");
+    static readonly int P_SmoothnessStd = Shader.PropertyToID("_Smoothness");
+    static readonly int P_GlossinessStd = Shader.PropertyToID("_Glossiness");
+    static readonly int P_MetalMapStd   = Shader.PropertyToID("_MetallicGlossMap");
+    static readonly int P_BumpScaleStd  = Shader.PropertyToID("_BumpScale");
+    static readonly int P_OcclusionStd  = Shader.PropertyToID("_OcclusionStrength");
+    static readonly int P_EmissionStd   = Shader.PropertyToID("_EmissionColor");
+
+    /// <summary>
+    /// 생성물이 들고 온 재질값을 사람 피부에 맞게 되돌린다.
+    /// 형태를 고치지는 못하지만, 번들거림 하나만 없애도 체감이 크게 달라진다.
+    /// </summary>
+    void SanitizeMaterials(GameObject root)
+    {
+        // sharedMaterials 로 받는다. materials 로 받으면 렌더러마다 사본이 생겨
+        // 인물 하나에 머티리얼이 몇 배로 불어난다. 여기 있는 것들은 이번 로드에서
+        // glTFast 가 방금 만든 것이라, 공유본을 고쳐도 다른 오브젝트로 안 번진다.
+        var seen = new HashSet<Material>();
+
+        foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            foreach (var m in r.sharedMaterials)
+                if (m != null && seen.Add(m)) Sanitize(m);
+
+        if (verboseLog)
+            Debug.Log($"[PersonaSpawner] 머티리얼 보정 {seen.Count}개 " +
+                      $"(metallic={metallic}, roughness={roughness}, normal={normalStrength}, ao={occlusionStrength})");
+    }
+
+    void Sanitize(Material m)
+    {
+        // ── 금속성 / 거칠기 ──
+        // 맵을 먼저 떼야 아래 factor 값이 그대로 최종값이 된다. 안 떼면
+        // factor × 맵 이라, 맵에 박힌 얼룩이 그대로 남는다.
+        if (dropMetallicRoughnessMap)
+        {
+            if (m.HasProperty(P_MetalRoughMap)) m.SetTexture(P_MetalRoughMap, null);
+            if (m.HasProperty(P_MetalMapStd))
+            {
+                m.SetTexture(P_MetalMapStd, null);
+                m.DisableKeyword("_METALLICSPECGLOSSMAP");
+            }
+        }
+
+        if (m.HasProperty(P_Metallic))  m.SetFloat(P_Metallic, metallic);
+        if (m.HasProperty(P_Roughness)) m.SetFloat(P_Roughness, roughness);
+
+        // 빌트인·URP Lit 은 거칠기가 아니라 매끄러움으로 받는다. 뒤집어 준다.
+        float smoothness = 1f - roughness;
+        if (m.HasProperty(P_MetallicStd))   m.SetFloat(P_MetallicStd, metallic);
+        if (m.HasProperty(P_SmoothnessStd)) m.SetFloat(P_SmoothnessStd, smoothness);
+        if (m.HasProperty(P_GlossinessStd)) m.SetFloat(P_GlossinessStd, smoothness);
+
+        // ── 노멀맵 ──
+        if (m.HasProperty(P_NormalScale))  m.SetFloat(P_NormalScale, normalStrength);
+        if (m.HasProperty(P_BumpScaleStd)) m.SetFloat(P_BumpScaleStd, normalStrength);
+        if (normalStrength <= 0f) m.DisableKeyword("_NORMALMAP");
+
+        // ── AO ──
+        // 알베도에 그늘이 이미 구워져 있는데 AO 까지 곱하면 눈두덩·목이 새까매진다.
+        if (m.HasProperty(P_OcclusionStr)) m.SetFloat(P_OcclusionStr, occlusionStrength);
+        if (m.HasProperty(P_OcclusionStd)) m.SetFloat(P_OcclusionStd, occlusionStrength);
+        if (occlusionStrength <= 0f) m.DisableKeyword("_OCCLUSION");
+
+        // ── 알베도 밝기 ──
+        if (!Mathf.Approximately(albedoBrightness, 1f))
+        {
+            int id = m.HasProperty(P_BaseColor)      ? P_BaseColor
+                   : m.HasProperty(P_BaseColorStd)   ? P_BaseColorStd
+                   : m.HasProperty(P_ColorStd)       ? P_ColorStd
+                   : -1;
+            if (id != -1)
+            {
+                Color c = m.GetColor(id);
+                m.SetColor(id, new Color(c.r * albedoBrightness,
+                                         c.g * albedoBrightness,
+                                         c.b * albedoBrightness, c.a));
+            }
+        }
+
+        // ── 자체발광 ──
+        if (killEmissive)
+        {
+            if (m.HasProperty(P_Emissive))    m.SetColor(P_Emissive, Color.black);
+            if (m.HasProperty(P_EmissionStd)) m.SetColor(P_EmissionStd, Color.black);
+            m.DisableKeyword("_EMISSIVE");
+            m.DisableKeyword("_EMISSION");
         }
     }
 
