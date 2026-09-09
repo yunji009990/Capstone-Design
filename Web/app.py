@@ -337,6 +337,72 @@ def admin_login(password: str = Form(...)):
     return {"ok": True}
 
 
+# ── 3D 모델 생성 키 ──────────────────────────────────────────────────
+# 웹이 서버로 옮겨간 뒤(2026-09-09) 생긴 자리다. 전에는 각자 PC 의 `.env` 를
+# 고치면 됐는데, 이제 서버 파일이라 손이 안 닿는다.
+#
+# **키 자체는 절대 돌려주지 않는다.** 들어 있는지(bool)와 앞 네 글자만 알려준다.
+# 그것만으로도 「내가 넣은 그 키가 맞나」는 확인된다.
+#
+# **이 서버는 공용이다**(`uc` 사용자가 같이 쓴다). 돈이 나가는 키를 여기 두는
+# 것이므로 — 전용 키를 따로 발급하고, 지출 상한을 걸고, 시연이 끝나면 지운다.
+# 지우는 것도 이 엔드포인트로 한다(빈 값을 보내면 지워진다).
+
+def _env_path():
+    return os.path.join(HERE, ".env")
+
+
+def _write_env_key(key, value):
+    """`.env` 의 한 줄만 바꾼다. 나머지 줄과 주석은 그대로 둔다."""
+    path = _env_path()
+    lines = []
+    if os.path.exists(path):
+        with io.open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+    hit = False
+    for i, ln in enumerate(lines):
+        t = ln.lstrip()
+        if t.startswith("#") or not t.startswith(key + "="):
+            continue
+        lines[i] = f"{key}={value}"
+        hit = True
+        break
+    if not hit:
+        lines.append(f"{key}={value}")
+    # BOM 을 붙이면 파이썬이 첫 키 이름에 \ufeff 를 달고 읽어 안 잡힌다.
+    with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines).rstrip("\n") + "\n")
+    try:
+        os.chmod(path, 0o600)     # 공용 기계다. 남이 읽을 이유가 없다.
+    except OSError:
+        pass
+
+
+@app.get("/admin/tripo")
+def admin_tripo_get(x_admin_pw: str = Header("")):
+    _admin(x_admin_pw)
+    k = (os.environ.get("TRIPO_API_KEY") or "").strip()
+    # 앞 네 글자만. 전부 보여 주면 화면에 띄운 사람이 어깨너머로 잃는다.
+    return {"set": bool(k), "hint": (k[:4] + "…") if k else ""}
+
+
+@app.post("/admin/tripo")
+def admin_tripo_set(key: str = Form(""), x_admin_pw: str = Header("")):
+    _admin(x_admin_pw)
+    v = (key or "").strip()      # 붙여넣기에 공백·줄바꿈이 섞여 오는 일이 잦다
+    if v and not v.startswith("tsk_"):
+        raise HTTPException(400, "Tripo 키는 tsk_ 로 시작합니다")
+    # **환경변수를 먼저 바꾼다.** TripoClient.from_secrets() 가 부를 때마다
+    # os.environ 을 읽으므로 서버를 껐다 켤 필요가 없다.
+    if v:
+        os.environ["TRIPO_API_KEY"] = v
+    else:
+        os.environ.pop("TRIPO_API_KEY", None)
+    _write_env_key("TRIPO_API_KEY", v)     # 다음 기동에도 남게
+    print(f"[관리자] 3D 키를 {'넣었습니다' if v else '지웠습니다'}", flush=True)
+    return {"ok": True, "set": bool(v)}
+
+
 @app.get("/admin/sessions")
 def admin_sessions(include_deleted: bool = False, x_admin_pw: str = Header("")):
     _admin(x_admin_pw)

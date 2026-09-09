@@ -1,17 +1,20 @@
-// ServerStatusWindow.cs — 두 서버의 상태를 한 창에서 보고, 웹 UI 를 여기서 띄운다.
+// ServerStatusWindow.cs — 두 서버의 상태를 한 창에서 보고, 등록 화면을 연다.
 //
 // 체험을 하려면 서버가 둘 다 살아 있어야 한다. 웹만 떠 있으면 9단계 등록에서 막히고,
 // Raon 만 떠 있으면 등록할 방법이 없다. 매번 터미널과 브라우저를 오가며 확인하는 대신
 // 한 창에 모았다.
 //
-// Raon 은 여기서 못 켠다 — 교내망의 다른 기계에서 손으로 띄우는 서버다(`~/server/start.sh`).
-// 웹 UI 는 이 PC 에서 도는 것이라 켤 수 있다.
+// **둘 다 여기서 못 켠다.** 교내망의 같은 기계에서 손으로 띄운다
+// (`~/server/start.sh` 와 `~/webapp/web_start.sh`).
+//
+// 웹은 2026-09-09 에 그 서버로 옮겼다. 전에는 이 PC 에서 띄웠는데, 새로 받은
+// 사람은 파이썬·의존성·.env 를 다 갖춰야 해서 「서버가 안 켜진다」가 반복됐다.
+// 여기 있던 「서버 켜기」가 `python` 을 그냥 불렀고, 그 이름이 어느 파이썬을
+// 가리킬지는 기계마다 다르다. 이제 주소만 열면 된다.
 //
 //   메뉴: Tools > 서버 연결 상태 확인
 
 using System;
-using System.Diagnostics;
-using System.IO;
 using System.Net.Sockets;
 using UnityEditor;
 using UnityEngine;
@@ -20,7 +23,8 @@ using UnityEngine.Networking;
 public class ServerStatusWindow : EditorWindow
 {
     const int Port = 8500;
-    const string Url = "http://localhost:8500";
+    // 웹도 Raon 과 같은 기계에 있다. localhost 가 아니다.
+    const string Url = "http://220.69.208.201:8500";
     const string RaonFallback = "http://220.69.208.201:8000";
     const double AutoRefreshSec = 5;
 
@@ -61,14 +65,15 @@ public class ServerStatusWindow : EditorWindow
 
     bool _webUp;
     WebStatus _web;
-    Health _raon;
     string _tripoInput = "";
-    string _saved;              // 저장 직후 안내. 서버를 껐다 켜야 반영된다
+    string _adminPw = "";
+    string _saved;              // 보낸 직후 안내
+    bool _busy;                 // 보내는 동안 단추를 막는다
+    Health _raon;
     string _raonError;
     bool _raonChecking;
     double _nextRefresh;
 
-    static string WebDir => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Web"));
 
     /// <summary>씬의 RaonVoiceClient 가 진짜 주소다. 씬이 안 열려 있을 때만 기본값을 쓴다.</summary>
     static string RaonUrl
@@ -120,22 +125,20 @@ public class ServerStatusWindow : EditorWindow
                 catch { _web = null; }
             else _web = null;
 
-            // 서버가 새 키를 물고 다시 떴으면 안내는 할 일을 다 한 것이다.
-            if (_web != null && _web.tripo) _saved = null;
-
             req.Dispose();
             Repaint();
         };
         EditorApplication.update += tick;
     }
 
-    /// <summary>포트가 열려 있으면 돌고 있는 것이다. localhost 라 사실상 즉시 답한다.</summary>
+    /// <summary>포트가 열려 있으면 돌고 있는 것이다.
+    /// **교내망을 건너가므로 200ms 로는 모자란다** — localhost 이던 때의 값이었다.</summary>
     static bool WebUp()
     {
         try
         {
             using (var c = new TcpClient())
-                return c.ConnectAsync("127.0.0.1", Port).Wait(200) && c.Connected;
+                return c.ConnectAsync("220.69.208.201", Port).Wait(1500) && c.Connected;
         }
         catch { return false; }
     }
@@ -210,19 +213,15 @@ public class ServerStatusWindow : EditorWindow
         Sub(Url);
 
         EditorGUILayout.Space(6);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            using (new EditorGUI.DisabledScope(_webUp))
-                if (GUILayout.Button("서버 켜기", GUILayout.Height(26))) StartWeb();
-
-            using (new EditorGUI.DisabledScope(!_webUp))
-                if (GUILayout.Button("웹 사이트 열기", GUILayout.Height(26)))
-                    Application.OpenURL(Url);
-        }
+        // **꺼져 있어도 열 수 있게 둔다.** 서버가 잠깐 안 보이는 것과 주소가
+        // 틀린 것은 다른 문제인데, 단추를 막아 두면 그 둘을 구별할 수 없다.
+        if (GUILayout.Button("등록 화면 열기", GUILayout.Height(26)))
+            Application.OpenURL(Url);
 
         if (!_webUp)
         {
-            Note("켜면 별도 콘솔 창에서 돕니다. 창을 닫는 것이 곧 종료입니다.");
+            Note("서버에서 돕니다. 꺼져 있으면 그 기계에서 켜야 합니다 —\n"
+                 + "ssh raon \"cd ~/webapp; ./web_start.sh\"");
             return;
         }
 
@@ -239,8 +238,11 @@ public class ServerStatusWindow : EditorWindow
     }
 
     /// <summary>
-    /// 키를 여기서 등록한다. 화면에 되돌려주지 않는다 — 있는지 없는지는 위 줄이 말해준다.
-    /// 저장하면 Web/.env 에 쓰고, 서버가 뜰 때 읽으므로 껐다 켜야 반영된다.
+    /// 3D 키를 **서버로** 보낸다. 웹이 서버로 옮겨간 뒤로 이 PC 의 Web/.env 는
+    /// 아무도 안 읽으므로, 예전처럼 파일에 쓰면 「넣었는데 왜 안 되지」가 된다.
+    ///
+    /// 관리자 비밀번호를 같이 보낸다 — 교내망 전체에 열린 서버라 아무나 바꾸면 안 된다.
+    /// **키는 되돌려받지 않는다.** 들어 있는지와 앞 네 글자만 온다.
     /// </summary>
     void DrawTripoField()
     {
@@ -248,61 +250,69 @@ public class ServerStatusWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             GUILayout.Space(26);
+            GUILayout.Label("관리자 비번", GUILayout.Width(66));
+            _adminPw = EditorGUILayout.PasswordField(_adminPw);
+            GUILayout.Space(10);
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.Space(26);
+            GUILayout.Label("3D 키", GUILayout.Width(66));
             _tripoInput = EditorGUILayout.PasswordField(_tripoInput);
 
-            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(_tripoInput)))
-                if (GUILayout.Button("저장", GUILayout.Width(56)))
-                {
-                    // 붙여넣기에 공백·줄바꿈이 섞여 오는 일이 잦다.
-                    if (WriteEnv("TRIPO_API_KEY", _tripoInput.Trim()))
-                    {
-                        _tripoInput = "";
-                        GUI.FocusControl(null);
-                    }
-                }
+            using (new EditorGUI.DisabledScope(
+                       _busy || string.IsNullOrWhiteSpace(_adminPw)
+                       || string.IsNullOrWhiteSpace(_tripoInput)))
+                if (GUILayout.Button("보내기", GUILayout.Width(60)))
+                    SendTripo(_tripoInput.Trim());
+
+            // 시연이 끝나면 지운다. 공용 기계에 결제 키를 남길 이유가 없다.
+            using (new EditorGUI.DisabledScope(
+                       _busy || string.IsNullOrWhiteSpace(_adminPw) || !_web.tripo))
+                if (GUILayout.Button("지우기", GUILayout.Width(60)))
+                    SendTripo("");
             GUILayout.Space(10);
         }
 
         Note(_saved ?? (_web.tripo
-            ? "바꾸려면 새 키를 넣고 저장하세요. 없어도 대화는 정상입니다."
-            : "여기에 넣으면 Web/.env 에 저장됩니다. 없어도 대화는 정상이고, 인물 3D 모델만 안 뜹니다."));
+            ? "키가 서버에 들어 있습니다. 시연이 끝나면 지워 주세요."
+            : "키가 없어 인물 3D 모델이 안 뜹니다(대화는 정상)."));
     }
 
-    /// <summary>Web/.env 의 한 줄만 바꾼다. 나머지 줄과 주석은 그대로 둔다.</summary>
-    bool WriteEnv(string key, string value)
+    /// <summary>서버에 키를 넣거나(빈 값이면) 지운다. 즉시 반영된다 — 재시작이 필요 없다.</summary>
+    void SendTripo(string key)
     {
-        string path = Path.Combine(WebDir, ".env");
-        try
-        {
-            var lines = File.Exists(path)
-                ? new System.Collections.Generic.List<string>(File.ReadAllLines(path))
-                : new System.Collections.Generic.List<string>();
+        var form = new WWWForm();
+        form.AddField("key", key);
+        var req = UnityWebRequest.Post(Url + "/admin/tripo", form);
+        req.SetRequestHeader("X-Admin-Pw", _adminPw);
+        req.timeout = 10;
+        _busy = true;
 
-            bool replaced = false;
-            for (int i = 0; i < lines.Count; i++)
+        var op = req.SendWebRequest();
+        EditorApplication.CallbackFunction tick = null;
+        tick = () =>
+        {
+            if (!op.isDone) return;
+            EditorApplication.update -= tick;
+            _busy = false;
+
+            if (req.result != UnityWebRequest.Result.Success)
+                _saved = req.responseCode == 401
+                    ? "관리자 비밀번호가 다릅니다."
+                    : $"보내지 못했습니다 — {req.error}";
+            else
             {
-                var t = lines[i].TrimStart();
-                if (t.StartsWith("#") || !t.StartsWith(key + "=")) continue;
-                lines[i] = $"{key}={value}";
-                replaced = true;
-                break;
+                _saved = key.Length > 0 ? "서버에 넣었습니다. 바로 반영됩니다."
+                                        : "서버에서 지웠습니다.";
+                _tripoInput = "";
+                GUI.FocusControl(null);
             }
-            if (!replaced) lines.Add($"{key}={value}");
-
-            // BOM 을 붙이면 파이썬이 첫 키 이름에 ﻿ 를 달고 읽어 안 잡힌다.
-            File.WriteAllText(path, string.Join("\n", lines) + "\n",
-                              new System.Text.UTF8Encoding(false));
-
-            _saved = _webUp
-                ? "저장했습니다. 서버를 껐다 켜야 반영됩니다 — 콘솔 창을 닫고 «서버 켜기»."
-                : "저장했습니다. «서버 켜기» 를 누르면 반영됩니다.";
-            return true;
-        }
-        catch (Exception e)
-        {
-            EditorUtility.DisplayDialog("키 저장", $"{path} 에 쓰지 못했습니다.\n\n{e.Message}", "확인");
-            return false;
-        }
+            req.Dispose();
+            Refresh();
+            Repaint();
+        };
+        EditorApplication.update += tick;
     }
 
     void DrawRaon()
@@ -343,65 +353,6 @@ public class ServerStatusWindow : EditorWindow
         Row("가동", Uptime(_raon.uptime_sec), Grey);
         Row("대화 / 등록", $"{_raon.sessions}개 / {_raon.registered}개", Grey);
         Row("억양 복제", _raon.cont ? "켬 (RAON_CONT=1)" : "끔", Grey);
-    }
-
-    void StartWeb()
-    {
-        if (!File.Exists(Path.Combine(WebDir, "app.py")))
-        {
-            EditorUtility.DisplayDialog("웹 UI",
-                $"Web/app.py 를 찾을 수 없습니다.\n\n{WebDir}", "확인");
-            return;
-        }
-
-        try
-        {
-            // /k 로 창을 남긴다. 파이썬이 없거나 포트가 막혀 있으면 그 메시지를 봐야 하고,
-            // 화자 분리 진행 문구도 거기 찍힌다.
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/k python -m uvicorn app:app --port {Port}",
-                WorkingDirectory = WebDir,
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception e)
-        {
-            EditorUtility.DisplayDialog("웹 UI", $"실행하지 못했습니다.\n\n{e.Message}", "확인");
-            return;
-        }
-
-        WaitThenOpen();
-    }
-
-    /// <summary>뜰 때까지 기다렸다 브라우저를 연다. 바로 열면 아직 안 떠서 오류 화면이 뜬다.</summary>
-    void WaitThenOpen()
-    {
-        double deadline = EditorApplication.timeSinceStartup + 20;
-        double next = 0;
-
-        EditorApplication.CallbackFunction tick = null;
-        tick = () =>
-        {
-            if (EditorApplication.timeSinceStartup < next) return;
-            next = EditorApplication.timeSinceStartup + 0.5;
-
-            if (WebUp())
-            {
-                EditorApplication.update -= tick;
-                _webUp = true;
-                Repaint();
-                Application.OpenURL(Url);
-            }
-            else if (EditorApplication.timeSinceStartup > deadline)
-            {
-                EditorApplication.update -= tick;
-                UnityEngine.Debug.LogWarning(
-                    "[웹 UI] 20초 안에 뜨지 않았습니다. 콘솔 창의 메시지를 확인하세요.");
-            }
-        };
-        EditorApplication.update += tick;
     }
 
     // ── 그리기 도구 ───────────────────────────────────────────────
