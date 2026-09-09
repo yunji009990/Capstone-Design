@@ -18,6 +18,7 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 | `app.py` | FastAPI 서버. `/talk`, `/talk_stream`, `/tts`, `/stt`, `/reset`, `/health` |
 | `modeling_raon.patch` | 모델 파일(`modeling_raon.py`)에 넣은 프레임 단위 스트리밍 훅 |
 | `start.sh` / `stop.sh` / `status.sh` | 기동 · 종료 · 상태 확인 |
+| `vllm_start.sh` | **답변 LLM 서버(포트 8001).** 이 기계의 함정 다섯이 주석에 있다 |
 | `*.bak` | 우리가 손대기 전 원본 |
 
 **기본 인물도 기본 음성도 없습니다.** 인물은 웹(`Web/`)에서만 등록되고, 등록되지
@@ -40,6 +41,7 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 | `RAON_TEMP` | `1.6` | **소리** 온도. 코드 기본값 `1.2` 면 「국어책 읽는 느낌」이 남는다 |
 | `RAON_CONT_SILENCE` | 비움 | 생성 초반 무음 프레임. 비우면 모델 기본값 `2`. **`0` 이면 참조가 통째로 샌다** |
 | `RAON_TOKEN` | — | 클라이언트(Unity·`Web/app.py`)의 값과 같아야 한다. 다르면 `401` |
+| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | **오래 켜 두면 VRAM 이 기어오른다.** 세션마다 `/reset` 을 해도 그렇다 — 켜 둔 시간이 쌓이는 것이다. 같은 부하 6회에 39.8 → 66.1GB(OOM) 이던 것이 39.8 → 52.9GB 로 끝난다. 중간에 내려가기도 한다 |
 
 ### 코드 기본값 — `start.sh` 에 없다
 
@@ -50,14 +52,68 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 | `RAON_ANSWER_TOKENS` | `200` | 답변 최대 토큰 |
 | `RAON_MAX_TURNS` / `_KEEP_TURNS` | `30` / `3` | 유지할 대화 턴 수. **함부로 올리지 말 것** — 54턴에 60.8GB, 70턴에 OOM |
 | `RAON_CHAT_TEMP` | `0.7` | **답변 글** 온도. 위 `RAON_TEMP`(소리)와 다른 것 |
-| `RAON_JUDGE` / `_TURNS` | `1` / `3` | 답을 뽑기 전에 아는 것인지 먼저 묻는다 |
+| `RAON_JUDGE` / `_TURNS` | `1` / **`0`** | 답을 뽑기 전에 아는 것인지 먼저 묻는다. **`_TURNS` 는 2026-09-04 에 3 → 0.** 판정기에 최근 대화를 붙이면 아는 것도 모른다고 한다 — 답이 사전지식에 글자 그대로 있는 물음에서 교대 측정으로 `3` 은 1/12, `0` 은 7/12. 원래 넣은 근거(이어 묻는 말)는 지금 `BACKREF` 가 건너뛰기로 처리한다. 되돌리려면 `3` |
+| `RAON_JUDGE_R45` | **`4`** | 판정기 끝의 「없다」 규칙 둘. **겹치면 사건을 묻는 열린 물음을 통째로 죽인다** — 「월미도에서 뭐 했어?」가 0/10. 하나만 남기면 어느 쪽이든 10/10 이다. `4`=때 규칙만(잰 모든 축에서 최선) · `3`=전제 규칙만 · `1`=둘 다(옛 기본) · `0`=둘 다 끔 · `2`=둘 다+우선순위줄 |
+| `RAON_HEDGE_REGEN` | **`1`** | 모른다고 판정됐는데 답이 얼버무리지 않으면 다시 뽑는다. 판정은 맞는데 모델이 무시하는 일이 잦았다(10/10 판정에 6/10 지어냄). 교대 측정 지어내기 평균 12.7 → **6.2**. 모른다 턴에서만 돌고 응답이 1.03 → 1.66초(최대 2.47) |
 | `RAON_LEARN` / `_CHARS` / `_MIN` | `1` / `600` / `8` | 사용자가 말한 사실을 적립 |
+| `RAON_LEARN_MODE` | **`json`** | 적립을 근거(evidence) 붙인 JSON 으로 받는다. **2026-09-04 에 `line` 에서 바꿨다** — 줄 단위는 모델이 지시문을 베끼거나 발화를 되풀이해서 필터가 다 걸러냈다(날 출력 12건 중 9건). 두 사실 모두 적립이 1/6 → **8/8**. 되돌리려면 `line` |
+| `RAON_LEARN_RAW` / `RAON_JUDGE_RAW` | `0` / `0` | `1` 이면 적립·판정에 들어가고 나오는 **날 글**을 로그에 찍는다. 모델이 빈손인지 필터가 버린 건지 갈릴 때 쓴다 |
 | `RAON_SUMMARY` / `_CHARS` | `0` / `600` | 요약. **켜지 말 것** — 기억이 62/64 → 50/64 로 무너진다 |
 | `RAON_REGEN_SIM` | `0.6` | 앞 답변과 꼬리가 이만큼 닮으면 다시 뽑는다 |
 | `RAON_RAS` / `_WINDOW` / `_THRESHOLD` | `1` / `100` / `0.35` | 반복 루프 억제. 실측 최적값이 곧 코드 기본값 |
 | `RAON_REF_TEXT` | `1` | 참조 음성 전사를 `tts_continuation` 에 넘긴다. `0` 은 빈 글을 넘기는 시험용 |
 
 값의 근거는 [`docs/음성대화_작업현황.md`](../docs/음성대화_작업현황.md) §5.
+**2026-09-04 에 바꾼 다섯은 아직 그 문서에 안 들어갔다** — 위 표가 최신이다.
+
+## 시험용 손잡이 — `POST /dbg`
+
+재시작 없이 바꾼다. `{"key": "...", "value": "..."}` 를 폼으로 보내고 `X-Token` 이 필요하다.
+바꿀 수 있는 것: `judge_temp` · `judge_turns` · `judge_head` · `judge_r45` · `learn_mode` · `hedge_regen`.
+
+**왜 필요한가 — 순차 측정은 못 믿는다.** 판정이 회차마다 크게 흔들려서, A 를 다 돌고
+B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 9/10 다음에 3/10 이 나온 적이
+있다. **두 조건을 회차마다 번갈아 걸어야** 가른다. 도구는 `.claude/work/ab.py`.
+
+이 함정에 2026-09-04 하루에만 세 번 빠졌다. 판정기 온도·머리글·창을 순차로 재서
+잘못 기각했다가 교대로 다시 재서 뒤집었다.
+
+## 서버는 둘입니다 (2026-09-07 부터)
+
+**Raon 은 받아적기와 목소리 복제만 하고, 답변 글은 따로 올린 LLM 이 만듭니다.**
+근거는 `docs/음성대화_작업현황.md` §6 「0순위 — 답변 LLM 을 밖으로 뺀다」.
+
+```
+포트 8000   Raon        받아적기 · 판정 · 적립 · 목소리 복제
+포트 8001   vLLM        답변 글 (google/gemma-4-31B-it-qat-w4a16-ct)
+```
+
+**기동 순서가 있습니다 — vLLM 을 먼저, Raon 을 나중에.** Raon 이 뜰 때
+`RAON_LLM_URL` 을 한 번 읽기 때문입니다.
+
+```bash
+# 1) 답변 LLM. **별도 venv 입니다** — Raon 의 venv 에 vLLM 을 넣으면
+#    transformers 버전이 꼬여 Raon 이 죽습니다.
+cd ~; MODEL=/home/crc_unity/models/gemma-4-31B-qat   nohup ./vllm_start.sh > vllm.log 2>&1 &
+#    1~2분 걸립니다. curl http://127.0.0.1:8001/v1/models 로 확인
+
+# 2) Raon
+cd ~/server
+RAON_JUDGE=0 RAON_LLM_URL=http://127.0.0.1:8001/v1/chat/completions RAON_LLM_EXTRA='{"chat_template_kwargs":{"enable_thinking":false}}' ./start.sh
+
+# 3) 답변 LLM 고르기 (재시작 없이 바뀝니다)
+curl -H "X-Token: $TOK" -F key=llm -F value=exaone http://127.0.0.1:8000/dbg
+```
+
+- `--served-model-name exaone` 이라 이름이 `exaone` 이지만 **올라가는 것은 `MODEL` 이
+  가리키는 모델**입니다. 시험하며 갈아끼우려고 이름을 고정해 뒀습니다
+- **`RAON_LLM_EXTRA` 로 추론을 끕니다.** 안 끄면 영어 사고가 답변에 그대로 섞여
+  TTS 로 읽힙니다
+- **vLLM 은 재부팅되면 안 뜹니다.** 자동 기동 절차는 아직 없습니다
+- **이 기계는 공용입니다** — `uc` 사용자가 6.2GB 를 상시 씁니다. 가용은 95GB 가 아니라 89GB
+
+**되돌리려면 셋을 같이 되돌립니다** — `DBG["llm"]=raon`, `RAON_JUDGE=1`,
+`RAON_MEM_FRACTION=0.70`. 하나만 되돌리면 죽거나 지어냅니다.
 
 ## 서버를 새로 셋업하거나 복구할 때
 
@@ -66,8 +122,7 @@ Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리�
 # 2. 모델 파일에 스트리밍 훅 재적용
 patch ~/models/AX-K2-Raon-Speech/modeling_raon.py < ~/server/modeling_raon.patch
 rm -rf ~/hf_home/modules/transformers_modules/AX_hyphen_K2_hyphen_Raon_hyphen_Speech
-# 3. 기동
-cd ~/server && ./start.sh
+# 3. 기동 (위 「서버는 둘입니다」 순서대로)
 ```
 
 2번의 캐시 삭제가 중요합니다. transformers는 `trust_remote_code` 파일을

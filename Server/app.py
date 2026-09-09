@@ -1,4 +1,4 @@
-import os, io, re, time, asyncio, difflib, shutil, tempfile, warnings, logging
+import os, io, re, json, time, asyncio, difflib, shutil, tempfile, warnings, logging
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TQDM_DISABLE", "1")
 import torch, numpy as np, soundfile as sf
@@ -104,6 +104,12 @@ CURRENT = {"session": None}
 # 전부 지시형으로 쓴다. 금지형("~하지 마세요")은 무엇을 하라는 말이 없어서 모델이
 # 빈칸을 제 기본값으로 채운다. 20턴 대화 한 회차에서 길이 규칙을 어긴 턴이
 # 15.0 에서 6.5 로 줄었다(회차 편차 2~3). 자세한 근거는 docs/페르소나_작성규격.md.
+# **「매번 새 문장을 만듭니다」를 뺐다 (2026-09-07).**
+# Raon 이 꼬리를 다섯 턴 연속 되풀이하던 시절에 넣은 규칙인데, 답변을 밖으로 뺀 뒤로는
+# 그 문제가 없고 오히려 해가 된다 — **없는 정보에 답할 때도 새 맺음말을 만들어야 하니
+# 내용을 채운다.** 실측으로 「잊어버린 거야?」 「기억력이 왜 그러니?」 같은 타박이
+# 8회차에 여섯 번 나왔고, 이 줄을 「같은 답을 다시 해도 된다」로 바꾸니 두 번이 됐다.
+# 판정기와 같은 꼴이다 — 약한 모델을 메우려던 장치가 좋은 모델에는 방해가 된다.
 BASE_RULES = """당신은 아래 [인물]에 적힌 사람입니다. 그 사람이 되어 사람처럼 대화하세요.
 
 말하기 규칙
@@ -111,7 +117,7 @@ BASE_RULES = """당신은 아래 [인물]에 적힌 사람입니다. 그 사람�
 - 글자와 쉼표, 마침표, 물음표만 씁니다. 이 말은 소리로 읽힙니다.
 - 아는 사이끼리 하는 말로 합니다.
 - 상대가 방금 한 말에 반응하고, 거기서 이어지는 것을 말합니다.
-- 매번 새 문장을 만듭니다. 특히 마지막 문장은 앞서 한 말과 다르게 끝냅니다.
+- 같은 질문에는 같은 사실과 같은 모르는 범위를 유지합니다. 표현과 마지막 질문만 조금 바꿀 수 있고, 같은 답을 그대로 다시 말해도 됩니다.
 - 되물을 때도 있고 당신 이야기를 할 때도 있습니다. 번갈아 합니다.
 - 확실한 것만 말하고, 기억이 흐릿하면 되묻습니다."""
 
@@ -245,7 +251,7 @@ def ref_text(voice):
         return ""
     if voice not in REF_TEXT:
         t0 = time.time()
-        REF_TEXT[voice] = S["pipe"].stt(voice)
+        REF_TEXT[voice] = stt(voice)
         print(f"[참조전사] {time.time()-t0:.1f}초 — {REF_TEXT[voice]!r}", flush=True)
     return REF_TEXT[voice]
 
@@ -301,7 +307,7 @@ def synth(text, voice, tries=2):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
             t.write(data); tmp = t.name
         try:
-            heard = pipe.stt(tmp)
+            heard = stt(tmp)
         finally:
             os.unlink(tmp)
         if _sim(heard, text) >= 0.4:
@@ -414,6 +420,17 @@ async def set_mode(cont: str = Form(...), x_token: str = Header("")):
                 await asyncio.to_thread(warm_pipe, sess_voice(CURRENT["session"]))
     return {"cont": S["cont"], "session": CURRENT["session"]}
 
+@app.post("/dbg")
+def dbg(key: str = Form(...), value: str = Form(...), x_token: str = Header("")):
+    """시험용 손잡이. 재시작 없이 바꾼다 — 교대 측정을 하려면 필요하다."""
+    auth(x_token)
+    if key not in DBG:
+        raise HTTPException(400, f"모르는 손잡이: {key}")
+    DBG[key] = type(DBG[key])(value)
+    print(f"[손잡이] {key} = {DBG[key]}", flush=True)
+    return dict(DBG)
+
+
 @app.post("/reset")
 def reset(session: str = Form("default"), x_token: str = Header("")):
     auth(x_token); HIST.pop(session, None); SUMM_TEXT.pop(session, None)
@@ -437,7 +454,7 @@ async def stt_ep(file: UploadFile = File(...), x_token: str = Header("")):
         t.write(raw); p = t.name
     try:
         async with LOCK:
-            return {"text": S["pipe"].stt(p)}
+            return {"text": stt(p)}
     finally:
         os.unlink(p)
 
@@ -504,11 +521,11 @@ LEARN_PROMPT = """상대가 방금 이렇게 말했다.
 "{heard}"
 
 이 말에서, 뒤에 이어 말할 때 알고 있어야 할 사실만 적어라.
-상대가 직접 말한 것만 적는다. 짐작해서 채우지 마라.
-한 줄에 한 가지씩, 누가 무엇인지가 드러나는 평서문으로 적는다.
+상대가 직접 말한 것만 적어라. 짐작해서 채우지 마라.
+한 줄에 한 가지씩, 누가 무엇인지가 드러나는 평서문으로 적어라.
 "야", "떨린다" 처럼 낱말만 떼어 놓지 마라.
 적을 것이 없으면 아무것도 적지 마라. 없다고 적지도 마라.
-글자와 쉼표, 마침표만 쓴다."""
+글자와 쉼표, 마침표만 써라."""
 
 # **"다"로 끝나는 줄만 받는다.** 마지막 줄("적을 것이 없으면 적지 마라")은 안 먹혔다 —
 # 8개 발화로 재보니 5개에서 발화를 그대로 베껴 적었다. 그런데 **베낀 것과 뽑은 것은
@@ -548,7 +565,102 @@ LEARN_META = re.compile(r"내용은 다음|사실만|것만 적|적는다|적어
                         #   확인 대상은 "the first one"으로 지칭되었다.
                         #   상대가 방금 "예를 들어봅시다"라고 말했다.
                         r"이 문장은|발화(자|되|했|를|가)|지칭|의도를|반복되어|"
-                        r"방금.{0,20}라고 (말했|했)")
+                        r"방금.{0,20}라고 (말했|했)|"
+                        # 발화를 사실이 아니라 **서술**하는 꼴. JSON 시험에서 나왔다.
+                        #   월미도에 함께 간 사실이 언급되었다.
+                        #   구체적인 날짜나 동행자는 포함되지 않았다.
+                        r"언급(되|됐|했|한|함)|서술(되|했|함)|진술(되|했|함)|"
+                        r"포함되(지|어|었)|드러난다|나타난다|밝혔다|표현(되|했|함)")
+
+
+LEARN_RAW = os.environ.get("RAON_LEARN_RAW", "0") == "1"
+# 적립 방식. line = 줄 단위(옛것), json = 근거 붙인 JSON(새것).
+# 줄 단위는 지시문 베끼기를 못 막는다 — 모델이 "…적는다."로 베끼면 LEARN_OK 를
+# 그대로 통과한다. 말투를 바꿔 가며 베끼므로 금지어를 늘리는 것으로는 안 끝난다.
+# JSON 은 지시(산문)와 출력(JSON)의 꼴이 아예 달라서 베낀 것이 파싱에서 걸린다.
+LEARN_MODE = os.environ.get("RAON_LEARN_MODE", "json")
+
+# 근거(evidence)를 함께 받는다. 원문의 이어진 조각이어야 하므로 코드가 확인할 수 있다.
+# 금지어 목록을 늘리는 대신 **원문에 근거가 있는지**를 묻는 쪽으로 뒤집은 것이다.
+LEARN_PROMPT_JSON = """<발화>
+{heard}
+</발화>
+
+위 발화가 주장하는 사건이나 상태를 JSON 하나로만 내보내라.
+
+{{"facts":[{{"text":"기억할 문장","evidence":"발화에서 그대로 딴 조각"}}]}}
+
+- text 는 "-다." 로 끝나는 짧은 평서문으로 써라.
+- evidence 는 발화 안에서 **이어진 원문 그대로**를 따라 적어라. 고쳐 쓰지 마라.
+- 발화에 없는 사람·장소·때를 text 에 넣지 마라.
+- 가리키는 대상이 무엇인지 모르겠으면 그 대상을 빼고 남는 것만 적어라.
+- 발화가 무엇을 말했는지 **설명하지 마라.** 발화가 말한 것을 적어라.
+- 주장이 여럿이면 facts 를 여러 개로 나눠라.
+- 적을 것이 없으면 {{"facts":[]}} 만 내보내라.
+- JSON 밖에 아무것도 쓰지 마라.
+
+본보기다. 발화를 그대로 옮기지 말고 이렇게 **평서문으로 바꿔라.**
+시험용 낱말이니 여기 나온 말을 답에 가져다 쓰지 마라.
+
+발화: 어제 병원에 다녀왔어요
+{{"facts":[{{"text":"어제 병원에 다녀왔다.","evidence":"어제 병원에 다녀왔어요"}}]}}
+
+발화: 저 이번에 이사했어요 방이 두 개예요
+{{"facts":[{{"text":"이사했다.","evidence":"저 이번에 이사했어요"}},{{"text":"방이 두 개다.","evidence":"방이 두 개예요"}}]}}
+
+발화: 그냥 좀 그래요
+{{"facts":[]}}
+"""
+
+
+
+
+DEIXIS = re.compile(r"거기|그곳|그때|그 때|그 곳|저기")
+
+
+def _prev_said(session):
+    """직전 **사용자** 발화. 지시대명사가 있을 때 앞에 이어 붙이는 데 쓴다.
+
+    문서가 금지한 것은 모델 **답변**에서 사실을 뽑는 것과, 앞 턴을 통째로 맥락으로
+    주는 것이다 — 지어낸 물음이 사실로 새기 때문이다. 여기는 사용자가 실제로 한
+    말만 주므로 그 길이 없다. evidence 는 파서가 이번 발화 안으로 묶는다."""
+    us = [m["content"] for m in list(HIST.get(session, []))[:-2]
+          if m["role"] == "user" and isinstance(m["content"], str)]
+    return us[-1] if us else ""
+
+def _norm(x):
+    return re.sub(r"\s+", "", x or "")
+
+
+def _parse_facts(raw, heard):
+    """JSON 에서 사실만 골라낸다. 근거가 원문에 없으면 버린다.
+
+    금지어를 늘리는 대신 **원문에 근거가 있는가**를 묻는다. 지시문을 베끼면
+    근거 조각이 발화에 없으므로 여기서 걸린다."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return []
+    try:
+        facts = json.loads(m.group())["facts"]
+    except Exception:
+        return []
+    hn, out = _norm(heard), []
+    for f in facts if isinstance(facts, list) else []:
+        if not isinstance(f, dict):
+            continue
+        t, e = (f.get("text") or "").strip(), (f.get("evidence") or "").strip()
+        # 근거는 원문의 이어진 조각이어야 한다.
+        if len(t) < 6 or not e or _norm(e) not in hn:
+            continue
+        # 낱말 대조는 하지 않는다 — 한국어 활용을 못 견뎌 성한 것을 버렸다
+        # ("같이"->"함께", "갔었"->"갔다"). 근거가 원문에 있는지만 본다.
+        # 없는 정보를 붙이는 실패는 아직 관측되지 않았다. 보이면 그때 막는다.
+        if not any(w[:2] in _norm(e) for w in re.findall(r"[가-힣]{2,}", t)):
+            continue
+        if LEARN_META.search(t):
+            continue
+        out.append(t if t.endswith(".") else t + ".")
+    return out
 
 
 def learn(session, heard):
@@ -577,9 +689,35 @@ def learn(session, heard):
         return
     try:
         t0 = time.time()
-        out = clean_summary(S["pipe"].chat(
-            [{"role": "user", "content": LEARN_PROMPT.format(heard=heard)}],
-            max_new_tokens=120, temperature=0.3), tag="적립")
+        js = DBG["learn_mode"] == "json"
+        # 모델은 한 문장 안의 지시대명사는 잇는데 턴을 넘으면 못 잇는다(실측).
+        # 프롬프트로 두 번 시켜 봤고 0/8 이었다. 그래서 코드로 이어 붙인다.
+        # 사용자 발화끼리만 잇는다 — 모델 답변은 절대 안 섞는다.
+        src = heard
+        if js and DEIXIS.search(heard):
+            prev = _prev_said(session)
+            if prev:
+                src = prev + " " + heard
+        pr = (LEARN_PROMPT_JSON if js else LEARN_PROMPT).format(heard=src)
+        # 적립은 답변 뒤로 미뤄져 있어 첫 소리 지연에 안 걸린다. GPT 를 넣어도
+        # 안전한 유일한 자리라 여기만 갈아끼울 수 있게 뒀다.
+        if DBG["learn_llm"] == "raon":
+            raw = S["pipe"].chat([{"role": "user", "content": pr}],
+                                 max_new_tokens=160 if js else 120,
+                                 temperature=0.0 if js else 0.3)
+        else:
+            try:
+                raw = openai_answer([{"role": "user", "content": pr}], DBG["learn_llm"])
+            except Exception as e:
+                DBG["llm_fallbacks"] += 1
+                print(f"[{session}] 적립 {DBG['learn_llm']} 실패, Raon 으로 — {e}", flush=True)
+                raw = S["pipe"].chat([{"role": "user", "content": pr}],
+                                     max_new_tokens=160 if js else 120,
+                                     temperature=0.0 if js else 0.3)
+        out = "" if js else clean_summary(raw, tag="적립")
+        # 계측용. 모델이 빈손인지 필터가 버린 것인지 갈리지 않으면 고칠 수가 없다.
+        if LEARN_RAW:
+            print(f"[{session}] 적립raw — {heard!r} -> {(raw or '').strip()[:300]!r}", flush=True)
     except Exception as e:
         print(f"[{session}] 적립 실패, 넘어간다 — {e}", flush=True)
         return
@@ -587,10 +725,14 @@ def learn(session, heard):
     # 하면 두 줄이 된다. 글자로만 거른다 — 뜻으로 거르려면 또 모델을 써야 한다.
     olds = [x.strip() for x in (sess_system(session) + "\n" + "\n".join(lines)).splitlines()
             if x.strip()]
-    fresh = [l for l in (x.strip() for x in out.splitlines())
-             if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
-             and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)
-             and not any(_sim(l, p) > 0.7 for p in olds)]
+    if js:
+        # 근거 검증을 먼저 하고 중복 제거는 그 뒤다 — 순서를 바꾸면 성한 것이 먼저 버려진다.
+        cand = _parse_facts(raw, src)
+    else:
+        cand = [l for l in (x.strip() for x in out.splitlines())
+                if len(l) >= 6 and LEARN_OK.search(l) and not LEARN_META.search(l)
+                and not any(_sim(l, j) > 0.6 for j in LEARN_JUNK)]
+    fresh = [l for l in cand if not any(_sim(l, p) > 0.7 for p in olds)]
     if fresh:
         lines += fresh
         print(f"[{session}] 적립 +{len(fresh)} ({time.time()-t0:.1f}초) — {fresh}", flush=True)
@@ -630,7 +772,10 @@ ASKING = re.compile(r"\?|기억\s*(나|해|하)|알아|아니야|뭐(야|였|지
 BACKREF = re.compile(r"(라|다|자|냐)고\s*(했|하)|랬|말했|얘기했|"
                      r"그때|아까|방금|저번|지난번")
 
-JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
+JUDGE_HEAD_A = "어떤 사람에 대해 알려진 것은 아래가 전부다."
+JUDGE_HEAD_B = "아래가 지금 아는 것 전부다."
+
+JUDGE_PROMPT = """{head}
 ===== 아는 것 =====
 {known}
 ===== 끝 =====
@@ -641,9 +786,21 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 이 말에 답하는 데 필요한 것이 위에 있으면 "있다", 없으면 "없다" 라고만 적어라.
 묻는 말이 아니면 "있다" 라고 적어라.
 앞서 나눈 말에 답이 있으면 "있다" 이다.
-물음이 무언가를 전제하더라도 그 전제가 위에 없으면 "없다" 이다.
-물음이 가리키는 때가 위에 적힌 때와 다르면 "없다" 이다.
-다른 말은 적지 마라."""
+{rules45}다른 말은 적지 마라."""
+
+# 규칙 넷·다섯. 둘 다 「없다」 방아쇠이고 프롬프트 끝에 붙어 있다. 사건에 대한
+# 열린 물음(「뭐 했어?」)이 전부 「없다」로 가는 것이 이 둘 때문인지 가르는 중이다.
+_R45 = ["물음이 무언가를 전제하더라도 그 전제가 위에 없으면 \"없다\" 이다.",
+        "물음이 가리키는 때가 위에 적힌 때와 다르면 \"없다\" 이다."]
+# 우선순위를 못박는 줄. 규칙 넷·다섯이 「없다」 방아쇠라 열린 물음(「뭐 했어?」)을
+# 전부 「없다」로 끌고 간다. 그냥 빼면 열린 물음은 0/10 -> 10/10 으로 고쳐지지만
+# 지어내기가 13/36 -> 18/36 으로 오른다. 빼는 대신 순서를 정해 준다.
+_R45_LAST = "다만 물음이 묻는 것이 위에 적혀 있으면 \"있다\" 이다."
+JUDGE_RULES45 = chr(10).join(_R45) + chr(10)
+JUDGE_RULES45B = chr(10).join(_R45 + [_R45_LAST]) + chr(10)
+# 갈라 보기 — 어느 쪽이 열린 물음을 죽이는가
+JUDGE_RULES_ONLY4 = _R45[0] + chr(10)
+JUDGE_RULES_ONLY5 = _R45[1] + chr(10)
 
 # 판정기에 붙일 최근 대화. **없으면 이어 묻는 말을 통째로 놓친다.**
 # "그때 터미널에서 얼마나 기다렸더라", "무슨 요일이라고 했지?" 는 앞 대화가 있어야
@@ -652,7 +809,42 @@ JUDGE_PROMPT = """어떤 사람에 대해 알려진 것은 아래가 전부다.
 #
 # `--probe` 가 이걸 못 잡았다 — 매번 /reset 하고 물어서 물음이 전부 홀로 섰다.
 # **대화 안에서만 나는 결함이다.**
-JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
+# **0 이 기본이다.** 3 이었는데 판정기를 망가뜨리고 있었다 — 답이 사전지식에
+# 글자 그대로 있는 물음에서 교대 측정으로 3 은 1/12, 0 은 7/12 였다.
+# 20턴 기억 30/32 -> 31/32, 지어내기 14/36 -> 11/36 으로 회귀도 없다.
+# recent 를 넣은 원래 이유(이어 묻는 말)는 지금 BACKREF 가 건너뛰기로 처리한다.
+# 되돌리려면 RAON_JUDGE_TURNS=3.
+JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "0"))
+JUDGE_RAW = os.environ.get("RAON_JUDGE_RAW", "0") == "1"
+
+# 시험용 손잡이. **재시작 없이** 바꾼다 — 판정이 회차마다 크게 흔들려서
+# (같은 프로세스에서 9/10 다음에 3/10) A 를 다 돌고 B 를 돌면 드리프트가 효과로
+# 읽힌다. 교대로 걸어야 가른다. POST /dbg 로 바꾼다.
+DBG = {"judge_temp": float(os.environ.get("RAON_JUDGE_TEMP", "0.1")),
+       "judge_turns": JUDGE_TURNS,
+       "judge_head": "A",
+       # 4 = 「때」 규칙만. 전제 규칙을 빼면 사건에 대한 열린 물음이
+       # 0/10 -> 10/10 이 되고 지어내기도 13/36 -> 10/36 으로 준다.
+       # 둘이 겹칠 때만 죽는다 — 하나만 남기면 어느 쪽이든 열린 물음은 산다.
+       # 0=둘다끔 1=둘다(옛 기본) 2=둘다+우선순위줄 3=전제만 4=때만
+       "judge_r45": int(os.environ.get("RAON_JUDGE_R45", "4")),
+       "learn_mode": LEARN_MODE,
+       # 답변 LLM. "raon" 이거나 OpenAI 모델 이름.
+       "llm": os.environ.get("RAON_LLM", "raon"),
+       # 폴백 횟수. **계측기가 실패를 가리면 유령 숫자를 잰다** —
+       # chat-latest 셋이 404 를 내고 Raon 으로 되돌아갔는데 그걸 모르고 쟀다.
+       # 측정 앞뒤로 이 값을 보고 늘었으면 그 회차는 버린다.
+       "llm_fallbacks": 0,
+       # 받아적기 폴백. LLM 쪽과 같은 이유로 센다 — 밖의 STT 가 조용히 죽고
+       # Raon 이 대신 받아적으면, 후보를 재는 줄 알고 Raon 을 재게 된다.
+       "stt_fallbacks": 0,
+       # 적립만 갈아끼운다. 답변 뒤로 미뤄져 지연에 안 걸리는 자리다.
+       "learn_llm": os.environ.get("RAON_LEARN_LLM", "raon"),
+       # 모른다 판정인데 안 얼버무리면 다시 뽑는다.
+       "hedge_regen": int(os.environ.get("RAON_HEDGE_REGEN", "1")),
+       # 격려 클리셰가 걸리면 다시 뽑는다. **기본은 꺼 둔다** — 지연을 늘리므로
+       # 3초 관문으로 재보고 정한다. GPT 교체를 2/60 으로 떨어뜨린 그 관문이다.
+       "cheer_regen": int(os.environ.get("RAON_CHEER_REGEN", "0"))}
 
 # 모른다고 판정됐을 때 그 턴에만 붙인다.
 #
@@ -665,6 +857,38 @@ JUDGE_TURNS = int(os.environ.get("RAON_JUDGE_TURNS", "3"))
 # 답한다. 시킨 대로 한 것이다. 순서를 정해 주고, 무엇을 되물을지까지 말한다.
 JUDGE_NOTE = (" (모르는 것이다. 모른다는 말을 먼저 하고, 그 다음 상대에게 알려 달라고 해라."
               " 물음을 그대로 되풀이하지 마라. 지어내지 마라.)")
+
+# 모른다고 판정된 턴에서 답이 실제로 얼버무렸는가. **모델이 지시를 자주 무시한다** —
+# 판정이 10/10 맞았는데 답은 6/10 에서 강릉을 갖다 붙였다. 지시를 더 세게 하는 것은
+# 이 저장소에서 실패하는 길이라, 뽑고 나서 재보고 안 걸리면 다시 뽑는다
+# (꼬리 반복을 REGEN 으로 잡는 것과 같은 방식).
+HEDGED = re.compile(r"모르|몰라|몰랐|기억(이|은)?\s*(잘\s*)?안\s*나|기억이 가물|가물|"
+                    r"생각이\s*안\s*나|글쎄|헷갈|확실하지 않|처음 듣|들은 적 없|"
+                    r"말 안 했|얘기 안 했|알려 ?(줘|주라|주렴|줄)|(말|얘기)해 ?(봐|줘|줄)")
+
+# 격려 클리셰. **이 저장소가 여섯 가지로 쳐서 못 잡고 접은 항목이다** — 금지형 규칙,
+# 페르소나 지시, 본보기 쌍 세 벌, 코드로 다시 뽑기, 꼬리 문장 떼기(지표 다섯이
+# 좋아지고 대화가 토막 났다).
+#
+# 이번엔 GPT 를 오프라인 라벨러로 써서 **꼴을 특정했다.** 핵심은 감정 인정이 아니라
+# 뒤에 붙는 **능력 보증·응원 절**이다. 계측기가 격려로 표시한 10턴을 100% 잡고
+# 격려 아닌 턴은 하나도 안 잡는 것을 확인하고 넣었다.
+#
+# **이 길은 막혔다 (2026-09-05 실측). 다시 밟지 말 것.**
+# 다시 뽑기가 21번 돌았는데 격려는 0.18 -> 0.17, 0.13 -> 0.17 로 안 줄었다.
+# 문서 §2순위에 「코드 — 걸리면 다시 뽑기 | 27%만 잡고」가 이미 있었고 같은 결과다.
+#
+# 새로 안 것 하나 — **막히는 곳은 탐지가 아니다.** 아래 정규식은 계측기가 격려로
+# 표시한 10턴을 100% 잡고 오탐이 0이었다. 다시 뽑아도 모델이 **또 격려한다.**
+# 그러니 탐지기를 더 정교하게 만드는 쪽으로 가지 말 것.
+#
+# 탐지기 자체는 쓸모가 있으니 남긴다(계측·라벨링용). RAON_CHEER_REGEN=1 로 켜지만
+# **켜지 마라** — 지연만 늘고 효과가 없다.
+CHEER = re.compile(
+    r"잘할\s*(거|수)|잘\s*할\s*(거|수)|충분히\s*잘|잘\s*해\s*낼|"
+    r"넌\s*(잘|충분|할)|너\s*정도면|너라면|잘\s*해왔|잘하고\s*있어|"
+    r"응원(할게|해)|파이팅|화이팅|평소처럼\s*하면|"
+    r"다\s*잘\s*될|잘\s*될\s*거")
 
 
 def unknown(session, heard):
@@ -691,16 +915,21 @@ def unknown(session, heard):
         return False
     # 이어 묻는 말은 앞 대화가 있어야 뜻이 잡힌다. 최근 몇 턴만 붙인다 —
     # 다 붙이면 판정 프리필이 답변만큼 커진다.
-    h = list(HIST.get(session, []))[-JUDGE_TURNS * 2:]
+    h = list(HIST.get(session, []))[-DBG["judge_turns"] * 2:] if DBG["judge_turns"] else []
     recent = ("\n===== 방금까지 나눈 말 =====\n"
               + "\n".join(f"{'상대' if m['role'] == 'user' else '나'}: {m['content']}"
                           for m in h)
               + "\n===== 끝 =====\n") if h else ""
+    head = JUDGE_HEAD_A if DBG["judge_head"] == "A" else JUDGE_HEAD_B
+    prompt = JUDGE_PROMPT.format(head=head, known=known, heard=heard, recent=recent,
+                                 rules45=("", JUDGE_RULES45, JUDGE_RULES45B,
+                                          JUDGE_RULES_ONLY4, JUDGE_RULES_ONLY5)[DBG["judge_r45"]])
+    # 계측용. 무엇을 보고 그렇게 판정했는지 안 보이면 고칠 수가 없다.
+    if JUDGE_RAW:
+        print(f"[{session}] 판정입력 >>>{prompt}<<<", flush=True)
     try:
-        out = S["pipe"].chat(
-            [{"role": "user", "content": JUDGE_PROMPT.format(known=known, heard=heard,
-                                                             recent=recent)}],
-            max_new_tokens=8, temperature=0.1)
+        out = S["pipe"].chat([{"role": "user", "content": prompt}],
+                             max_new_tokens=8, temperature=DBG["judge_temp"])
     except Exception as e:
         print(f"[{session}] 판정 실패, 그냥 답한다 — {e}", flush=True)
         return False
@@ -818,7 +1047,165 @@ def _tail(text):
     ss = [s.strip() for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s.strip()]
     return ss[-1] if ss else ""
 
-def answer_for(session, msgs, tries=2):
+
+# ── 답변 LLM 을 갈아끼운다 (시험용) ────────────────────────────────
+# Raon 은 STT->LLM->TTS 를 다 하지만 **답변과 합성은 이미 따로 호출**이라
+# 여기만 갈아끼우면 LLM 만 바꿀 수 있다. 받아적기와 합성은 그대로 Raon 이 한다.
+#
+# 키는 저장소에 두지 않는다. `~/.openai_key` 에서 읽는다(600, ~/server 밖).
+OPENAI_KEY = ""
+try:
+    with open(os.path.expanduser("~/.openai_key")) as _f:
+        OPENAI_KEY = _f.read().strip()
+except Exception:
+    pass
+
+
+def _flat(c):
+    """오디오 경로가 섞인 content 를 글만 남겨 평평하게 만든다."""
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+    return str(c or "")
+
+
+# ── 받아적기 이음매 ──────────────────────────────────────────────
+# **답변 LLM 과 같은 방식으로 뺀다.** 여기도 사실상 표준이 있다 —
+# faster-whisper-server·Speaches·vLLM 이 다 OpenAI 의
+# `/v1/audio/transcriptions` 를 낸다. 주소만 바꾸면 코드가 그대로다.
+#
+# 기본값은 비어 있고, 그러면 Raon 이 받아적는다. **지금까지와 똑같다.**
+#
+# 왜 지금 내는가 — 2026-09-06 부터 **받아적은 글이 답변의 유일한 재료**다.
+# 그런데 Raon STT 의 정확도를 잰 적이 한 번도 없다. 이 이음매가 있어야 같은
+# 음성으로 후보들을 나란히 재 볼 수 있다.
+#
+# **합성 쪽은 이렇게 못 뺀다** — `/v1/audio/speech` 에는 참조 음성을 실을 자리가
+# 없어서 목소리 복제가 표준에 없다. 그쪽 이음매는 우리가 정해야 한다.
+STT_URL = os.environ.get("RAON_STT_URL", "")
+STT_MODEL = os.environ.get("RAON_STT_MODEL", "whisper-1")
+
+
+def _multipart(fields, filename, blob):
+    """OpenAI 호환 서버가 받는 multipart 한 덩어리."""
+    import uuid
+    b = uuid.uuid4().hex
+    out = []
+    for k, v in fields.items():
+        out += [b"--" + b.encode(),
+                f'Content-Disposition: form-data; name="{k}"'.encode(),
+                b"", v.encode()]
+    out += [b"--" + b.encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"'.encode(),
+            b"Content-Type: audio/wav", b"", blob,
+            b"--" + b.encode() + b"--", b""]
+    return b"\r\n".join(out), b
+
+
+def stt(path):
+    """음성 파일 하나를 글로. 주소가 없으면 Raon 이 한다.
+
+    **실패하면 Raon 으로 되돌린다.** 받아적기가 비면 답변도 못 만든다."""
+    if not STT_URL:
+        return S["pipe"].stt(path)
+    try:
+        import urllib.request
+        with open(path, "rb") as f:
+            blob = f.read()
+        body, b = _multipart({"model": STT_MODEL, "language": "ko"}, "a.wav", blob)
+        req = urllib.request.Request(
+            STT_URL, data=body,
+            headers={"Authorization": f"Bearer {OPENAI_KEY}",
+                     "Content-Type": f"multipart/form-data; boundary={b}"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            out = (json.load(r).get("text") or "").strip()
+        if not out:
+            raise RuntimeError("받아적은 글이 비었다")
+        return out
+    except Exception as e:
+        DBG["stt_fallbacks"] += 1
+        print(f"[받아적기] 밖의 STT 실패, Raon 으로 되돌린다 — {e}", flush=True)
+        return S["pipe"].stt(path)
+
+
+def need_heard():
+    """소리로 온 발화라도 미리 받아적어야 하는가.
+
+    밖의 답변 LLM 은 소리를 못 받는다. Raon 을 쓸 때만 건너뛸 수 있다."""
+    return DBG["llm"] != "raon"
+
+
+def _as_text(msgs, heard):
+    """소리로 온 발화를 받아적은 글로 갈아끼운다.
+
+    **이게 없으면 OpenAI 에는 빈 발화가 간다.** 2026-09-06 헤드셋에서 GPT 가 매 턴
+    "말이 없네", "왜 말이 없니" 라고 답한 것이 이것이다. `/talk_stream` 은 발화를
+    `{"type": "audio", ...}` 로 넣는데 `_flat()` 이 `"text"` 키를 뽑으므로 오디오
+    조각에서는 빈 문자열이 나온다. 판정이 걸린 턴은 note 한 줄만 갔다.
+
+    **글 경로(`/chat`)에서는 안 드러난다** — content 가 이미 문자열이다. 손잡이를
+    만들 때 글로만 재서 못 봤다.
+
+    Raon 은 오디오를 그대로 알아들으므로 이 갈아끼우기는 OpenAI 경로에만 건다."""
+    out = list(msgs)
+    for i in range(len(out) - 1, -1, -1):
+        if out[i]["role"] != "user":
+            continue
+        c = out[i]["content"]
+        if isinstance(c, list) and any(isinstance(x, dict) and x.get("type") == "audio"
+                                       for x in c):
+            if not heard:
+                # 받아적기를 껐으면 보낼 글이 없다. 예외를 올려 Raon 으로 되돌린다 —
+                # 빈 발화를 보내느니 되돌리는 쪽이 낫고, 폴백으로 세어져 밖에서 보인다.
+                raise RuntimeError("소리로 온 발화인데 받아적은 글이 없다")
+            note = "".join(x.get("text", "") for x in c
+                           if isinstance(x, dict) and x.get("type") == "text")
+            out[i] = {**out[i], "content": heard + note}
+        break
+    return out
+
+
+# 답변 LLM 의 주소. **로컬 모델도 같은 자리에 꽂는다** — vLLM·llama.cpp 는 OpenAI
+# 호환 엔드포인트를 내므로 주소만 바꾸면 코드가 그대로다. 시험 장치(DBG["llm"])도
+# 그대로 쓴다. 로컬이면 키가 필요 없으니 빈 값이어도 된다.
+LLM_URL = os.environ.get("RAON_LLM_URL", "https://api.openai.com/v1/chat/completions")
+# 서버마다 다른 여분 필드. **OpenAI 에 보내면 400 이 나므로 기본값은 비어 있다.**
+# vLLM 에 EXAONE 을 올릴 때 추론을 끄는 자리가 여기다 —
+#   RAON_LLM_EXTRA='{"chat_template_kwargs": {"enable_thinking": false}}'
+# EXAONE 4.5 는 enable_thinking 기본이 참이라, 안 끄면 추론 토큰이 예산을 먹고
+# 빈 답이 나온다(gpt-5.5 에서 겪은 것과 같다).
+try:
+    LLM_EXTRA = json.loads(os.environ.get("RAON_LLM_EXTRA", "") or "{}")
+except Exception as _e:
+    print(f"[설정] RAON_LLM_EXTRA 를 못 읽었다, 무시한다 — {_e}", flush=True)
+    LLM_EXTRA = {}
+
+
+def openai_answer(msgs, model):
+    """OpenAI 호환 엔드포인트로 답을 뽑는다. 실패하면 예외를 올려 호출자가 Raon 으로 되돌린다."""
+    import urllib.request
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": m["role"], "content": _flat(m["content"])} for m in msgs],
+        "max_completion_tokens": TOKENS,
+        **LLM_EXTRA,
+    }).encode()
+    req = urllib.request.Request(
+        LLM_URL, data=body,
+        headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        out = json.load(r)["choices"][0]["message"]["content"]
+    # **빈 답이 그대로 TTS 로 가면 안 된다.** gpt-5.5 가 추론 토큰으로 예산(TOKENS)을
+    # 다 써서 본문 0자를 낸 적이 있다. 예외가 아니라 정상 응답이라 폴백 카운터에도
+    # 안 잡혔다. 여기서 올려 Raon 으로 되돌리고 세어지게 한다.
+    out = (out or "").strip()
+    if not out:
+        raise RuntimeError(f"{model} 이 빈 답을 냈다 (추론 토큰이 예산을 먹었을 수 있다)")
+    return out
+
+
+def answer_for(session, msgs, tries=2, must_hedge=False, heard=""):
     """답변을 뽑되, 앞선 답변과 마지막 문장이 겹치면 한 번 더 뽑는다.
 
     실측에서 16턴부터 20턴까지 "면접 끝나면 연락해."가 다섯 턴 연속 붙었다. 모델이
@@ -830,8 +1217,29 @@ def answer_for(session, msgs, tries=2):
     때만 본다. 다시 뽑을 때는 온도를 올려야 같은 것이 또 나오지 않는다."""
     prev = [_tail(m["content"]) for m in HIST.get(session, []) if m["role"] == "assistant"]
     a = ""
+    # **예산을 늘리지 마라.** 꼬리고착 때문에 tries 를 하나 올렸더니 95턴 대본에서
+    # CUDA OOM 이 났다(상한 66.48GB). 다시 뽑기 한 번이 그만큼 무겁다.
+    # 대신 마지막 회에는 얼버무림 검사를 건너뛰어 꼬리 검사가 반드시 한 번은 돌게 한다.
     for i in range(tries):
-        a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        llm = DBG["llm"]
+        if llm == "raon":
+            a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        else:
+            try:
+                a = openai_answer(_as_text(msgs, heard), llm)
+            except Exception as e:
+                DBG["llm_fallbacks"] += 1
+                print(f"[{session}] {llm} 실패, Raon 으로 되돌린다 — {e}", flush=True)
+                a = S["pipe"].chat(msgs, max_new_tokens=TOKENS, temperature=CHAT_TEMP + 0.3 * i)
+        # 모른다고 판정됐는데 얼버무리지 않으면 다시 뽑는다.
+        # 마지막 회에는 검사를 건너뛴다 — 예산을 나눠 쓰면 꼬리 반복 검사가 굶는다.
+        if i < tries - 1:
+            if must_hedge and DBG["hedge_regen"] and not HEDGED.search(a):
+                print(f"[{session}] 모른다 판정인데 안 얼버무렸다, 다시 뽑는다 — {a[:40]!r}", flush=True)
+                continue
+            if DBG["cheer_regen"] and CHEER.search(a):
+                print(f"[{session}] 격려 클리셰, 다시 뽑는다 — {a[:40]!r}", flush=True)
+                continue
         t = _tail(a)
         if not REGEN or not prev or len(t) < 8:
             return a
@@ -897,7 +1305,7 @@ async def chat_ep(text: str = Form(...), session: str = Form("default"),
         t0 = time.time()
         note = JUDGE_NOTE if unknown(session, text) else ""
         msgs = build_msgs(session, {"role": "user", "content": text}, note)
-        answer = answer_for(session, msgs)
+        answer = answer_for(session, msgs, must_hedge=bool(note))
         record(session, text, answer)
         # 여기만 동기로 적립한다. 계측기가 쓰는 길이라 이번 응답에 결과가 실려야
         # 하고, 글 경로에는 합성이 없어 첫 소리 지연에 영향을 주지 않는다.
@@ -917,7 +1325,7 @@ async def _record_history(session: str, path: str, answer: str):
     """응답을 보낸 뒤 사용자 발화를 받아적어 히스토리를 채운다."""
     try:
         async with LOCK:
-            heard = S["pipe"].stt(path)
+            heard = stt(path)
             record(session, heard, answer)
             learn(session, heard)       # 이미 응답을 보낸 뒤라 미룰 것이 없다
         print(f"[{session}] (후처리) {heard!r}", flush=True)
@@ -945,17 +1353,22 @@ async def talk(background: BackgroundTasks, file: UploadFile = File(...),
     # 답을 만들기 전에 글이 있어야 하므로, 자막을 안 보내더라도 먼저 받아적는다.
     # 묶어 두면 자막 스위치 하나가 지어내기 27/36 을 되살린다 — 운영자 화면에서
     # 끌 수 있는 스위치라 더 위험하다.
-    early = want_heard or JUDGE
+    #
+    # **밖의 답변 LLM 을 쓰면 받아적기가 선택이 아니다.** 그쪽은 소리를 못 받아서
+    # 글이 없으면 답을 아예 못 만든다. 2026-09-07 헤드셋 시연에서 자막을 끈 채로
+    # 여덟 턴을 갔더니 여덟 번 다 Raon 으로 되돌아갔다 — 화면에는 답이 나오니
+    # 아무도 몰랐고, 로그를 봐야 보였다. 판정기만 보던 조건을 넓힌다.
+    early = want_heard or JUDGE or need_heard()
     deferred = False
     try:
         async with LOCK:
             pipe, t0 = S["pipe"], time.time()
-            heard = pipe.stt(p) if early else ""
+            heard = stt(p) if early else ""
             t1 = time.time()
             note = JUDGE_NOTE if unknown(session, heard) else ""
             msgs = build_msgs(session, {"role": "user",
                                         "content": [{"type": "audio", "audio": p}]}, note)
-            answer = answer_for(session, msgs)
+            answer = answer_for(session, msgs, must_hedge=bool(note), heard=heard)
             t2 = time.time()
             data, _ = synth(answer, sess_voice(session))
             t3 = time.time()
@@ -991,17 +1404,18 @@ async def talk_stream(file: UploadFile = File(...), session: str = Form("default
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
         t.write(raw); p = t.name
 
-    # 자막을 안 보내더라도 판정기가 켜져 있으면 먼저 받아적는다 — /talk 주석 참고.
-    early = want_heard or JUDGE
+    # 자막을 안 보내더라도 판정기나 밖의 LLM 이 글을 필요로 하면 먼저 받아적는다
+    # — /talk 주석 참고.
+    early = want_heard or JUDGE or need_heard()
 
     # 답변 텍스트는 헤더로 먼저 나가야 하므로 여기서 확정한다
     async with LOCK:
         pipe, t0 = S["pipe"], time.time()
-        heard = pipe.stt(p) if early else ""
+        heard = stt(p) if early else ""
         note = JUDGE_NOTE if unknown(session, heard) else ""
         msgs = build_msgs(session, {"role": "user",
                                     "content": [{"type": "audio", "audio": p}]}, note)
-        answer = answer_for(session, msgs)
+        answer = answer_for(session, msgs, must_hedge=bool(note), heard=heard)
         if early:
             record(session, heard, answer)
         t1 = time.time()
