@@ -749,7 +749,7 @@ PlayerSettings:
   webGLPowerPreference: 2
   scriptingDefineSymbols:
     Android: ISDK_OPENXR_HAND
-    Standalone: ISDK_OPENXR_HAND
+    Standalone: ISDK_OPENXR_HAND;MOREMOUNTAINS_NICEVIBRATIONS_INSTALLED
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend: {}
