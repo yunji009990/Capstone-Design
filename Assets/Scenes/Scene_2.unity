@@ -54378,6 +54378,16 @@ MonoBehaviour:
   applyPoseAnimation: 1
   freezePose: 1
   freezeTimeSec: 0
+  generateMipMaps: 1
+  anisotropicFilterLevel: 8
+  sanitizeMaterials: 1
+  metallic: 0
+  roughness: 0.85
+  dropMetallicRoughnessMap: 1
+  normalStrength: 0.5
+  occlusionStrength: 0.3
+  albedoBrightness: 1
+  killEmissive: 1
   retryIntervalSec: 3
   maxWaitSec: 0
   loadingIndicator: {fileID: 0}
