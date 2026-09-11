@@ -749,7 +749,7 @@ PlayerSettings:
   webGLPowerPreference: 2
   scriptingDefineSymbols:
     Android: ISDK_OPENXR_HAND
-    Standalone: ISDK_OPENXR_HAND
+    Standalone: ISDK_OPENXR_HAND;COZY_WEATHER;COZY_3_AND_UP;COZY_URP
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend: {}
