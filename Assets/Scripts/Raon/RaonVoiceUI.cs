@@ -15,6 +15,8 @@ public class RaonVoiceUI : MonoBehaviour
 
     [Header("상태")]
     [SerializeField] private Image statusDot;
+    /// <summary>상태 점. 상태가 바뀔 때 연출(ExperienceCues)이 살짝 튕긴다.</summary>
+    public Image StatusDot => statusDot;
     [SerializeField] private TMP_Text statusLabel;
     [SerializeField] private TMP_Text messageLabel;
 

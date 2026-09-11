@@ -128,6 +128,8 @@ public class PersonaSpawner : MonoBehaviour
 
     // ── 내부 상태 ──────────────────────────────────────────────
     GameObject _spawnedInstance;
+    /// <summary>지금 서 있는 인물. 아직 안 받았으면 null. 연출이 얼굴 위치를 재는 데 쓴다.</summary>
+    public GameObject Spawned => _spawnedInstance;
     string _loadedSession = "";      // 이미 띄운 세션. 인물이 바뀔 때만 다시 받는다.
     bool _isLoading;
 
