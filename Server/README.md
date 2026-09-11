@@ -78,18 +78,19 @@ B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 
 이 함정에 2026-09-04 하루에만 세 번 빠졌다. 판정기 온도·머리글·창을 순차로 재서
 잘못 기각했다가 교대로 다시 재서 뒤집었다.
 
-## 서버는 둘입니다 (2026-09-07 부터)
+## 서버는 셋입니다 (웹까지 2026-09-09 부터)
 
 **Raon 은 받아적기와 목소리 복제만 하고, 답변 글은 따로 올린 LLM 이 만듭니다.**
 근거는 `docs/음성대화_작업현황.md` §6 「0순위 — 답변 LLM 을 밖으로 뺀다」.
 
 ```
-포트 8000   Raon        받아적기 · 판정 · 적립 · 목소리 복제
-포트 8001   vLLM        답변 글 (google/gemma-4-31B-it-qat-w4a16-ct)
+포트 8000   Raon        받아적기 · 판정 · 적립 · 목소리 복제   ~/server
+포트 8001   vLLM        답변 글 (gemma-4-31B-qat)             ~/vllm_start.sh
+포트 8500   등록 웹      설문 · 참조음성 · 인물 등록            ~/webapp
 ```
 
 **기동 순서가 있습니다 — vLLM 을 먼저, Raon 을 나중에.** Raon 이 뜰 때
-`RAON_LLM_URL` 을 한 번 읽기 때문입니다.
+`RAON_LLM_URL` 을 한 번 읽기 때문입니다. 웹은 아무 때나 됩니다.
 
 ```bash
 # 1) 답변 LLM. **별도 venv 입니다** — Raon 의 venv 에 vLLM 을 넣으면
@@ -97,13 +98,40 @@ B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 
 cd ~; MODEL=/home/crc_unity/models/gemma-4-31B-qat   nohup ./vllm_start.sh > vllm.log 2>&1 &
 #    1~2분 걸립니다. curl http://127.0.0.1:8001/v1/models 로 확인
 
-# 2) Raon
-cd ~/server
-RAON_JUDGE=0 RAON_LLM_URL=http://127.0.0.1:8001/v1/chat/completions RAON_LLM_EXTRA='{"chat_template_kwargs":{"enable_thinking":false}}' ./start.sh
+# 2) Raon. **손으로 붙이던 값들은 start.sh 기본값으로 옮겼습니다** (2026-09-07).
+#    전에는 RAON_JUDGE=0 RAON_LLM_URL=... 을 앞에 붙여야 했는데, 그러면
+#    재시작 한 번에 Raon + 판정기로 조용히 되돌아갑니다. 실제로 그렇게 죽었습니다.
+cd ~/server && ./start.sh
 
-# 3) 답변 LLM 고르기 (재시작 없이 바뀝니다)
-curl -H "X-Token: $TOK" -F key=llm -F value=exaone http://127.0.0.1:8000/dbg
+# 3) 등록 웹
+cd ~/webapp && ./web_start.sh      # -> http://220.69.208.201:8500
 ```
+
+**되돌리려면 셋을 같이** — `RAON_LLM=raon RAON_JUDGE=1 RAON_MEM_FRACTION=0.70 ./start.sh`.
+하나만 되돌리면 죽거나 지어냅니다.
+
+### 등록 웹 (2026-09-09 에 옮겨왔습니다)
+
+전에는 체험장 PC 에서 띄웠습니다. 새로 받은 사람이 파이썬·의존성·`.env` 를
+저마다 갖춰야 해서 「서버가 안 켜진다」가 반복됐습니다.
+
+**옮길 수 있었던 이유는 이 웹이 마이크를 안 쓰기 때문입니다.** 음성·영상을
+파일로 올리는 구조라 https 가 필요 없습니다. **브라우저 녹음을 넣게 되면 그때는
+인증서를 붙여야 합니다** — 크롬은 localhost 아닌 http 에서 마이크를 막습니다.
+
+```
+~/webapp/Web/       app.py · persona.py · static · assets · .env(600)
+~/webapp/Survey/    core/  (설문 DB · 저장 · 3D 작업)
+~/venv/web/         전용 venv
+```
+
+- **`RAON_URL` 이 localhost 입니다.** 같은 기계라 교내망을 건너갈 이유가 없습니다
+- **화자 분리는 안 됩니다.** `nemo_env`(1.8GB, 윈도우 경로)가 없어서
+  「한 명 (분리 안 함)」으로만 등록됩니다
+- **`TRIPO_API_KEY` 는 비워 뒀습니다.** 공용 기계라 결제 키를 상주시키지
+  않습니다. `POST /admin/tripo` 나 유니티 창에서 넣고 지웁니다(재시작 불필요)
+- **관리자 비밀번호를 기본값에서 바꿨습니다.** 교내망 전체에 열리는데
+  `/admin` 이 참여자 사진·목소리의 내려받기와 삭제를 쥐고 있습니다
 
 - `--served-model-name exaone` 이라 이름이 `exaone` 이지만 **올라가는 것은 `MODEL` 이
   가리키는 모델**입니다. 시험하며 갈아끼우려고 이름을 고정해 뒀습니다
