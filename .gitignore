@@ -119,3 +119,6 @@ Server/dialogue.log
 Server/dialogue.pid
 Server/*.env
 Server/*.pid
+
+# COZY 데모 씬·에셋 (108MB, 76MB 짜리 씬 하나 포함). 참고용이라 안 올린다 — 필요하면 에셋 스토어에서 다시 임포트
+/Packages/com.distantlands.cozy.core/Content/Demo/
