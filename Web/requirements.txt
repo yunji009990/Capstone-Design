@@ -1,0 +1,10 @@
+# Registration web environment observed on Python 3.12.3, 2026-09-13.
+# Speaker extraction's NeMo environment remains separate; it is not needed for Tripo development.
+fastapi==0.141.1
+uvicorn==0.52.4
+python-multipart==0.0.32
+httpx==0.28.1
+numpy==2.5.3
+scipy==1.18.1
+librosa==1.0.0
+soundfile==0.14.0

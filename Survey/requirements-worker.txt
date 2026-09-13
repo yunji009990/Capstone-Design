@@ -1,0 +1,2 @@
+# Tripo requests and GLB delivery. No GPU, web UI, or dialogue dependencies.
+httpx==0.28.1

@@ -1,0 +1,8 @@
+# -*- coding: utf-8 -*-
+# 모의 검사 전용. 모델·GPU·음성 인식 엔진 설치 없이 실행한다.
+fastapi==0.128.8
+httpx==0.28.1
+numpy==2.0.2
+webrtcvad-wheels==2.0.14
+python-multipart==0.0.32; python_version >= '3.10'
+python-multipart==0.0.20; python_version < '3.10'

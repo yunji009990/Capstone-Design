@@ -89,10 +89,13 @@ crashlytics-build.properties
 # 프롬프트 시험 산출물 (질문 음성·답변 기록)
 /tools/_work/
 tools/__pycache__/
+tools/tests/__pycache__/
 
 # 설문 앱 — 실제 참가자 자료와 API 키는 저장소에 넣지 않는다
 /Survey/data/
 Survey/core/__pycache__/
+Survey/tests/__pycache__/
+Survey/__pycache__/
 Web/__pycache__/
 
 # MCP 스크린샷 (일회성)
@@ -100,7 +103,19 @@ Web/__pycache__/
 
 # 하네스 — 서브에이전트 결과 수거함
 /.claude/work/
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
 
 # 청취 판정용 합성 결과. **실존 인물의 복제 음성이라 커밋하지 않는다.**
 /들어볼것/
 /들어볼것2/
+
+# 실시간 텍스트 대화 개발 환경·모델·실험 기록
+/.venv-dialogue/
+/.dialogue-work/
+Server/**/__pycache__/
+Server/dialogue.env
+Server/dialogue.log
+Server/dialogue.pid
+Server/*.env
+Server/*.pid

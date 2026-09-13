@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import shutil
+import os
 from pathlib import Path
 
-ASSETS_ROOT = Path(__file__).resolve().parent.parent / "data" / "sessions"
+ASSETS_ROOT = Path(os.environ.get("SURVEY_DATA_DIR") or Path(__file__).resolve().parent.parent / "data") / "sessions"
 
 # 찾을 때 쓰는 확장자 목록. 저장은 웹 백엔드가 직접 한다(`_record_and_model`).
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}

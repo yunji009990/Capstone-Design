@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sessions.db"
+DATA_ROOT = Path(os.environ.get("SURVEY_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
+DB_PATH = DATA_ROOT / "sessions.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
