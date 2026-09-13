@@ -1,168 +1,116 @@
-# Raon 음성 서버 (사본)
+# 다시, 봄 — 서버
 
-이 폴더는 **실제로 돌아가는 서버가 아니라 백업 겸 버전 관리용 사본**입니다.
+대화 AI 담당의 시작 문서는 [대화 AI 개발 가이드](../docs/대화_AI_개발가이드.md)다.
+기본 모의 검사는 `python tools/check.py --area dialogue`, 검사 전용 의존성은 `requirements-test.txt`다.
+검사 환경 선택과 결과 파일은 [공통 하네스](../docs/AI_하네스.md)를 따른다.
+등록·테스트 인물의 공통 규칙은 `gemma4_dialogue_v1`이다.
+[Gemma 4 프롬프트·비교 결과](../docs/Gemma4_대화프롬프트.md)에 변경 이유, 적용 경로, 재실행 방법이 있다.
 
-실 서버는 여기서 동작합니다:
+2026-09-12 웹·등록·Tripo와 대화 AI의 실행 환경·배포 경로·인물 정보 접근을 분리했다.
+현재 운영 명령과 검증 결과는 [웹·Tripo·대화 AI 서비스 분리](../docs/웹_Tripo_대화AI_서비스_분리.md)를 참고한다.
 
-```
-crc_unity@220.69.208.201:~/server        # 교내망 전용
-```
+2026-09-10부터 등록·대화·LLM·TTS를 별도 프로세스로 실행한다. Raon은 제거했다.
+2026-09-11 현재 TTS는 비활성화·프로세스 종료 상태이며 텍스트 답변으로 판정기를 검증한다.
+[텍스트 검사 결과·재실행](../docs/판정기_텍스트_검사.md)을 참고한다.
+전체 설계는 [서버 음성 대화 구조](../docs/서버_음성대화_구조.md),
+과거 실험은 [Raon 작업 이력](../docs/Raon_작업이력_보관.md)을 참고한다.
 
-Unity 클라이언트(`Assets/Scripts/Raon/`)와 짝을 이루므로 같은 리포지토리에 둡니다.
-서버 쪽을 고치면 이 폴더에도 반영해 커밋해야 둘의 버전이 어긋나지 않습니다.
+| 포트 | 서비스 | 환경 | 역할 |
+|---|---|---|---|
+| 8000 | session | `~/venv/registration` | 웹 영역의 CPU 인물·참조 WAV·3D 자료 관리 |
+| 8001 (loopback) | vLLM | `~/venv/vllm` | 기존 Gemma, API 이름 `exaone` |
+| 8002 | dialogue | `~/venv/dialogue` | CPU SenseVoiceSmall·VAD·상황·일반/추론 분류·중단 |
+| 8003 (loopback, 현재 중지) | tts | `~/venv/qwentts` | 선택 기능: Qwen3-TTS 1.7B Base / 참조 목소리·말투 복제 |
+| 8500 | web | `~/venv/web` | 등록 웹, 코드 위치 `~/webapp` |
+| 없음 | tripo | `~/venv/tripo` | 별도 CPU 작업자, SQLite 작업 복구·Tripo 요청·GLB 전달 |
 
-## 파일
+웹·Tripo 실행 코드: `~/webapp`. 등록 API: `~/webapp/Server/registration`.
+대화 AI 실행 코드: `~/capstone-server`. 인물 원본: `~/server/sessions`. STT: `~/dialogue-models/sensevoice`.
+대화 AI는 인물 원본 폴더를 직접 읽지 않고 등록 API를 조회한다.
+Qwen 가중치는 Hugging Face 캐시에 있다. TTS가 Gemma 환경을 변경하거나 중복 로드하지 않는다.
+서버는 공용 GPU이므로 다른 사용자의 프로세스를 종료하면 안 된다.
 
-| 파일 | 설명 |
-|---|---|
-| `app.py` | FastAPI 서버. `/talk`, `/talk_stream`, `/tts`, `/stt`, `/reset`, `/health` |
-| `modeling_raon.patch` | 모델 파일(`modeling_raon.py`)에 넣은 프레임 단위 스트리밍 훅 |
-| `start.sh` / `stop.sh` / `status.sh` | 기동 · 종료 · 상태 확인 |
-| `vllm_start.sh` | **답변 LLM 서버(포트 8001).** 이 기계의 함정 다섯이 주석에 있다 |
-| `*.bak` | 우리가 손대기 전 원본 |
+## 시작·종료·상태
 
-**기본 인물도 기본 음성도 없습니다.** 인물은 웹(`Web/`)에서만 등록되고, 등록되지
-않은 세션으로 들어온 요청은 **409** 로 거절합니다. 폴백을 두면 등록을 잊었을 때
-오류가 아니라 엉뚱한 목소리로 답해서 코드 결함처럼 보입니다 — 실제로 한 번 겪었습니다.
-
-## 환경변수
-
-**두 가지가 섞이지 않게 나눠 적는다.** `start.sh` 가 직접 설정하는 것과, 설정하지 않아서
-`app.py` 의 기본값이 그대로 쓰이는 것은 다르다. 뒤엣것을 바꾸려면 앞에 붙여 띄운다
-(`RAON_MAX_TURNS=20 ./start.sh`).
-
-### `start.sh` 가 설정하는 것
-
-| 변수 | 값 | 설명 |
-|---|---|---|
-| `RAON_VERIFY` | `0` | 합성 검증. 끄면 약 0.5초 빨라지고 20회 중 1회 미만으로 품질 불량이 통과 |
-| `RAON_CONT` | `1` | 참조의 억양·속도까지 복제(`tts_continuation`). 참조가 10초 미만이면 깨지므로 그럴 땐 `0` |
-| `RAON_MEM_FRACTION` | `0.70` | 이 프로세스가 쓸 GPU 비율(=66.9GB). `0.60`(57.4GB)은 긴 대화에서 넘쳤다 |
-| `RAON_TEMP` | `1.6` | **소리** 온도. 코드 기본값 `1.2` 면 「국어책 읽는 느낌」이 남는다 |
-| `RAON_CONT_SILENCE` | 비움 | 생성 초반 무음 프레임. 비우면 모델 기본값 `2`. **`0` 이면 참조가 통째로 샌다** |
-| `RAON_TOKEN` | — | 클라이언트(Unity·`Web/app.py`)의 값과 같아야 한다. 다르면 `401` |
-| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | **오래 켜 두면 VRAM 이 기어오른다.** 세션마다 `/reset` 을 해도 그렇다 — 켜 둔 시간이 쌓이는 것이다. 같은 부하 6회에 39.8 → 66.1GB(OOM) 이던 것이 39.8 → 52.9GB 로 끝난다. 중간에 내려가기도 한다 |
-
-### 코드 기본값 — `start.sh` 에 없다
-
-| 변수 | 기본 | 설명 |
-|---|---|---|
-| `RAON_COMPILE` | `1` | `code_predictor`에 `torch.compile`. 약 0.66초 단축 |
-| `RAON_FRAME_CHUNK` | `8` | 스트리밍 전송 단위(프레임). 8이면 0.64초 분량 |
-| `RAON_ANSWER_TOKENS` | `200` | 답변 최대 토큰 |
-| `RAON_MAX_TURNS` / `_KEEP_TURNS` | `30` / `3` | 유지할 대화 턴 수. **함부로 올리지 말 것** — 54턴에 60.8GB, 70턴에 OOM |
-| `RAON_CHAT_TEMP` | `0.7` | **답변 글** 온도. 위 `RAON_TEMP`(소리)와 다른 것 |
-| `RAON_JUDGE` / `_TURNS` | `1` / **`0`** | 답을 뽑기 전에 아는 것인지 먼저 묻는다. **`_TURNS` 는 2026-09-04 에 3 → 0.** 판정기에 최근 대화를 붙이면 아는 것도 모른다고 한다 — 답이 사전지식에 글자 그대로 있는 물음에서 교대 측정으로 `3` 은 1/12, `0` 은 7/12. 원래 넣은 근거(이어 묻는 말)는 지금 `BACKREF` 가 건너뛰기로 처리한다. 되돌리려면 `3` |
-| `RAON_JUDGE_R45` | **`4`** | 판정기 끝의 「없다」 규칙 둘. **겹치면 사건을 묻는 열린 물음을 통째로 죽인다** — 「월미도에서 뭐 했어?」가 0/10. 하나만 남기면 어느 쪽이든 10/10 이다. `4`=때 규칙만(잰 모든 축에서 최선) · `3`=전제 규칙만 · `1`=둘 다(옛 기본) · `0`=둘 다 끔 · `2`=둘 다+우선순위줄 |
-| `RAON_HEDGE_REGEN` | **`1`** | 모른다고 판정됐는데 답이 얼버무리지 않으면 다시 뽑는다. 판정은 맞는데 모델이 무시하는 일이 잦았다(10/10 판정에 6/10 지어냄). 교대 측정 지어내기 평균 12.7 → **6.2**. 모른다 턴에서만 돌고 응답이 1.03 → 1.66초(최대 2.47) |
-| `RAON_LEARN` / `_CHARS` / `_MIN` | `1` / `600` / `8` | 사용자가 말한 사실을 적립 |
-| `RAON_LEARN_MODE` | **`json`** | 적립을 근거(evidence) 붙인 JSON 으로 받는다. **2026-09-04 에 `line` 에서 바꿨다** — 줄 단위는 모델이 지시문을 베끼거나 발화를 되풀이해서 필터가 다 걸러냈다(날 출력 12건 중 9건). 두 사실 모두 적립이 1/6 → **8/8**. 되돌리려면 `line` |
-| `RAON_LEARN_RAW` / `RAON_JUDGE_RAW` | `0` / `0` | `1` 이면 적립·판정에 들어가고 나오는 **날 글**을 로그에 찍는다. 모델이 빈손인지 필터가 버린 건지 갈릴 때 쓴다 |
-| `RAON_SUMMARY` / `_CHARS` | `0` / `600` | 요약. **켜지 말 것** — 기억이 62/64 → 50/64 로 무너진다 |
-| `RAON_REGEN_SIM` | `0.6` | 앞 답변과 꼬리가 이만큼 닮으면 다시 뽑는다 |
-| `RAON_RAS` / `_WINDOW` / `_THRESHOLD` | `1` / `100` / `0.35` | 반복 루프 억제. 실측 최적값이 곧 코드 기본값 |
-| `RAON_REF_TEXT` | `1` | 참조 음성 전사를 `tts_continuation` 에 넘긴다. `0` 은 빈 글을 넘기는 시험용 |
-
-값의 근거는 [`docs/음성대화_작업현황.md`](../docs/음성대화_작업현황.md) §5.
-**2026-09-04 에 바꾼 다섯은 아직 그 문서에 안 들어갔다** — 위 표가 최신이다.
-
-## 시험용 손잡이 — `POST /dbg`
-
-재시작 없이 바꾼다. `{"key": "...", "value": "..."}` 를 폼으로 보내고 `X-Token` 이 필요하다.
-바꿀 수 있는 것: `judge_temp` · `judge_turns` · `judge_head` · `judge_r45` · `learn_mode` · `hedge_regen`.
-
-**왜 필요한가 — 순차 측정은 못 믿는다.** 판정이 회차마다 크게 흔들려서, A 를 다 돌고
-B 를 돌면 그 드리프트가 효과로 읽힌다. 같은 프로세스에서 9/10 다음에 3/10 이 나온 적이
-있다. **두 조건을 회차마다 번갈아 걸어야** 가른다. 도구는 `.claude/work/ab.py`.
-
-이 함정에 2026-09-04 하루에만 세 번 빠졌다. 판정기 온도·머리글·창을 순차로 재서
-잘못 기각했다가 교대로 다시 재서 뒤집었다.
-
-## 서버는 셋입니다 (웹까지 2026-09-09 부터)
-
-**Raon 은 받아적기와 목소리 복제만 하고, 답변 글은 따로 올린 LLM 이 만듭니다.**
-근거는 `docs/음성대화_작업현황.md` §6 「0순위 — 답변 LLM 을 밖으로 뺀다」.
-
-```
-포트 8000   Raon        받아적기 · 판정 · 적립 · 목소리 복제   ~/server
-포트 8001   vLLM        답변 글 (gemma-4-31B-qat)             ~/vllm_start.sh
-포트 8500   등록 웹      설문 · 참조음성 · 인물 등록            ~/webapp
-```
-
-**기동 순서가 있습니다 — vLLM 을 먼저, Raon 을 나중에.** Raon 이 뜰 때
-`RAON_LLM_URL` 을 한 번 읽기 때문입니다. 웹은 아무 때나 됩니다.
+각 서비스의 `.env.example`을 `.env`로 복사해 설정한다. 토큰은 Unity와 일치시키며 파일 권한은 600으로 둔다.
+TTS worker 토큰은 `tts.env`의 `TTS_TOKEN`과 `dialogue.env`의 `DIALOGUE_TTS_TOKEN`을 맞춘다.
+네트워크에 노출되는 두 서비스는 토큰이 없으면 시작 스크립트가 실행을 거부한다.
 
 ```bash
-# 1) 답변 LLM. **별도 venv 입니다** — Raon 의 venv 에 vLLM 을 넣으면
-#    transformers 버전이 꼬여 Raon 이 죽습니다.
-cd ~; MODEL=/home/crc_unity/models/gemma-4-31B-qat   nohup ./vllm_start.sh > vllm.log 2>&1 &
-#    1~2분 걸립니다. curl http://127.0.0.1:8001/v1/models 로 확인
-
-# 2) Raon. **손으로 붙이던 값들은 start.sh 기본값으로 옮겼습니다** (2026-09-07).
-#    전에는 RAON_JUDGE=0 RAON_LLM_URL=... 을 앞에 붙여야 했는데, 그러면
-#    재시작 한 번에 Raon + 판정기로 조용히 되돌아갑니다. 실제로 그렇게 죽었습니다.
-cd ~/server && ./start.sh
-
-# 3) 등록 웹
-cd ~/webapp && ./web_start.sh      # -> http://220.69.208.201:8500
+ssh raon bash /home/crc_unity/capstone-server/service.sh session start
+ssh raon bash /home/crc_unity/capstone-server/service.sh dialogue start
+ssh raon bash /home/crc_unity/capstone-server/service.sh dialogue status
+ssh raon bash /home/crc_unity/capstone-server/service.sh dialogue stop
 ```
 
-**되돌리려면 셋을 같이** — `RAON_LLM=raon RAON_JUDGE=1 RAON_MEM_FRACTION=0.70 ./start.sh`.
-하나만 되돌리면 죽거나 지어냅니다.
+신규 운영은 웹 영역의 `~/webapp/Server/platform.sh {web|session|tripo} {start|stop|status}`와
+대화 영역의 `~/capstone-server/dialogue.sh {api|tts} {start|stop|status}`를 사용한다.
+기존 `service.sh session`은 `service-paths.env`를 통해 웹 영역으로 연결한다.
+등록 설정은 `~/webapp/Server/session.env`, 대화 설정은 `~/capstone-server/dialogue.env`에 있다.
+`PERSONA_READ_TOKEN`과 `DIALOGUE_PERSONA_TOKEN`은 인물 조회 전용이며 Unity 접속 토큰과 별개다.
 
-### 등록 웹 (2026-09-09 에 옮겨왔습니다)
+Gemma는 기존 8001 프로세스를 사용한다. 꺼진 경우 `vllm_start.sh`를 별도로 실행한다.
+`start.sh`, `stop.sh`, `status.sh`는 CPU 등록 서비스의 호환 진입점이다.
+로그는 `session.log`, `dialogue.log`, `tts.log`. PID 파일의 명령행을 확인한 프로세스만 종료한다.
+재부팅 자동 시작은 설정하지 않았다.
 
-전에는 체험장 PC 에서 띄웠습니다. 새로 받은 사람이 파이썬·의존성·`.env` 를
-저마다 갖춰야 해서 「서버가 안 켜진다」가 반복됐습니다.
+TTS는 `DIALOGUE_TTS_URL=`이면 사용하지 않는다. 다시 사용하려면 URL을 `http://127.0.0.1:8003`으로
+설정하고 `service.sh tts start` 후 dialogue를 재시작한다. 두 서비스의 TTS 토큰은 일치해야 한다.
 
-**옮길 수 있었던 이유는 이 웹이 마이크를 안 쓰기 때문입니다.** 음성·영상을
-파일로 올리는 구조라 https 가 필요 없습니다. **브라우저 녹음을 넣게 되면 그때는
-인증서를 붙여야 합니다** — 크롬은 localhost 아닌 http 에서 마이크를 막습니다.
+`http://220.69.208.201:8002/health`의 `status=ready`, `llm_ready=true`를 확인한다.
+현재는 `mode=streaming_text`, `tts=false`다. 음성을 켜면 `mode=streaming_voice`, `tts_ready=true`여야 한다.
+`reasoning_ready`는 추론 경로 상태다.
+`prompt_version=gemma4_dialogue_v1`은 현재 적용한 공통 답변 규칙이다.
+의미 기반 끼어들기 활성화는 `interruption_policy=semantic_v1`로 확인한다.
+등록 API만 살아 있는 것을 음성 대화 준비 완료로 판단하지 않는다.
 
-```
-~/webapp/Web/       app.py · persona.py · static · assets · .env(600)
-~/webapp/Survey/    core/  (설문 DB · 저장 · 3D 작업)
-~/venv/web/         전용 venv
-```
+## 설치·배포
 
-- **`RAON_URL` 이 localhost 입니다.** 같은 기계라 교내망을 건너갈 이유가 없습니다
-- **화자 분리는 안 됩니다.** `nemo_env`(1.8GB, 윈도우 경로)가 없어서
-  「한 명 (분리 안 함)」으로만 등록됩니다
-- **`TRIPO_API_KEY` 는 비워 뒀습니다.** 공용 기계라 결제 키를 상주시키지
-  않습니다. `POST /admin/tripo` 나 유니티 창에서 넣고 지웁니다(재시작 불필요)
-- **관리자 비밀번호를 기본값에서 바꿨습니다.** 교내망 전체에 열리는데
-  `/admin` 이 참여자 사진·목소리의 내려받기와 삭제를 쥐고 있습니다
+등록 API는 `requirements-registration.txt`, Tripo 작업자는 `Survey/requirements-worker.txt`,
+대화 CPU 서비스는 `requirements-dialogue.txt`, TTS는 `requirements-tts.txt`를 사용한다.
+서버 검증 환경은 Python 3.12, TTS의 torch는 2.8.0+cu128이다.
+기존 vLLM 환경에 TTS 의존성을 설치하지 않는다. TTS의 `sdpa` 실행은 flash-attn 추가 설치를 요구하지 않는다.
+SenseVoice 모델 설치는 `setup_dialogue_models.py --help`를 참고한다.
 
-- `--served-model-name exaone` 이라 이름이 `exaone` 이지만 **올라가는 것은 `MODEL` 이
-  가리키는 모델**입니다. 시험하며 갈아끼우려고 이름을 고정해 뒀습니다
-- **`RAON_LLM_EXTRA` 로 추론을 끕니다.** 안 끄면 영어 사고가 답변에 그대로 섞여
-  TTS 로 읽힙니다
-- **vLLM 은 재부팅되면 안 뜹니다.** 자동 기동 절차는 아직 없습니다
-- **이 기계는 공용입니다** — `uc` 사용자가 6.2GB 를 상시 씁니다. 가용은 95GB 가 아니라 89GB
-
-**되돌리려면 셋을 같이 되돌립니다** — `DBG["llm"]=raon`, `RAON_JUDGE=1`,
-`RAON_MEM_FRACTION=0.70`. 하나만 되돌리면 죽거나 지어냅니다.
-
-## 서버를 새로 셋업하거나 복구할 때
-
-```bash
-# 1. 이 폴더 내용을 ~/server 로 복사
-# 2. 모델 파일에 스트리밍 훅 재적용
-patch ~/models/AX-K2-Raon-Speech/modeling_raon.py < ~/server/modeling_raon.patch
-rm -rf ~/hf_home/modules/transformers_modules/AX_hyphen_K2_hyphen_Raon_hyphen_Speech
-# 3. 기동 (위 「서버는 둘입니다」 순서대로)
+```powershell
+python tools/service_bundle.py platform
+python tools/service_bundle.py dialogue
 ```
 
-2번의 캐시 삭제가 중요합니다. transformers는 `trust_remote_code` 파일을
-`hf_home/modules/` 로 복사해서 쓰기 때문에, 캐시를 지워야 수정본이 다시 복사됩니다.
+영역별 명시된 파일만 묶는다. platform 번들의 대상은 `~/webapp`, dialogue 번들의 대상은
+`~/capstone-server`다. 배포 전 현재 파일과 해시를 대조하고 백업한 뒤 해당 영역만 적용한다.
+전체 `Server/*.py`를 일괄 복사하는 방식은 사용하지 않는다. 환경 파일·자료·모델은 번들에 포함하지 않는다.
 
-## 주의사항
+코드 복사 후 해당 서비스만 종료·시작하고 `/health`와 로그를 확인한다.
+배포한 파일은 SHA256으로 로컬과 대조한다. `.env`, 음성, 세션, 로그는 커밋하지 않는다.
+다른 작업자의 수정이 있을 때 파일 전체를 덮어쓰지 말고 차이를 먼저 확인한다.
 
-- **`mode="reduce-overhead"`를 `torch.compile`에 쓰지 말 것.** 세그폴트로 서버가 죽습니다.
-  CUDA 그래프는 transformers 캐시의 in-place 변형 때문에 어차피 비활성화됩니다.
-- `./start.sh`를 `tail -f` 같은 포그라운드 명령과 `&&`로 묶지 말 것.
-  Ctrl-C 시 SIGINT가 서버까지 죽입니다. 두 명령을 따로 실행하세요.
-- 모델 라이선스는 **CC BY-NC 4.0** — 비상업적 용도만 가능하며,
-  실존 인물의 목소리를 참조 음성으로 쓰려면 사전 동의가 필요합니다.
+## API 호환과 변경
 
-전체 명세는 [`docs/RAON_UNITY_구현명세.md`](../docs/RAON_UNITY_구현명세.md) 참고.
+`/session/start`, `/session/current`, `/session/{sid}/model`, `/session/{sid}/model.glb`,
+`/session/end`는 8000에 유지한다. 등록은 GPU 예열·참조 재합성을 호출하지 않는다.
+8000의 구형 `/talk`, `/talk_stream`, `/chat`, `/tts`, `/stt`, `/reset`, `/mode`, `/dbg`는 폐기했다.
+현재 대화·초기화·끼어들기는 8002 WebSocket으로 처리한다.
+첫 `start` 메시지에 `interruption_policy="semantic_v1"`을 보내면 TTS 없이도 생성 중인 답변을 보류·판정한다.
+음성 출력 연결에서는 이 기능을 지원하는 최신 Unity가 필수다.
+발화 감지 시 답변을 보관하고 전사 후 기존 일반 LLM이 재개·수정·전환·대기·확인 질문을 판단한다.
+텍스트 입력 검사는 STT 이후 입력을 직접 구성한다. 판정기에는 미전달 초안을 넣지 않는다.
+규칙·출력 검증은 `interruption_policy.py`, HTTP 호출은 `realtime_llm.py`, 보류 상태는 `realtime_dialogue.py`에 있다.
+추가 모델 로드 없이 새 답변의 일반/추론 경로도 함께 고른다. 보류 최대 120초, 판정 최대 6.5초다.
+판정 중 다음 TTS 구절을 보류하지만 이미 진행 중인 GPU 계산을 일시정지하는 기능은 아니다.
+Web은 `SESSION_URL`, `SESSION_TOKEN`을 사용하고 하드코딩된 접속 토큰은 제거했다.
+
+TTS는 Base 모델의 ICL 모드로 참조 음성 코드·화자 임베딩·전사를 함께 사용한다.
+등록 체험은 해당 세션의 `voice.wav`를 자동으로 읽는다. 테스트 씬은 등록 음성 또는 임시 WAV를 선택한다.
+`POST /references`(multipart `voice`, 생략하면 현재 등록 음성), `GET /references/{id}/audio.wav`,
+`DELETE /references/{id}`는 8002의 인증된 참조 API다. 업로드는 테스트 모드에서만 허용한다.
+테스트 WebSocket `start`에 `reference_id`, `reference_text`를 전달하면 정확한 구간의 전사를 수정할 수 있다.
+참조는 3–12초 연속 구간으로 제한하고 그 구간만 SenseVoice로 전사한다. 원본은 변경하지 않는다.
+GPU 참조 프롬프트는 연결마다 한 번 만들고 구절마다 재사용하며 연결 종료 시 해제한다.
+임시 WAV는 메모리에 최대 8개, 30분 미사용 후 만료된다. 끊긴 준비 요청의 GPU 캐시는 최대 6시간 후 정리한다.
+
+현재 TTS는 문장별 합성 후 PCM 스트리밍이다. 모델 내부 토큰 단위 디코딩은 아직 없다.
+억양·운율은 참조를 조건으로 생성하며 문장별 높낮이와 길이를 동일하게 재현하는 기능은 아니다.
+`AI_Response_Test`에서는 키보드 질문과 마이크 입력을 각각 검사할 수 있다.
+키보드 질문은 STT를 거치지 않는다. 참조 전사 입력은 목소리 설정에 사용한다.
+사용법·검증: [AI 테스트 씬](../docs/AI_응답_테스트_씬.md).

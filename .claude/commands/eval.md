@@ -1,41 +1,20 @@
 ---
-description: 프롬프트 평가를 절차대로 돌린다. 대화를 먼저 재고 그다음 probe.
-argument-hint: <변형 이름>
-allowed-tools: Bash, Read, Glob
+description: 대화 AI의 기능 검사와 실제 여러 턴 품질 평가를 구분해 실행한다.
+argument-hint: <기능 검사 또는 품질 평가 대상>
+allowed-tools: Bash, Read, Grep, Glob
 ---
 
-변형: $ARGUMENTS
+대상: $ARGUMENTS
 
-## 순서를 어기지 말 것
+`AGENTS.md`, `docs/대화_AI_개발가이드.md`, `docs/AI_하네스.md`를 먼저 읽는다.
 
-**반드시 대화부터 잰다.** `--probe` 는 물음을 하나씩 떼어 묻기 때문에 **대화 안에서만 나는
-결함을 못 본다.** 2026-08-28 에 판정기와 적립을 붙이며 세 번 망가뜨렸고 **셋 다 probe
-로는 안 보였다** — 앵무새(기억 1/8), 이어 묻는 말 놓침, 판정기가 아는 것까지 막기(기억 52%).
+- 기능 검사: `python tools/check.py --area dialogue`. 모의 STT/LLM/TTS·인물 API 계약 검사다.
+- 판정기 실제 모델 검사: `tools/eval_turn_judge.py`. 설정과 사례·결과 해시는 `docs/판정기_텍스트_검사.md`를 따른다.
+- 실제 응답/Unity 연결: `docs/AI_응답_테스트_씬.md`의 텍스트 검사 메뉴를 사용한다.
+- 대화 품질: 새 테스트 연결에서 임시 인물·상황·기록을 유지하며 여러 턴을 비교한다.
+  알려준 사실, 모르는 사실, 말투, 앞선 답변 일관성, 수정·전환·대기를 함께 평가하고 원문과 판정 근거를 남긴다.
 
-probe 숫자만 보면 셋 다 좋아 보인다. 기억이 무너지면 지어내기를 아무리 잡아도 대화 자체가 안 된다.
-
-## 1단계 — 대화 (20턴)
-
-```bash
-RAON_EVAL_VOICE=<참조.wav> python "C:/Users/user/Documents/GitHub/Capstone-Design/tools/prompt_eval.py" $ARGUMENTS -n 4
-```
-
-## 2단계 — 지어내기 (1단계가 정상일 때만)
-
-```bash
-RAON_EVAL_VOICE=<참조.wav> python "C:/Users/user/Documents/GitHub/Capstone-Design/tools/prompt_eval.py" $ARGUMENTS --probe -n 6
-```
-
-## 읽는 법
-
-- **최소 4회차.** 같은 설정을 다섯 번 돌렸더니 4, 4, 8, 17, 6 이 나왔다. 단발로 결론 내지 말 것
-- **소리는 안 잰다.** 지지직·억양·속도는 사용자의 귀로 판정한다. 들을 파일은 `들어볼것\` 에 모은다
-- 변형 파일은 `C:/Users/user/Documents/GitHub/Capstone-Design/tools/prompts/<이름>.{persona,knowledge,rules}.md` 셋이다
-
-## 끝나고 반드시 알릴 것
-
-**서버의 등록 인물이 `eval` 로 바뀐다.** 시연 전에 웹에서 다시 등록해야 한다는 것을
-사용자에게 알린다.
-
-참조 음성은 실존 인물 목소리라 저장소에 없다. **글로만 잴 때는 아무 wav 나 된다** —
-`/chat` 은 합성을 안 하므로 잡음 12초짜리면 등록 형식을 통과한다.
+기능 검사·분류 일치율·대화 품질·실제 마이크 성능을 서로의 통과 근거로 사용하지 않는다.
+TTS는 꺼 둔다. 공유 서버의 현재 등록 인물을 평가용으로 교체하지 않는다.
+실제 모델 평가가 요청되지 않은 단순 기능 검사에서 운영 LLM·유료 공급자를 자동 호출하지 않는다.
+구형 `/chat`, `/talk`, `tools/prompt_eval.py`와 Raon 실행기는 사용하지 않는다.
