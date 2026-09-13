@@ -46504,7 +46504,7 @@ GameObject:
   - component: {fileID: 1370936790}
   - component: {fileID: 1370936791}
   m_Layer: 0
-  m_Name: RaonVoice
+  m_Name: DialogueVoice
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

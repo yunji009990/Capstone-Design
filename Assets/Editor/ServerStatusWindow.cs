@@ -1,19 +1,3 @@
-// ServerStatusWindow.cs — 두 서버의 상태를 한 창에서 보고, 등록 화면을 연다.
-//
-// 체험을 하려면 서버가 둘 다 살아 있어야 한다. 웹만 떠 있으면 9단계 등록에서 막히고,
-// Raon 만 떠 있으면 등록할 방법이 없다. 매번 터미널과 브라우저를 오가며 확인하는 대신
-// 한 창에 모았다.
-//
-// **둘 다 여기서 못 켠다.** 교내망의 같은 기계에서 손으로 띄운다
-// (`~/server/start.sh` 와 `~/webapp/web_start.sh`).
-//
-// 웹은 2026-09-09 에 그 서버로 옮겼다. 전에는 이 PC 에서 띄웠는데, 새로 받은
-// 사람은 파이썬·의존성·.env 를 다 갖춰야 해서 「서버가 안 켜진다」가 반복됐다.
-// 여기 있던 「서버 켜기」가 `python` 을 그냥 불렀고, 그 이름이 어느 파이썬을
-// 가리킬지는 기계마다 다르다. 이제 주소만 열면 된다.
-//
-//   메뉴: Tools > 서버 연결 상태 확인
-
 using System;
 using System.Net.Sockets;
 using UnityEditor;
@@ -23,9 +7,9 @@ using UnityEngine.Networking;
 public class ServerStatusWindow : EditorWindow
 {
     const int Port = 8500;
-    // 웹도 Raon 과 같은 기계에 있다. localhost 가 아니다.
+    // 웹도 Session 과 같은 기계에 있다. localhost 가 아니다.
     const string Url = "http://220.69.208.201:8500";
-    const string RaonFallback = "http://220.69.208.201:8000";
+    const string SessionFallback = "http://220.69.208.201:8000";
     const double AutoRefreshSec = 5;
 
     static readonly Color Green = new Color(0.35f, 0.75f, 0.42f);
@@ -47,13 +31,11 @@ public class ServerStatusWindow : EditorWindow
     class Health
     {
         public string status;
-        public float vram_gb;
-        public int uptime_sec;
-        public int sessions;
+        public string device;
+        public float uptime_sec;
         public int registered;
         public string current;
         public bool ready_to_talk;
-        public bool cont;
     }
 
     [Serializable]
@@ -69,20 +51,20 @@ public class ServerStatusWindow : EditorWindow
     string _adminPw = "";
     string _saved;              // 보낸 직후 안내
     bool _busy;                 // 보내는 동안 단추를 막는다
-    Health _raon;
-    string _raonError;
-    bool _raonChecking;
+    Health _session;
+    string _sessionError;
+    bool _sessionChecking;
     double _nextRefresh;
 
 
-    /// <summary>씬의 RaonVoiceClient 가 진짜 주소다. 씬이 안 열려 있을 때만 기본값을 쓴다.</summary>
-    static string RaonUrl
+    /// <summary>씬의 DialogueVoiceClient 가 진짜 주소다. 씬이 안 열려 있을 때만 기본값을 쓴다.</summary>
+    static string SessionUrl
     {
         get
         {
-            var voice = FindObjectOfType<RaonVoiceClient>();
+            var voice = FindObjectOfType<DialogueVoiceClient>();
             var url = voice != null ? voice.serverUrl : null;
-            return string.IsNullOrEmpty(url) ? RaonFallback : url.TrimEnd('/');
+            return string.IsNullOrEmpty(url) ? SessionFallback : url.TrimEnd('/');
         }
     }
 
@@ -91,7 +73,7 @@ public class ServerStatusWindow : EditorWindow
 
     void Update()
     {
-        // 창을 보고 있을 때만 다시 묻는다. 띄워둔 채로 두면 Raon 로그가 /health 로
+        // 창을 보고 있을 때만 다시 묻는다. 띄워둔 채로 두면 Session 로그가 /health 로
         // 도배되고, 어차피 안 보는 값이다.
         if (focusedWindow != this) return;
         if (EditorApplication.timeSinceStartup < _nextRefresh) return;
@@ -103,7 +85,8 @@ public class ServerStatusWindow : EditorWindow
         _nextRefresh = EditorApplication.timeSinceStartup + AutoRefreshSec;
         _webUp = WebUp();
         if (_webUp) CheckWeb(); else _web = null;
-        CheckRaon();
+        CheckSession();
+        CheckDialogue();
         Repaint();
     }
 
@@ -147,12 +130,12 @@ public class ServerStatusWindow : EditorWindow
     /// `/health` 를 물어본다. 인증이 없는 엔드포인트라 토큰은 필요 없다.
     /// 에디터에는 코루틴이 없으므로 update 로 완료를 지켜본다.
     /// </summary>
-    void CheckRaon()
+    void CheckSession()
     {
-        if (_raonChecking) return;
-        _raonChecking = true;
+        if (_sessionChecking) return;
+        _sessionChecking = true;
 
-        var req = UnityWebRequest.Get($"{RaonUrl}/health");
+        var req = UnityWebRequest.Get($"{SessionUrl}/health");
         req.timeout = 8;
         var op = req.SendWebRequest();
 
@@ -164,17 +147,17 @@ public class ServerStatusWindow : EditorWindow
 
             if (req.result != UnityWebRequest.Result.Success)
             {
-                _raon = null;
-                _raonError = req.error;
+                _session = null;
+                _sessionError = req.error;
             }
             else
             {
-                try { _raon = JsonUtility.FromJson<Health>(req.downloadHandler.text); _raonError = null; }
-                catch (Exception e) { _raon = null; _raonError = $"응답을 읽지 못했습니다 — {e.Message}"; }
+                try { _session = JsonUtility.FromJson<Health>(req.downloadHandler.text); _sessionError = null; }
+                catch (Exception e) { _session = null; _sessionError = $"응답을 읽지 못했습니다 — {e.Message}"; }
             }
 
             req.Dispose();
-            _raonChecking = false;
+            _sessionChecking = false;
             Repaint();
         };
         EditorApplication.update += tick;
@@ -190,7 +173,9 @@ public class ServerStatusWindow : EditorWindow
         EditorGUILayout.Space(10);
         Divider();
         EditorGUILayout.Space(10);
-        DrawRaon();
+        DrawSession();
+        EditorGUILayout.Space(10);
+        DrawDialogue();
 
         GUILayout.FlexibleSpace();
         Divider();
@@ -315,44 +300,88 @@ public class ServerStatusWindow : EditorWindow
         EditorApplication.update += tick;
     }
 
-    void DrawRaon()
+    void DrawSession()
     {
-        bool ready = _raon != null && _raon.status == "ready";
-        bool loading = _raon != null && _raon.status != "ready";
+        bool ready = _session != null && _session.status == "ready";
+        bool loading = _session != null && _session.status != "ready";
 
-        Header("Raon 서버 — 목소리·대화",
+        Header("등록 서버 — 인물·참조 자료·3D",
                ready ? Green : loading ? Amber : Red,
                ready ? "준비 완료" : loading ? "준비 중" : "연결 안 됨");
-        Sub(RaonUrl);
+        Sub(SessionUrl);
 
         EditorGUILayout.Space(4);
 
-        if (_raon == null)
+        if (_session == null)
         {
-            Note(_raonChecking
+            Note(_sessionChecking
                 ? "확인 중…"
-                : $"꺼져 있거나 교내망이 아닙니다.\n{_raonError}\n\n"
-                  + "이 상태로는 인물 등록도 대화도 되지 않습니다.\n"
-                  + "서버에서 ~/server/start.sh 를 실행해야 합니다.");
+                : $"꺼져 있거나 교내망이 아닙니다.\n{_sessionError}\n\n"
+                  + "인물 등록과 3D 자료를 관리하는 CPU 서비스입니다.\n"
+                  + "서버에서 ~/capstone-server/service.sh session start 를 실행해야 합니다.");
             return;
         }
 
         if (loading)
         {
-            Note("모델을 올리는 중입니다. 약 20초 걸립니다.");
+            Note("등록 API 준비 상태를 확인해 주세요.");
             return;
         }
 
         // 제일 알고 싶은 것 — 지금 누구로 대화가 되는가.
-        if (_raon.ready_to_talk)
-            Row("등록된 인물", _raon.current, Green);
+        if (_session.ready_to_talk)
+            Row("등록된 인물", _session.current, Green);
         else
             Row("등록된 인물", "없음 — 웹에서 등록해야 합니다", Amber);
 
-        Row("VRAM", $"{_raon.vram_gb:F1} GB", Grey);
-        Row("가동", Uptime(_raon.uptime_sec), Grey);
-        Row("대화 / 등록", $"{_raon.sessions}개 / {_raon.registered}개", Grey);
-        Row("억양 복제", _raon.cont ? "켬 (RAON_CONT=1)" : "끔", Grey);
+        Row("실행 장치", "CPU", Grey);
+        Row("가동", Uptime((int)_session.uptime_sec), Grey);
+        Row("등록", $"{_session.registered}개", Grey);
+    }
+
+    [Serializable] class DialogueHealth
+    {
+        public string status, stt, llm, mode;
+        public bool llm_ready, tts_ready, reasoning_ready;
+    }
+    DialogueHealth _dialogueHealth;
+    bool _dialogueChecking;
+    static string DialogueUrl => FindObjectOfType<DialogueVoiceClient>()?.DialogueServerUrl
+        ?? "http://220.69.208.201:8002";
+
+    void CheckDialogue()
+    {
+        if (_dialogueChecking) return;
+        _dialogueChecking = true;
+        var req = UnityWebRequest.Get(DialogueUrl + "/health");
+        req.timeout = 8;
+        var op = req.SendWebRequest();
+        EditorApplication.CallbackFunction tick = null;
+        tick = () =>
+        {
+            if (!op.isDone) return;
+            EditorApplication.update -= tick;
+            _dialogueHealth = null;
+            if (req.result == UnityWebRequest.Result.Success)
+                try { _dialogueHealth = JsonUtility.FromJson<DialogueHealth>(req.downloadHandler.text); }
+                catch (Exception) { }
+            req.Dispose();
+            _dialogueChecking = false;
+            Repaint();
+        };
+        EditorApplication.update += tick;
+    }
+
+    void DrawDialogue()
+    {
+        bool ready = _dialogueHealth != null && _dialogueHealth.status == "ready";
+        Header("음성 대화 — STT · LLM · TTS", ready ? Green : Amber, ready ? "준비 완료" : "연결 확인 필요");
+        Sub(DialogueUrl);
+        if (_dialogueHealth == null) return;
+        Row("STT·감정", _dialogueHealth.stt, Grey);
+        Row("답변", _dialogueHealth.llm_ready ? "Gemma · 준비됨" : "연결 안 됨", Grey);
+        Row("추론", _dialogueHealth.reasoning_ready ? "준비됨" : "연결 안 됨", Grey);
+        Row("TTS", _dialogueHealth.tts_ready ? "Qwen3-TTS · 준비됨" : "연결 안 됨", Grey);
     }
 
     // ── 그리기 도구 ───────────────────────────────────────────────

@@ -1,0 +1,6 @@
+# Existing isolated CUDA environment; do not install into the LLM venv.
+# Python 3.12; torch 2.8.0+cu128 (PyTorch cu128 index).
+qwen-tts==0.1.1
+transformers==4.57.3
+fastapi==0.141.1
+uvicorn==0.52.4

@@ -17,7 +17,7 @@
 //   1. 빈 GameObject 두 개: "PersonaSpawner"(부모) + 그 자식으로 "SpawnPoint".
 //   2. SpawnPoint 의 position/rotation 으로 인물이 등장할 자리·방향을 잡는다.
 //   3. PersonaSpawner 에 이 스크립트를 부착하고 spawnPoint 를 연결한다.
-//   4. 같은 씬에 RaonVoiceClient 가 있으면 주소·토큰·세션을 자동으로 따라간다.
+//   4. 같은 씬에 DialogueVoiceClient 가 있으면 주소·토큰·세션을 자동으로 따라간다.
 //      없으면 인스펙터의 serverUrl/token 을 쓴다.
 
 using System;
@@ -31,14 +31,14 @@ using UnityEngine.Networking;
 public class PersonaSpawner : MonoBehaviour
 {
     [Header("서버")]
-    [Tooltip("같은 씬의 RaonVoiceClient. 비워두면 자동으로 찾는다.\n" +
+    [Tooltip("같은 씬의 DialogueVoiceClient. 비워두면 자동으로 찾는다.\n" +
              "찾으면 주소·토큰·세션을 그쪽에 맞춘다 — 두 곳에 따로 적으면 어긋난다.")]
-    public RaonVoiceClient voiceClient;
+    public DialogueVoiceClient voiceClient;
 
-    [Tooltip("RaonVoiceClient 가 없을 때 쓸 서버 주소.")]
+    [Tooltip("DialogueVoiceClient 가 없을 때 쓸 서버 주소.")]
     public string serverUrl = "http://220.69.208.201:8000";
 
-    [Tooltip("RaonVoiceClient 가 없을 때 쓸 토큰.")]
+    [Tooltip("DialogueVoiceClient 가 없을 때 쓸 토큰.")]
     public string token = "";
 
     [Tooltip("강제로 사용할 세션 ID. 비워두면 서버의 현재 세션을 따라간다.")]
@@ -96,7 +96,7 @@ public class PersonaSpawner : MonoBehaviour
 
     void Start()
     {
-        if (voiceClient == null) voiceClient = FindObjectOfType<RaonVoiceClient>();
+        if (voiceClient == null) voiceClient = FindObjectOfType<DialogueVoiceClient>();
         StartCoroutine(WatchSession());
     }
 
@@ -116,7 +116,7 @@ public class PersonaSpawner : MonoBehaviour
 
             if (string.IsNullOrEmpty(sid))
             {
-                // RaonVoiceClient 가 이미 세션을 따라가고 있으면 그 값을 쓴다.
+                // DialogueVoiceClient 가 이미 세션을 따라가고 있으면 그 값을 쓴다.
                 if (voiceClient != null && voiceClient.HasSession)
                 {
                     sid = voiceClient.sessionId;
