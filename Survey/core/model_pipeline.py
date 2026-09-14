@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from . import model_queue, storage
+from .tripo import image_extension, image_url
 
 
 class SubmissionUnknown(Exception):
@@ -61,6 +62,36 @@ class ModelPipeline:
             self.sleep(3)
         raise PipelineFailure(name + ": 대기 시간 초과 · 작업 ID를 유지했습니다")
 
+    def tpose(self, sid, path):
+        """사진을 Tripo generate_image(t_pose)로 T포즈 이미지로 바꿔 그 파일을 돌려준다.
+
+        손이 몸에 닿은 사진은 리깅 뒤 팔을 들 때 옷이 손을 따라 늘어나므로, 어떤
+        사진이 들어와도 팔을 벌린 이미지로 만든 다음 생성한다. 유료 제출은 task()
+        가 먼저 기록하고, 받은 파일은 해시로 재사용해 재시작 때 다시 요청하지 않는다."""
+        steps = self.job["steps"]
+        asset = (steps.get("tpose") or {}).get("asset")
+        if asset:
+            dest = storage.session_dir(sid) / asset["file"]
+            if dest.is_file() and hashlib.sha256(dest.read_bytes()).hexdigest() == asset["sha256"]:
+                return dest
+        _, data = self.task("tpose", lambda: self.client.submit_tpose_image(path))
+        url = image_url(data.get("output") or {})
+        if not isinstance(url, str) or not url:
+            raise PipelineFailure("T포즈 이미지 다운로드 주소가 없습니다")
+        partial = storage.session_dir(sid) / "tpose.part"
+        self.client.download_file(url, partial)
+        self.check()
+        with partial.open("rb") as stream:
+            ext = image_extension(stream.read(16))
+        if ext is None:
+            raise PipelineFailure("T포즈 결과가 이미지 파일이 아닙니다")
+        dest = storage.session_dir(sid) / ("tpose." + ext)
+        os.replace(partial, dest)
+        steps["tpose"]["asset"] = {"file": dest.name, "bytes": dest.stat().st_size,
+                                   "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()}
+        self.save()
+        return dest
+
     def run(self):
         sid = self.job["session_id"]
         path = storage.find_image(sid)
@@ -70,7 +101,9 @@ class ModelPipeline:
         steps = self.job["steps"]
         if "input" not in steps:
             steps["input"] = {"sha256": fingerprint,
-                              "pose": os.environ.get("TRIPO_POSE", "preset:sit").strip()}
+                              "pose": os.environ.get("TRIPO_POSE", "preset:sit").strip(),
+                              "tpose": os.environ.get("TRIPO_TPOSE", "1").strip().lower()
+                              not in {"0", "false", "no", "off", ""}}
             self.save()
         elif fingerprint != steps["input"]["sha256"]:
             raise PipelineFailure("입력 이미지가 변경되었습니다. 새 생성 작업이 필요합니다")
@@ -79,7 +112,8 @@ class ModelPipeline:
         if artifact and (not dest.is_file() or hashlib.sha256(dest.read_bytes()).hexdigest() != artifact["sha256"]):
             raise PipelineFailure("저장된 모델 파일이 없거나 변경되었습니다")
         if not artifact:
-            model_id, result = self.task("model", lambda: self.client.submit_image_to_3d(path))
+            source = self.tpose(sid, path) if steps["input"].get("tpose") else path
+            model_id, result = self.task("model", lambda: self.client.submit_image_to_3d(source))
             pose = steps["input"]["pose"]
             if pose:
                 _, check = self.task("prerigcheck", lambda: self.client._submit({

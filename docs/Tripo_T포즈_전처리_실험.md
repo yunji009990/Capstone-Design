@@ -1,6 +1,43 @@
 # T포즈 전처리 후 Tripo 리깅 비교
 
-2026-09-10
+2026-09-10 (2026-09-14 자동 전처리 추가)
+
+## 2026-09-14 추가: 사진 → T포즈 자동 전처리 (Tripo `generate_image`)
+
+팔을 내린 일반 전신 사진 두 장을 그대로 넣어 보니 정지 자세와 얼굴·옷 재현은 좋았지만,
+앉기 클립에서 팔을 드는 순간 반바지 천이 손을 따라 띠처럼 딸려 올라갔다. 사진에서 손이
+허벅지에 닿아 있어 자동 리깅이 그 접촉면의 정점을 손 뼈에 함께 묶기 때문이다. 팔짱 사진의
+첫 실험과 원인이 같다. 유족이 가진 사진의 자세는 고를 수 없으므로 전처리를 자동화했다.
+
+Tripo API 의 `generate_image` 에 `t_pose: true` 를 주면 얼굴·머리·옷을 유지한 채 팔을 벌린
+1024×1024 이미지를 만들어 준다. 모델 `gemini_2.5_flash_image_preview` 는 5 크레딧,
+`gemini_3_pro_image_preview`·`gpt_image_2` 등은 10 크레딧이다. 결과 output 의 키는 `generated_image` 다.
+프롬프트와 모델은 `Survey/core/tripo.py` 의 `TPOSE_PROMPT`·`TPOSE_MODEL` 이다.
+
+| 결과 폴더 (`tools/_work/`) | 입력 | 삼각형 | 관절 | 앉기 클립에서 팔 | 사용량 |
+|---|---|---:|---|---|---:|
+| `tripo_trial_20260914_model` | 원본 그대로 (팔 내림, 청반바지) | 48,016 | 41 | 반바지가 손을 따라 늘어남 | 75 |
+| `tripo_trial_20260914_model2` | 원본 그대로 (팔 내림, 검정 반바지) | 47,142 | 41 | 같은 띠, 색이 어두워 덜 보임 | 75 |
+| `tripo_trial_20260914_tpose` | 두 번째 사진 → `t_pose` 자동 변환 | 48,068 | 41 | 정상. 반바지는 엉덩이에 남고 손이 분리됨 | 5 + 75 + 80 |
+
+각 폴더의 `preview_sit.jpg` 가 정지 자세와 앉기 4.3초의 4방향 렌더다. 세 번째 폴더의 원본은
+`reference.png`, 변환 결과는 `reference_tpose.png` 다. 변환 이미지에서 맨발이 운동화로 바뀌었는데
+리깅에는 문제가 없었다. 실험 도구는 `--tpose` 로 같은 단계를 거친다.
+
+```powershell
+python tools/tripo_trial.py --image <원본 사진> --out tools/_work/tripo_trial_<이름> --tpose --tpose-only
+python tools/tripo_trial.py --image <원본 사진> --out tools/_work/tripo_trial_<이름> --tpose
+python tools/tripo_motion_pack.py --trial-dir tools/_work/tripo_trial_<이름>
+```
+
+첫 줄은 T포즈 이미지만 받고 멈춘다(5). 결과를 보고 둘째 줄을 실행하면 같은 task 를 재사용해
+생성·리깅·앉기로 이어진다(75). 셋째 줄이 나머지 8개 동작과 팩이다(80).
+
+운영 작업자(`Survey/core/model_pipeline.py`)도 같은 단계를 거친다. `Web/.env` 의 `TRIPO_TPOSE=1`
+(기본값)이면 등록 사진을 먼저 T포즈 이미지(세션 폴더의 `tpose.png`)로 바꾼 뒤 생성하고, `0` 이면
+예전처럼 원본을 바로 넣는다. T포즈 작업도 다른 유료 제출처럼 제출 전에 기록하고, 받은 파일은
+해시로 재사용해 재시작 때 다시 요청하지 않는다. 모의 검사는 `Survey/tests/test_model_worker.py` 다.
+운영 서버에는 아직 배포하지 않았다.
 
 ## 현재 상태
 

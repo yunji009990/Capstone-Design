@@ -17,7 +17,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "Survey"))
-from core.tripo import API_BASE, TripoClient  # noqa: E402
+from core.tripo import (API_BASE, TPOSE_MODEL, TPOSE_PROMPT, TripoClient,  # noqa: E402
+                        image_extension, image_url, tpose_credits)
 
 
 def read_key() -> str:
@@ -102,6 +103,12 @@ def main() -> int:
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--tpose", action="store_true",
+                        help="Tripo generate_image(t_pose)로 T포즈 이미지를 먼저 만들고 그 결과로 생성한다")
+    parser.add_argument("--tpose-model", default=TPOSE_MODEL,
+                        help="T포즈 이미지 모델. 기본 gemini_2.5_flash_image_preview(5). gemini_3_pro_image_preview 등은 10")
+    parser.add_argument("--tpose-only", action="store_true",
+                        help="T포즈 이미지까지만 받고 멈춘다. 같은 --out 으로 다시 실행하면 이어서 생성한다")
     args = parser.parse_args()
     image_path = args.image.resolve(strict=True)
     out = args.out.resolve()
@@ -118,8 +125,12 @@ def main() -> int:
     identity = {"image_sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
                 "generation": config, "rig_version": "v1.0-20240301",
                 "rig_spec": "tripo", "animation": "preset:sit"}
+    extra = tpose_credits(args.tpose_model) if args.tpose else 0
+    if args.tpose:
+        # 기존 폴더의 request 와 그대로 비교되도록 --tpose 일 때만 키를 더한다.
+        identity["tpose"] = {"model_version": args.tpose_model, "prompt": TPOSE_PROMPT, "t_pose": True}
     if args.dry_run:
-        print(json.dumps({"request": identity, "estimated_credits": 75, "network_calls": 0}, indent=2))
+        print(json.dumps({"request": identity, "estimated_credits": 75 + extra, "network_calls": 0}, indent=2))
         return 0
 
     client = TripoClient(read_key())
@@ -203,15 +214,52 @@ def main() -> int:
         if "balance_before" not in manifest:
             balance = client._get(API_BASE + "/user/balance").get("data") or {}
             manifest["balance_before"] = balance
-            if float(balance.get("balance", 0)) < 75:
-                raise RuntimeError("Trial requires at least 75 credits")
+            if float(balance.get("balance", 0)) < 75 + extra:
+                raise RuntimeError(f"Trial requires at least {75 + extra} credits")
             save()
         reference = out / ("reference." + image_type)
         if not reference.exists():
             shutil.copyfile(image_path, reference)
+        source, source_type = image_path, image_type
+        if args.tpose:
+            # 원본 대신 T포즈 이미지를 생성 입력으로 쓴다. 팔을 내린 사진은 리깅 뒤
+            # 팔을 들 때 옷이 손을 따라 늘어나기 때문이다(문서: Tripo_T포즈_전처리_실험).
+            if "tpose" not in manifest["tasks"]:
+                token = client._upload_image(image_path)
+                tpose_body = {"type": "generate_image", "model_version": args.tpose_model,
+                              "prompt": TPOSE_PROMPT, "file": {"type": image_type, "file_token": token},
+                              "t_pose": True}
+            else:
+                tpose_body = manifest["tasks"]["tpose"]["request"]
+            posed = task("tpose", tpose_body, 300)
+            existing = [p for p in out.glob("reference_tpose.*") if p.suffix != ".partial"]
+            if existing:
+                source = existing[0]
+            else:
+                url = image_url(posed.get("output") or {})
+                if not url:
+                    raise RuntimeError("tpose: response has no image URL: "
+                                       + json.dumps(posed.get("output"), ensure_ascii=False)[:500])
+                part = out / "reference_tpose.partial"
+                client.download_file(url, part)
+                ext = image_extension(part.read_bytes()[:16])
+                if ext is None:
+                    part.unlink()
+                    raise RuntimeError("tpose: downloaded file is not a PNG/JPEG/WEBP image")
+                source = part.replace(out / ("reference_tpose." + ext))
+            source_type = source.suffix.lstrip(".")
+            manifest.setdefault("assets", {})["tpose"] = {
+                "file": source.name, "bytes": source.stat().st_size,
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+            save()
+            emit("tpose", asset=manifest["assets"]["tpose"])
+            if args.tpose_only:
+                manifest["status"] = "tpose_ready"
+                emit("complete", status=manifest["status"])
+                return 0
         if "generation" not in manifest["tasks"]:
-            token = client._upload_image(image_path)
-            generation_body = {"type": "image_to_model", "file": {"type": image_type, "file_token": token}, **config}
+            token = client._upload_image(source)
+            generation_body = {"type": "image_to_model", "file": {"type": source_type, "file_token": token}, **config}
         else:
             generation_body = manifest["tasks"]["generation"]["request"]
         generated = task("generation", generation_body)

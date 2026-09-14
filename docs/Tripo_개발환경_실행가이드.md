@@ -76,11 +76,12 @@ tripo_trial_<고유이름>/
 
 ## 4. 현재 실험 도구로 모델 만들기
 
-지금까지의 T포즈 전처리는 대화의 `image_gen`에서 수행했다. 아래 Python 명령에 원본 사진을 넣어도
-자동으로 T포즈로 바뀌지 않는다. 준비된 JPG/PNG T포즈 이미지를 입력한다.
+`--tpose` 를 붙이면 원본 사진을 Tripo `generate_image`(`t_pose`)로 T포즈 이미지로 바꾼 뒤 생성한다
+(+5 크레딧, 2026-09-14). 붙이지 않으면 준비된 JPG/PNG T포즈 이미지를 그대로 입력한다.
+`--tpose-only` 는 변환 이미지(`reference_tpose.png`)만 받고 멈추며, 같은 `--out` 으로 다시 실행하면 이어진다.
 
 ```powershell
-python tools/tripo_trial.py --image C:/work/reference_tpose.png --out tools/_work/tripo_trial_my_first_tpose --dry-run
+python tools/tripo_trial.py --image C:/work/photo.png --out tools/_work/tripo_trial_my_first_tpose --tpose --dry-run
 ```
 
 `--dry-run`은 키와 네트워크 호출 없이 요청 설정을 확인한다. 실제 실행은 같은 명령에서 `--dry-run`을 뺀다.
@@ -141,6 +142,7 @@ ADMIN_PASSWORD=<개발용 관리자 비밀번호>
 SURVEY_ACCESS_CODE=
 TRIPO_API_KEY=
 TRIPO_POSE=preset:sit
+TRIPO_TPOSE=1
 ```
 
 기동할 각 PowerShell 터미널에서 아래 공통 부분을 먼저 실행한다. 값은 화면에 출력하지 않는다.
