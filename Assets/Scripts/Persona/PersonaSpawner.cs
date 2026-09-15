@@ -74,6 +74,36 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("굳힐 시점(초). 0 이면 클립 시작. 자세가 어색하면 조금 올려 본다.")]
     public float freezeTimeSec = 0f;
 
+    [Header("앉아서 숨쉬기")]
+    // preset:sit 7.2초는 "앉음 → 손 들기(2.0~3.0s) → 손 내리기(6.0~7.2s)" 라서 통째로
+    // 반복하면 대화 중에 계속 손을 흔든다. 앞쪽 0~1.5초는 손을 무릎에 얹고 앉은 채
+    // 미세하게만 움직이는 구간이다(2026-09-14 실측: 전체 뼈 각속도 합 20~40°/s, 손을
+    // 들 때는 560°/s). 이 구간만 느리게 앞뒤로 오가면 앉아서 숨 쉬는 사람처럼 보인다.
+    // 새 클립도 크레딧도 필요 없다. Tripo 프리셋에는 앉은 채 쉬는 동작이 없다.
+    [Tooltip("켜면 freezePose 대신 아래 구간을 느리게 왕복 재생한다. 앉아서 숨 쉬는 느낌.")]
+    public bool quietLoop = true;
+
+    [Tooltip("왕복 구간 시작(초).")]
+    public float quietStartSec = 0f;
+
+    [Tooltip("왕복 구간 끝(초). 클립보다 길면 클립 끝까지.")]
+    public float quietEndSec = 1.5f;
+
+    [Tooltip("재생 속도 배수. 0.5 면 절반 속도, 1.5초 구간을 3초에 한 번 왕복.")]
+    [Range(0.1f, 2f)] public float quietSpeed = 0.5f;
+
+    [Tooltip("가슴·어깨 뼈에 아주 작은 호흡 움직임을 얹는다. 정지 자세에서도 동작한다.")]
+    public bool breathe = true;
+
+    [Tooltip("분당 호흡 수. 쉬는 성인은 12~16.")]
+    [Range(4f, 30f)] public float breathsPerMinute = 13f;
+
+    [Tooltip("가슴이 앞뒤로 기우는 진폭(도). 1도 안팎이면 충분하다.")]
+    [Range(0f, 5f)] public float breathChestDeg = 1.0f;
+
+    [Tooltip("어깨가 오르내리는 진폭(도).")]
+    [Range(0f, 5f)] public float breathShoulderDeg = 0.7f;
+
     [Header("텍스처")]
     // glTFast 는 기본값으로 밉맵을 만들지 않는다(ImportSettings.GenerateMipMaps).
     // 밉맵 없는 2K 얼굴 텍스처는 VR 에서 조금만 멀어져도 픽셀이 지글거려서,
@@ -124,6 +154,10 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("모델을 기다리는 동안 켜져 있다가 완료 시 자동으로 꺼지는 GameObject.")]
     public GameObject loadingIndicator;
 
+    [Tooltip("에디터 확인용. 서버 대신 이 로컬 GLB 를 바로 띄운다. 비우면 서버를 따라간다.\n" +
+             "절대 경로 또는 프로젝트 루트 기준 상대 경로. 예: tools/_work/tripo_trial_x/animated.glb")]
+    public string localGlbPath = "";
+
     public bool verboseLog = true;
 
     // ── 내부 상태 ──────────────────────────────────────────────
@@ -133,13 +167,104 @@ public class PersonaSpawner : MonoBehaviour
     string _loadedSession = "";      // 이미 띄운 세션. 인물이 바뀔 때만 다시 받는다.
     bool _isLoading;
 
+    // 앉아서 숨쉬기. 클립을 왕복시키는 Animation 과, 호흡을 얹을 뼈들.
+    Animation _poseAnim;
+    float _quietStart, _quietEnd;
+    Transform _spine, _chest, _neck, _lClav, _rClav;
+    Quaternion _spineBase, _chestBase, _neckBase, _lClavBase, _rClavBase;
+
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
 
     void Start()
     {
         if (voiceClient == null) voiceClient = FindObjectOfType<DialogueVoiceClient>();
-        StartCoroutine(WatchSession());
+        if (!string.IsNullOrWhiteSpace(localGlbPath)) StartCoroutine(LoadLocal());
+        else StartCoroutine(WatchSession());
+    }
+
+    /// <summary>서버 없이 로컬 GLB 를 띄운다. 파일이 없으면 서버 흐름으로 돌아간다.</summary>
+    IEnumerator LoadLocal()
+    {
+        string path = localGlbPath.Trim();
+        if (!System.IO.Path.IsPathRooted(path))
+            path = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", path));
+        if (!System.IO.File.Exists(path))
+        {
+            Debug.LogWarning($"[PersonaSpawner] 로컬 GLB 가 없어 서버를 따라갑니다: {path}");
+            yield return StartCoroutine(WatchSession());
+            yield break;
+        }
+        _isLoading = true;
+        if (verboseLog) Debug.Log($"[PersonaSpawner] 로컬 GLB 로드: {path}");
+        var task = SpawnAsync("local", System.IO.File.ReadAllBytes(path));
+        while (!task.IsCompleted) yield return null;
+        if (task.IsFaulted) Debug.LogError($"[PersonaSpawner] 스폰 실패: {task.Exception}");
+        Finish();
+    }
+
+    void Update()
+    {
+        // 조용한 구간 왕복. Animation 컴포넌트가 재생하게 두고 방향만 뒤집는다.
+        if (!quietLoop || _poseAnim == null || !_poseAnim.enabled || _poseAnim.clip == null) return;
+        var state = _poseAnim[_poseAnim.clip.name];
+        if (state == null) return;
+        float speed = Mathf.Max(0.1f, quietSpeed);
+        if (state.speed >= 0f && state.time >= _quietEnd)      { state.time = _quietEnd;   state.speed = -speed; }
+        else if (state.speed < 0f && state.time <= _quietStart) { state.time = _quietStart; state.speed = speed; }
+        else state.speed = (state.speed < 0f ? -1f : 1f) * speed;   // 인스펙터에서 속도를 바꿔도 따라간다
+    }
+
+    void LateUpdate()
+    {
+        if (!breathe || _spawnedInstance == null) return;
+        // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
+        bool driven = _poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying;
+        if (driven) CaptureBreathBase();
+        float phase = Mathf.Sin(Time.time * breathsPerMinute / 60f * Mathf.PI * 2f);
+        // 뼈의 로컬 축은 리깅마다 달라서 인물 기준 축(옆·앞)으로 돌린다.
+        Transform body = _spawnedInstance.transform;
+        Vector3 side = body.right, front = body.forward;
+        Breathe(_spine, _spineBase, -phase * breathChestDeg * 0.5f, side);
+        Breathe(_chest, _chestBase, -phase * breathChestDeg, side);
+        Breathe(_neck,  _neckBase,   phase * breathChestDeg * 1.5f, side);   // 머리는 수평을 지킨다
+        Breathe(_lClav, _lClavBase,  phase * breathShoulderDeg, front);
+        Breathe(_rClav, _rClavBase, -phase * breathShoulderDeg, front);
+    }
+
+    static void Breathe(Transform bone, Quaternion baseLocal, float angleDeg, Vector3 worldAxis)
+    {
+        if (bone == null) return;
+        Quaternion parent = bone.parent != null ? bone.parent.rotation : Quaternion.identity;
+        Quaternion world = Quaternion.AngleAxis(angleDeg, worldAxis) * (parent * baseLocal);
+        bone.localRotation = Quaternion.Inverse(parent) * world;
+    }
+
+    void FindBreathBones(GameObject root)
+    {
+        _spine = _chest = _neck = _lClav = _rClav = null;
+        foreach (var t in root.GetComponentsInChildren<Transform>(true))
+        {
+            string n = t.name.ToLowerInvariant();
+            if (_spine == null && n.EndsWith("spine01")) _spine = t;
+            else if (_chest == null && n.EndsWith("spine02")) _chest = t;
+            else if (_neck == null && n.Contains("neck")) _neck = t;
+            else if (_lClav == null && n.Contains("l_clavicle")) _lClav = t;
+            else if (_rClav == null && n.Contains("r_clavicle")) _rClav = t;
+        }
+        CaptureBreathBase();
+        if (verboseLog)
+            Debug.Log($"[PersonaSpawner] 호흡 뼈: spine={_spine?.name} chest={_chest?.name} neck={_neck?.name} " +
+                      $"clavicle={_lClav?.name}/{_rClav?.name}");
+    }
+
+    void CaptureBreathBase()
+    {
+        if (_spine) _spineBase = _spine.localRotation;
+        if (_chest) _chestBase = _chest.localRotation;
+        if (_neck)  _neckBase  = _neck.localRotation;
+        if (_lClav) _lClavBase = _lClav.localRotation;
+        if (_rClav) _rClavBase = _rClav.localRotation;
     }
 
     /// <summary>
@@ -327,7 +452,22 @@ public class PersonaSpawner : MonoBehaviour
             return;
         }
 
-        if (freezePose)
+        _poseAnim = anim;
+        if (quietLoop)
+        {
+            // 조용한 구간만 느리게 왕복. 방향 전환은 Update 가 맡는다.
+            float len = anim.clip.length;
+            _quietStart = Mathf.Clamp(quietStartSec, 0f, len);
+            _quietEnd = Mathf.Clamp(quietEndSec, _quietStart + 0.05f, len);
+            anim.wrapMode = WrapMode.ClampForever;
+            anim.Play(anim.clip.name);
+            var state = anim[anim.clip.name];
+            if (state != null) { state.time = _quietStart; state.speed = Mathf.Max(0.1f, quietSpeed); }
+            if (verboseLog)
+                Debug.Log($"[PersonaSpawner] 자세 왕복: {anim.clip.name} {_quietStart:0.00}~{_quietEnd:0.00}s " +
+                          $"x{quietSpeed} (클립 {len:0.00}s)");
+        }
+        else if (freezePose)
         {
             // 재생하지 않고 한 프레임만 찍어 굳힌다. 대화 중 인물이 움직일
             // 필요가 없고, 정지 쪽이 프레임도 아낀다.
@@ -345,6 +485,7 @@ public class PersonaSpawner : MonoBehaviour
             if (verboseLog)
                 Debug.Log($"[PersonaSpawner] 자세 재생: {anim.clip.name} 루프");
         }
+        if (breathe) FindBreathBones(root);
     }
 
     // ── 머티리얼 보정 ─────────────────────────────────────────
