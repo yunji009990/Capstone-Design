@@ -40,6 +40,17 @@ python tools/tripo_motion_pack.py --trial-dir tools/_work/tripo_trial_<이름>
 호흡을 얹는다(`breathe`). 셋째 줄의 8개 동작 팩(80)은 대화 중 감정 동작을 붙일 때만 필요한 선택 단계다.
 `PersonaSpawner` 의 `localGlbPath` 에 결과 GLB 경로를 넣으면 서버 없이 Scene_2 에서 바로 확인할 수 있다.
 
+**입 벙긋 (2026-09-15).** Tripo 리깅에는 턱·입 뼈도 블렌드셰이프도 없어서(관절 41개, 모프 0개) 그대로는
+입이 움직일 수 없다. `Assets/Scripts/Persona/PersonaMouth.cs` 가 로드 때 머리 뼈에 붙은 정점으로
+"턱 벌림" 블렌드셰이프를 코드로 만들고, 대화 음성의 크기(`DialogueVoiceClient.SpeechLevel`, 재생
+버퍼 RMS)로 무게를 정한다. 입 위치는 코끝(정면 가운데에서 가장 앞으로 튀어나온 점)에서 턱끝(정면 윤곽이
+목으로 꺾이는 곳)까지의 42% 지점이다. 얼굴 높이 비율로 잡으면 머리카락·정수리 때문에 코 높이에 걸려
+코가 늘어난다(실측: 머리 관절 기준 턱끝 0.012, 코끝 0.054, 입선 0.036, 정수리 0.177). 입술이 갈라져
+속이 보이진 않고 아랫입술·턱이 오르내리는 정도이며, 시험은 `PersonaSpawner` 의 `mouthTestTalk`
+(음성 없이 말하는 척)·`mouthTestOpen`(고정 벌림)으로 한다. 세기·폭·위치는 `mouthSettings` 에서
+재생 중에도 바꿀 수 있다. 진짜 입모양(비짐)은 블렌드셰이프가 있는 머리가 있어야 하며 별도 과제다.
+TTS 가 꺼진 지금은 음성이 없어 시험 스위치로만 확인했다.
+
 운영 작업자(`Survey/core/model_pipeline.py`)도 같은 단계를 거친다. `Web/.env` 의 `TRIPO_TPOSE=1`
 (기본값)이면 등록 사진을 먼저 T포즈 이미지(세션 폴더의 `tpose.png`)로 바꾼 뒤 생성하고, `0` 이면
 예전처럼 원본을 바로 넣는다. T포즈 작업도 다른 유료 제출처럼 제출 전에 기록하고, 받은 파일은

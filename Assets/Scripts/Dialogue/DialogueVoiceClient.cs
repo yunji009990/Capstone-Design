@@ -29,6 +29,8 @@ public partial class DialogueVoiceClient : MonoBehaviour
     public bool SessionHasModel { get; private set; }
     public bool HasSession { get; private set; }
     public bool IsSpeaking => _playback != null && _playback.Playing;
+    /// <summary>지금 재생 중인 답변 음성의 크기(선형 RMS, 0~1). 인물의 입 벙긋이 읽는다.</summary>
+    public float SpeechLevel => _playback != null ? _playback.Level : 0f;
     public bool TtsEnabled { get; private set; }
     public string[] MicDevices => Microphone.devices;
     public string CurrentMic => _micDevice ?? "";
