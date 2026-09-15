@@ -28,6 +28,8 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(all(row["command"][2:5] == ["-m", "unittest", "discover"] for row in plan))
         all_plan = check.plan("all", sys.executable, self.root)
         self.assertEqual(len({row["name"] for row in all_plan}), len(all_plan))
+        self.assertIn("web", [row["name"] for row in all_plan])
+        self.assertIn("web", [row["name"] for row in check.plan("platform", sys.executable, self.root)])
 
     def test_failure_returns_nonzero_and_keeps_report_and_log(self):
         output = self.root / "result"

@@ -105,6 +105,11 @@ python tools/service_bundle.py dialogue
 
 `/session/start`, `/session/current`, `/session/{sid}/model`, `/session/{sid}/model.glb`,
 `/session/end`는 8000에 유지한다. 등록은 GPU 예열·참조 재합성을 호출하지 않는다.
+2026-09-15부터 `/session/start`는 새 UUID4 세션 ID를 발급한다. 비어 있지 않은 `session` 입력은 400으로 거부한다.
+클라이언트는 반환된 `session`으로 인물 조회·모델 업로드·종료를 수행한다. 기존 ID 조회는 유지한다.
+현재 인물을 지정한 기록이 없으면 이전 인물 폴더를 자동 선택하지 않는다.
+웹 등록에는 `/persona`에서 받은 `survey_revision`과 같은 설문이 필요하다.
+자세한 계약과 검사 결과는 [웹 등록 흐름 개선](../docs/웹_등록_흐름_개선.md)을 따른다.
 8000의 구형 `/talk`, `/talk_stream`, `/chat`, `/tts`, `/stt`, `/reset`, `/mode`, `/dbg`는 폐기했다.
 현재 대화·초기화·끼어들기는 8002 WebSocket으로 처리한다.
 첫 `start` 메시지에 `interruption_policy="semantic_v1"`을 보내면 TTS 없이도 생성 중인 답변을 보류·판정한다.

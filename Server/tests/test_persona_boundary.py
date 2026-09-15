@@ -30,7 +30,7 @@ class PersonaBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.app = create_app(self.temp.name, "writer", "reader")
         self.web = TestClient(self.app)
-        self.register()
+        self.sid = self.register()
 
     def tearDown(self):
         self.web.close()
@@ -38,33 +38,35 @@ class PersonaBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
     def register(self, value=0):
         response = self.web.post("/session/start", headers={"X-Token": "writer"},
-            data={"session": "person-a", "persona": "테스트 인물", "knowledge": "테스트 지식"},
+            data={"persona": "테스트 인물", "knowledge": "테스트 지식"},
             files={"voice": ("voice.wav", wav_bytes(value))})
         self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["session"]
 
     async def test_reader_contract_and_voice_hash_without_shared_files(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app)) as transport:
             client = PersonaClient("http://registration", "reader", client=transport)
-            bundle = await client.get("person-a")
+            bundle = await client.get(self.sid)
             self.assertEqual(bundle["schema_version"], 1)
             self.assertEqual(bundle["knowledge"], "테스트 지식")
             raw, source = await client.voice(bundle)
             self.assertEqual(hashlib.sha256(raw).hexdigest(), bundle["voice_sha256"])
-            self.assertEqual((await client.get())["session"], "person-a")
+            self.assertEqual((await client.get())["session"], self.sid)
             self.assertNotIn("model_glb_path", bundle)
             self.assertNotIn("token", bundle)
             self.assertEqual(self.web.post("/session/end", headers={"X-Token": "reader"},
-                data={"session": "person-a"}).status_code, 403)
-            self.assertEqual(self.web.get("/internal/personas/person-a",
+                data={"session": self.sid}).status_code, 403)
+            self.assertEqual(self.web.get(f"/internal/personas/{self.sid}",
                 headers={"X-Persona-Token": "writer"}).status_code, 403)
-            self.assertTrue((Path(self.temp.name) / "person-a/persona.md").is_file())
+            self.assertTrue((Path(self.temp.name) / self.sid / "persona.md").is_file())
 
     async def test_voice_update_cannot_mix_an_old_bundle_with_new_voice(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app)) as transport:
             client = PersonaClient("http://registration", "reader", client=transport)
-            old = await client.get("person-a")
-            self.register(1)
-            new = await client.get("person-a")
+            old = await client.get(self.sid)
+            # 신규 등록은 덮어쓰지 않는다. 기존 자료가 외부에서 바뀌는 경우의 해시 계약은 유지한다.
+            (Path(self.temp.name) / self.sid / "voice.wav").write_bytes(wav_bytes(1))
+            new = await client.get(self.sid)
             self.assertNotEqual(old["revision"], new["revision"])
             with self.assertRaisesRegex(ValueError, "변경"):
                 await client.voice(old)

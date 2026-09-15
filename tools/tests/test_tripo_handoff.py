@@ -67,7 +67,11 @@ class HandoffTests(unittest.TestCase):
     def test_common_harness_transfers_without_local_settings(self):
         shared = {"AGENTS.md": "shared rules\n", "CLAUDE.md": "@AGENTS.md\n",
                   "tools/check.py": "# shared runner\n", ".claude/settings.json": "{}\n",
-                  ".github/workflows/checks.yml": "name: checks\n"}
+                  ".github/workflows/checks.yml": "name: checks\n",
+                  "Web/registration_input.py": "# web registration contract\n",
+                  "Web/tests/test_registration_flow.py": "# web API checks\n",
+                  "Web/tests/test_registration_flow.cjs": "// browser script checks\n",
+                  "docs/웹_등록_흐름_개선.md": "registration workflow\n"}
         for name, content in shared.items():
             self.put(name, content)
         self.put(".claude/settings.local.json", "private-settings-sentinel")

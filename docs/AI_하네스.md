@@ -11,7 +11,7 @@
 | Claude 진입점 | `CLAUDE.md` → `@AGENTS.md` | 같은 규칙을 가져오며 공통 규칙을 중복 작성하지 않음 |
 | Claude 설정 | `.claude/settings.json` | 기존 모델 설정과 명령·파일 접근 규칙 |
 | 선택적 보조 작업 | `.claude/agents/`, `.claude/commands/verify.md`, `impl.md` | 사용자가 요청한 조사·독립 검증·구현안. 메인이 적용 |
-| 모의 검사 | `tools/check.py`, `Server/tests/`, `Survey/tests/`, `tools/tests/` | 영역별 검사 실행, 실패 전파, 결과 보관 |
+| 모의 검사 | `tools/check.py`, `Server/tests/`, `Survey/tests/`, `Web/tests/`, `tools/tests/` | 영역별 검사 실행, 실패 전파, 결과 보관 |
 | 자동 실행 | `.github/workflows/checks.yml` | 소스가 GitHub에 반영된 뒤 push·PR·수동 실행에서 같은 모의 검사 사용 |
 | 실제 연결·품질 | Unity MCP·AI 테스트 메뉴, `tools/eval_turn_judge.py` | 별도 선택하는 실제 연결·모델 검사 |
 | 배포·인계 | `tools/service_bundle.py`, `tools/tripo_handoff.py` | 명시된 소스·해시의 전달. 검사 성공 자체가 배포는 아님 |
@@ -35,12 +35,14 @@ python tools/check.py --area dialogue
 |---|---|---|
 | `dialogue` | 하네스·인계 도구 + Server 전체 모의 검사 | 우리 대화 AI 개발의 기본 |
 | `harness` | 하네스·인계 도구 검사 | 공통 실행기·인계 코드 변경 |
-| `platform` | 하네스 + 등록·인물 API 제공자 계약 + Tripo 작업자 모의 검사 | 팀원·공통 플랫폼 변경 |
-| `all` | 하네스 + Server 전체 + Tripo 작업자 모의 검사 | 공통 경계 변경·CI |
+| `platform` | 하네스 + 등록·인물 API 제공자 계약 + Tripo 작업자 + 웹 등록 검사 | 팀원·공통 플랫폼 변경 |
+| `all` | 하네스 + Server 전체 + Tripo 작업자 + 웹 등록 검사 | 공통 경계 변경·CI |
 
 Server 전체에는 대화뿐 아니라 인물 API 제공자·소비자 계약도 들어 있다.
 `platform`/`all`의 Tripo는 모의 클라이언트다. 실제 생성·이미지 편집·서버 재시작·모델 다운로드는 실행하지 않는다.
-현재 Web 화면 자체의 브라우저 검사와 Unity 컴파일은 이 실행기에 포함되지 않는다.
+웹 검사는 실제 등록 경로 함수·로컬 등록 API 및 Node.js의 가상 DOM·HTTP를 사용하는 화면 스크립트를 포함한다.
+실제 브라우저 렌더링·Unity 컴파일은 별도 검사다. 2026-09-15 웹 수정의 실제 Edge 검사·서버 적용은
+[웹 등록 흐름 개선](웹_등록_흐름_개선.md)에 기록했다.
 
 실행 계획만 확인하거나 Python을 지정할 수 있다.
 
@@ -76,6 +78,11 @@ Linux에서는 설치 명령의 실행 파일을 `.venv-dialogue/bin/python`으�
 [서버 운영 문서](../Server/README.md)를 따른다. 검사 준비를 위해 실제 모델·참여자 자료·API 키를 가져오지 않는다.
 일부 프로토콜 검사는 기본 VAD도 초기화하므로 작은 CPU 패키지 `webrtcvad-wheels`를 포함한다.
 의존성 파일은 인코딩을 명시해 Windows Python 3.9의 기존 pip에서도 한국어 주석을 읽을 수 있다.
+
+`platform`/`all`의 웹 스크립트 검사는 Node.js 22 이상이 필요하며, 현재 로컬·CI 기준은 24다.
+`node --version`으로 확인한다. npm 패키지를 설치하지 않고 Node 내장 테스트 실행기를 쓴다.
+CI는 Web 소스도 checkout하고 [공식 setup-node](https://github.com/actions/setup-node)로 Node 24를 준비한다.
+`dialogue` 기본 검사에는 Node가 필요하지 않다. 웹 검사 결과에는 호출한 `.cjs` 검사 파일의 해시도 남긴다.
 
 ## 4. 결과와 실패 처리
 
@@ -123,7 +130,29 @@ Claude Code는 프로젝트 루트에서 시작한다. `.claude/settings.json`�
 
 ## 7. 검증 기록
 
-### 2026-09-15 현재 작업의 검증
+### 2026-09-15 웹 등록 개선 후 최신 검사
+
+설문 재작성·예시 제거·UUID4 등록을 포함한 `--area all` 검사에서
+**135개(하네스 11, 서버 112, 작업자 5, 웹 7) 통과, 건너뜀 0개**를 확인했다.
+웹 검사 하나가 Node에서 11가지 화면 스크립트 동작을 실행한다. 135개에 별도 11개를 더해 보고하지 않는다.
+결과: `tools/_work/checks/20260915T071210Z-all-a9fc46a0/report.json`.
+인계 목록 관련 검사를 보강한 뒤 하네스 11개도 통과했다:
+`tools/_work/checks/20260915T075146Z-harness-5c7e9db5/report.json`.
+
+실제 Edge의 설문 변경·실패 복구·등록 화면 검사는 로컬 등록 응답을 사용했다.
+운영 서버에서는 새 화면·인물 작성·잘못된 등록 요청 거부·배포 해시·health·로그를 확인했다.
+기존 운영 인물을 바꾸는 성공 등록이나 실제 Tripo 생성은 수행하지 않았다.
+검사 범위와 서버 백업은 [웹 등록 흐름 개선](웹_등록_흐름_개선.md)에 있다.
+문서 최신화에서는 실행 소스·검사 파일을 추가로 바꾸지 않아 통과한 검사를 반복하지 않았다.
+
+### 2026-09-15 대화 AI·Unity 전체 검사
+
+웹 등록 수정 전 커밋 `8fbd6ea`에서 모의 검사 125개, 실제 판정 68개, 기억 60턴,
+되물음 5개 시나리오·199턴, 음성 왕복 9회와 Unity 검사 메뉴 4개를 통과했다.
+결과·지연·Quest Pro 미검증 범위는 [전체 검증 기록](전체_검증_20260915.md)에 있다.
+웹 등록 개선 후의 회귀 검사는 위 135개 결과로 구분한다.
+
+### 2026-09-15 대기 리액션 적용 당시
 
 대화 기억·TTS 생성 스트리밍·캐릭터 대기 리액션을 포함한 `--area all` 검사에서
 **125개(하네스 11, 서버 109, 작업자 5) 통과, 건너뜀 0개**를 확인했다.

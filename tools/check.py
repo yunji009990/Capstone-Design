@@ -21,12 +21,13 @@ SUITES = {
     "registration": ("Server/tests", "test_registration.py"),
     "persona_contract": ("Server/tests", "test_persona_boundary.py"),
     "worker": ("Survey/tests", "test_*.py"),
+    "web": ("Web/tests", "test_*.py"),
 }
 AREAS = {
     "dialogue": ("harness", "server"),
-    "platform": ("harness", "registration", "persona_contract", "worker"),
+    "platform": ("harness", "registration", "persona_contract", "worker", "web"),
     "harness": ("harness",),
-    "all": ("harness", "server", "worker"),
+    "all": ("harness", "server", "worker", "web"),
 }
 
 
@@ -79,6 +80,9 @@ def run_suite(suite, root, output, timeout):
     row = dict(suite, passed=False, tests_run=0, skipped=0, exit_code=None,
                test_sha256={p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in files if p.is_file()})
+    if suite["name"] == "web":
+        row["test_sha256"].update({p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                                    for p in (root / suite["directory"]).glob("test_*.cjs")})
     started = time.monotonic()
     row["log"] = suite["name"] + ".log"
     if not files:

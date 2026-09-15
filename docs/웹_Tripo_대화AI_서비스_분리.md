@@ -1,7 +1,8 @@
 # 웹·Tripo와 대화 AI 서비스 분리
 
-2026-09-12. **실행 코드·서버 설정·배포 적용 및 검증 완료.**
+기준일: 2026-09-15. 서비스 분리는 2026-09-12에 **구현·서버 적용·검증을 완료**했다.
 같은 서버에서 웹·인물 등록·Tripo 제작과 대화 AI를 각자 개발·배포·재시작할 수 있도록 분리했다.
+이후 대화 TTS를 재연결하고 생성 스트리밍·대기 리액션을 추가했으며, 등록 웹은 설문 재작성·자동 ID를 적용했다.
 전체 제품 흐름의 후속 설계는 [설문·인물·3D 통합 설계안](설문_인물_3D_통합_설계안.md)을 참고한다.
 
 ## 1. 현재 구성
@@ -19,7 +20,8 @@ flowchart LR
     Worker --> Tripo[Tripo 외부 API]
     subgraph AI[대화 AI 영역 · ~/capstone-server]
         Dialogue[대화 API :8002 + STT] --> LLM[Gemma :8001]
-        Dialogue -. 사용 설정 시 .-> TTS[TTS :8003 · 현재 중지]
+        Dialogue --> TTS[Qwen3-TTS API :8003]
+        TTS --> Engine[vLLM-Omni 엔진 :8004]
     end
     Dialogue -->|읽기 전용 인물 API| Registration
     Unity -->|모델 조회| Registration
@@ -33,7 +35,10 @@ flowchart LR
 | Tripo 작업자 | `~/webapp/Survey/model_worker.py` | `~/venv/tripo` | 실행 중, API 인증 확인 |
 | 대화 8002 | `~/capstone-server` | `~/venv/dialogue` | 실행 중, 인물 조회 방식 `http` |
 | LLM 8001 | 기존 Gemma/vLLM 프로세스 | `~/venv/vllm` | 기존 프로세스 유지 |
-| TTS 8003 | `~/capstone-server/tts_server.py` | `~/venv/qwentts` | 기존 비활성화 유지 |
+| TTS API 8003 | `~/capstone-server/tts_server.py` | `~/venv/qwentts` | 실행 중, loopback·PCM 스트리밍 |
+| TTS 엔진 8004 | `~/capstone-server/tts_streaming.yaml` 설정 | `~/venv/qwentts-stream` | TTS API가 관리, 두 단계 생성·디코딩 |
+
+상태는 2026-09-15 검증 시점 기준이다. TTS의 설치·예열·복구는 [실시간 스트리밍](TTS_실시간_스트리밍.md)을 따른다.
 
 3D 생성·리깅 연산은 Tripo가 수행한다. 서버 작업자는 API 요청·진행 관리·파일 다운로드·결과 전달을 담당한다.
 등록 API와 작업자는 대화용 STT/GPU 패키지를 설치하지 않은 환경에서도 실행된다.
@@ -66,7 +71,8 @@ ssh raon bash /home/crc_unity/webapp/Server/platform.sh tripo start
 ssh raon bash /home/crc_unity/capstone-server/dialogue.sh api start
 ```
 
-TTS는 현재 꺼져 있다. 대화 API의 재시작이 LLM이나 TTS를 자동으로 재시작하지 않는다.
+대화 API는 `DIALOGUE_TTS_URL=http://127.0.0.1:8003`으로 TTS를 사용한다.
+대화 API의 재시작이 LLM이나 TTS를 자동으로 재시작하지 않는다. 웹·Tripo 작업에서 TTS 설정을 변경하지 않는다.
 PID 파일의 프로세스 명령행이 대상 서비스와 일치할 때만 종료 신호를 보낸다.
 
 기존 `~/capstone-server/service.sh session ...`과 `start.sh`·`stop.sh`·`status.sh`는
@@ -91,6 +97,12 @@ URL이 설정된 운영 경로에서는 API 오류를 로컬 파일 읽기로 �
 
 이 계약의 revision은 현재 인물 자료의 스냅샷 식별자다. 통합 설계안의 모델·인물·음성을 묶는 게시 버전 전체를 구현한 것은 아니다.
 GLB는 기존 등록 API에서 Unity가 직접 받으며, 대화 AI에 전달하지 않는다.
+
+2026-09-15부터 신규 `POST /session/start`는 UUID4 세션 ID를 서버에서 발급한다.
+비어 있지 않은 `session` 입력은 400으로 거부하고, 호출자는 응답 ID를 이후 조회·모델 전달에 사용한다.
+웹의 `/publish`·`/publish_direct`는 `/persona`가 반환한 `survey_revision`과 같은 설문을 요구한다.
+이 해시는 설문 일치 검사이며 위 인물 조회 `revision`과 구분한다. 기존 ID의 조회·현재 인물 선택은 유지한다.
+설문 변경·작성 실패·부분 실패의 처리는 [웹 등록 흐름 개선](웹_등록_흐름_개선.md)에 있다.
 
 ## 5. Tripo 작업의 저장과 복구
 
@@ -118,7 +130,7 @@ T포즈 자동 전처리와 웹에서의 9개 동작 팩 구성은 통합 설계
 | 관리자 비밀번호·Tripo 키 | `~/webapp/Web/.env` — 웹·제작 영역 |
 | 등록 API 접속 토큰·인물 조회 전용 토큰 | `~/webapp/Server/session.env`의 `SESSION_TOKEN`, `PERSONA_READ_TOKEN` |
 | 대화 연결·인물 조회·LLM·TTS 설정 | `~/capstone-server/dialogue.env` — 대화 AI 영역 |
-| TTS 내부 설정 | `~/capstone-server/tts.env` — 현재 비활성화 |
+| TTS 내부 설정 | `~/capstone-server/tts.env` — Qwen3-TTS API·스트리밍 엔진 설정 |
 | 호환 명령의 목적지 | `~/capstone-server/service-paths.env` — 비밀 값 없는 경로 설정 |
 
 `PERSONA_READ_TOKEN`과 `DIALOGUE_PERSONA_TOKEN`은 새 인물 조회 전용 인증이다.
@@ -137,14 +149,19 @@ python tools/service_bundle.py dialogue
 명시된 코드 파일과 해시 manifest만 담는다. 실제 `.env`, 인물 자료, 모델 가중치, 작업 DB는 제외한다.
 기존 서버 갱신용이며, 가상환경 설치와 설정은 각각 별도로 관리한다. 적용 전에 대상 파일 해시를 대조하고 해당 영역 파일을 백업한다.
 
-검증 결과:
+2026-09-15 최신 등록 개선은 전체 회귀 검사 135개·실제 Edge 흐름·서버 적용을 확인했다.
+[등록 흐름 개선](웹_등록_흐름_개선.md)에 검사 범위와 백업을 기록했다. 웹·등록만 재시작했고
+대화 AI·TTS·Tripo 작업자 프로세스와 현재 인물 자료는 유지했다.
+대화·Unity의 실제 전체 검사는 [별도 검증 기록](전체_검증_20260915.md)에 있다.
+
+2026-09-12 분리 적용 당시의 검증 결과:
 
 - 기존 대화·음성·등록 회귀 검사와 인물 API 계약·연결 검사: 58개 통과.
 - Tripo 작업자 독립 검사: 5개 통과. 중복 요청, 전달 실패 후 복구, 제출 응답 유실, 리깅 불가, 삭제된 인물의 실행 권한을 확인했다.
 - 등록 전용 환경에서 등록 검사 2개·인물 계약 검사 4개, Tripo 전용 환경에서 작업자 검사 5개 통과.
 - 실제 서버에서 등록 인물 API 조회·참조 음성 해시·대화 시작을 확인했다.
 - 실제 웹 재시작 중 대화 연결과 대화·Tripo 작업자 PID가 유지됐다.
-- 실제 Gemma 텍스트 응답과 종료를 확인했다. TTS는 꺼진 상태다.
+- 실제 Gemma 텍스트 응답과 종료를 확인했다. 당시 TTS는 꺼진 상태였다.
 - 기존 인물 파일 해시·설문 행과 LLM PID/시작 시각이 보존됐다.
 - Tripo API 인증 확인에 생성 요청은 사용하지 않았다. 새 유료 생성 작업은 0건이다.
 

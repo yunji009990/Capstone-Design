@@ -17,6 +17,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = {
+    "웹_등록_흐름_개선.md", "웹_설문_항목_사용현황.md",
     "AI_하네스.md", "대화_AI_개발가이드.md",
     "Tripo_팀원_AI_작업지시서.md", "Tripo_개발환경_실행가이드.md",
     "Tripo_모델_테스트_씬.md", "Tripo_T포즈_전처리_실험.md",
@@ -39,7 +40,7 @@ def selected(name):
                 "tools/eval_turn_judge.py", "tools/turn_judge_cases.json",
                 "tools/tripo_trial.py", "tools/tripo_motion_pack.py", "tools/tripo_handoff.py",
                 "tools/tests/test_tripo_handoff.py", "Survey/model_worker.py", "Survey/requirements-worker.txt",
-                "Web/app.py", "Web/persona.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt"}:
+                "Web/app.py", "Web/persona.py", "Web/registration_input.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt"}:
         return True
     if path.parent.as_posix() == "docs":
         return path.name in DOCS
@@ -56,6 +57,8 @@ def selected(name):
         return path.suffix in {".py", ".sh", ".md", ".txt"} or path.name.endswith(".env.example")
     if name.startswith("Web/static/"):
         return path.suffix in {".html", ".css", ".js"}
+    if name.startswith("Web/tests/"):
+        return path.suffix in {".py", ".cjs"}
     return False
 
 

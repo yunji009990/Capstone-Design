@@ -65,8 +65,8 @@ def create_app(root=None, token=None, persona_token=None):
         if current_file.exists():
             sid = json.loads(current_file.read_text(encoding="utf-8")).get("session")
             return sid if sid and (folder(sid) / "persona.md").is_file() else None
-        sessions = registered()  # one-time migration from the legacy server
-        return sessions[-1] if sessions else None
+        # 예전 자료가 남아 있어도 임의로 체험 인물로 선택하지 않는다.
+        return None
 
     def set_current(sid):
         atomic(current_file, json.dumps({"session": sid}).encode())
@@ -151,10 +151,10 @@ def create_app(root=None, token=None, persona_token=None):
                     voice: UploadFile = File(...), model: UploadFile = File(None),
                     x_token: str = Header("")):
         auth(x_token)
+        if session.strip():
+            raise HTTPException(400, "세션 ID는 서버가 자동으로 발급합니다. 직접 지정할 수 없습니다.")
         if not persona.strip() or any(len(t.encode()) > 131072 for t in (persona, knowledge, rules)):
             raise HTTPException(400, "인물 설정이 비어 있거나 너무 깁니다")
-        sid = session.strip() or time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
-        path = folder(sid)
         raw = await upload(voice, 30 * 1024 * 1024)
         try:
             with wave.open(io.BytesIO(raw)) as wav:
@@ -166,7 +166,17 @@ def create_app(root=None, token=None, persona_token=None):
         mesh = await upload(model, 100 * 1024 * 1024) if model and model.filename else None
         if mesh is not None and not mesh.startswith(b"glTF"):
             raise HTTPException(400, "GLB 모델이 아닙니다")
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # UUID 충돌이나 동시 등록에서도 기존 인물 폴더를 덮어쓰지 않는다.
+        for _ in range(8):
+            sid = uuid.uuid4().hex
+            path = folder(sid)
+            try:
+                path.mkdir(parents=True, exist_ok=False, mode=0o700)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise HTTPException(503, "새 세션 ID를 발급하지 못했습니다. 다시 시도해 주세요.")
         for name, data in (("voice.wav", raw), ("persona.md", persona.strip().encode()),
                            ("knowledge.md", knowledge.strip().encode()), ("rules.md", rules.strip().encode())):
             atomic(path / name, data)

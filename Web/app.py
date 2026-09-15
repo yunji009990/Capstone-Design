@@ -23,6 +23,7 @@ import numpy as np
 import soundfile as sf
 
 import persona as persona_builder
+from registration_input import parse_survey, registration_survey, survey_revision
 
 # 설문 저장과 3D 모델 생성은 Survey/ 의 것을 그대로 쓴다. 스키마와 작업 추적이 이미
 # 있어서 다시 만들 이유가 없고, Survey/pages/2_관리자.py 로 같은 DB 를 들여다볼 수 있다.
@@ -224,15 +225,9 @@ def _measure_speakers(job):
             s["quality"] = {"error": str(e)}
 
 
-def _record_and_model(sid: str, survey_json: str, image: bytes, image_name: str):
-    """등록이 끝난 뒤 설문을 남기고, 사진이 있으면 3D 모델 작업을 띄운다.
-
-    등록 자체가 실패하면 안 되므로 여기서 나는 오류는 전부 삼킨다 — 대화는 사진 없이도
-    되고, 모델은 나중에 관리자 페이지에서 재시도할 수 있다."""
-    try:
-        d = json.loads(survey_json) if survey_json else {}
-    except json.JSONDecodeError:
-        d = {}
+def _record_and_model(sid: str, d: dict, image: bytes, image_name: str):
+    """등록 후 저장·모델 접수 결과를 별도로 반환하여 부분 실패를 화면에 알린다."""
+    result = {"survey_saved": False, "model_queued": False, "registration_warning": ""}
     try:
         survey_db.insert_session(
             session_id=sid, payload=d,
@@ -244,17 +239,22 @@ def _record_and_model(sid: str, survey_json: str, image: bytes, image_name: str)
         )
     except Exception as e:
         print(f"[설문저장 실패] {sid}: {e}", flush=True)
-        return
+        result["registration_warning"] = "인물은 등록됐지만 설문 기록을 저장하지 못했습니다. 운영자에게 알려 주세요. 사진·모델 작업은 접수되지 않았습니다."
+        return result
+    result["survey_saved"] = True
     if not image:
-        return
+        return result
     try:
         ext = os.path.splitext(image_name)[1].lower() or ".jpg"
         dest = survey_store.session_dir(sid) / f"front{ext}"
         dest.write_bytes(image)
         survey_db.set_model_status(sid, "queued")
         print(f"[모델] {sid} 작업 시작 — {survey_jobs.dispatch_model_job(sid)}", flush=True)
+        result["model_queued"] = True
     except Exception as e:
         print(f"[모델 준비 실패] {sid}: {e}", flush=True)
+        result["registration_warning"] = "인물과 설문은 등록됐지만 사진·모델 작업을 접수하지 못했습니다. 운영자에게 알려 주세요."
+    return result
 
 
 
@@ -459,12 +459,10 @@ async def persona_from_survey(survey: str = Form(...)):
     자동 생성이 끝이 아니라 시작이다 — 웹은 이 결과를 편집 가능한 상자에 채워 넣고,
     운영자가 확인하고 고친 뒤에 등록한다. 설문 답이 부실할 때 손쓸 데가 있어야 한다."""
     try:
-        d = json.loads(survey)
-    except json.JSONDecodeError as e:
-        raise HTTPException(400, f"설문 형식이 잘못됐습니다: {e}")
-    if not (d.get("relation") or "").strip():
-        raise HTTPException(400, "관계는 반드시 있어야 합니다. 말투 전체가 여기서 정해집니다.")
-    return persona_builder.build(d)
+        d = parse_survey(survey)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {**persona_builder.build(d), "survey_revision": survey_revision(d)}
 
 
 @app.post("/extract")
@@ -509,7 +507,12 @@ def file(job: str, path: str):
 @app.post("/publish")
 async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form(""),
                   persona: str = Form(...), knowledge: str = Form(""),
-                  survey: str = Form(""), image: UploadFile = File(None)):
+                  survey: str = Form(""), survey_revision: str = Form(""),
+                  image: UploadFile = File(None)):
+    try:
+        answers = registration_survey(survey, survey_revision, persona, session)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     j = JOBS.get(job)
     if not j or not j.get("result"):
         raise HTTPException(400, "추출이 끝나지 않았습니다")
@@ -527,7 +530,7 @@ async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = 
         o.write(wav)
     try:
         r = httpx.post(f"{SESSION_URL}/session/start", headers=_headers(),
-                       data={"persona": persona, "knowledge": knowledge, "session": session},
+                       data={"persona": persona, "knowledge": knowledge},
                        files={"voice": ("voice.wav", wav, "audio/wav")}, timeout=180)
     except Exception as e:
         raise HTTPException(502, f"등록 서버에 연결할 수 없습니다: {e}")
@@ -535,8 +538,8 @@ async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = 
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     out = r.json()
     img = await image.read() if image is not None and image.filename else b""
-    _record_and_model(out["session"], survey, img, image.filename if image else "")
-    return {**out,
+    recorded = _record_and_model(out["session"], answers, img, image.filename if image else "")
+    return {**out, **recorded,
             "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
 
 
@@ -628,10 +631,15 @@ def _quality(y, sr=24000):
 @app.post("/publish_direct")
 async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...),
                          knowledge: str = Form(""), session: str = Form(""),
-                         survey: str = Form(""), image: UploadFile = File(None)):
+                         survey: str = Form(""), survey_revision: str = Form(""),
+                         image: UploadFile = File(None)):
     """화자 분리를 건너뛰고 올린 오디오를 그대로 참조로 등록한다.
     분리기가 만든 참조는 조각을 이어붙인 것이라 무엇이 넘어갔는지 알기 어렵다.
     직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다."""
+    try:
+        answers = registration_survey(survey, survey_revision, persona, session)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     ext = os.path.splitext(voice.filename)[1].lower()
     if ext not in ALLOWED:
         raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
@@ -640,7 +648,7 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         o.write(wav)
     try:
         r = httpx.post(f"{SESSION_URL}/session/start", headers=_headers(),
-                       data={"persona": persona, "knowledge": knowledge, "session": session},
+                       data={"persona": persona, "knowledge": knowledge},
                        files={"voice": ("voice.wav", wav, "audio/wav")}, timeout=180)
     except Exception as e:
         raise HTTPException(502, f"등록 서버에 연결할 수 없습니다: {e}")
@@ -648,8 +656,8 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     out = r.json()
     img = await image.read() if image is not None and image.filename else b""
-    _record_and_model(out["session"], survey, img, image.filename if image else "")
-    return {**out,
+    recorded = _record_and_model(out["session"], answers, img, image.filename if image else "")
+    return {**out, **recorded,
             "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
 
