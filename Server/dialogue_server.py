@@ -19,6 +19,8 @@ from realtime_audio import SenseVoiceFrontend, TurnDetector
 from realtime_dialogue import Dialogue, load_persona, build_persona
 from persona_client import PersonaClient
 from persona_context import PROMPT_VERSION
+from dialogue_memory import MEMORY_VERSION, SessionMemory
+from dialogue_reactions import REACTION_VERSION, ReactionCache
 from realtime_llm import LLMClient, ModelEndpoint
 from realtime_tts import TTSClient
 from voice_reference import MAX_UPLOAD, ReferenceStore, decode_reference, session_recording
@@ -48,6 +50,10 @@ class Settings:
     tts_token: str = ""
     persona_url: str = ""
     persona_token: str = ""
+    memory_enabled: bool = True
+    context_tokens: int = 8192
+    reactions_enabled: bool = True
+    reaction_cache_dir: str = ""
 
     @classmethod
     def from_env(cls):
@@ -76,7 +82,11 @@ class Settings:
             int(os.environ.get("DIALOGUE_SILENCE_MS", "700")),
             os.environ.get("DIALOGUE_ALLOW_TEST_MODE", "0") == "1",
             os.environ.get("DIALOGUE_TTS_URL", ""), os.environ.get("DIALOGUE_TTS_TOKEN", ""),
-            os.environ.get("DIALOGUE_PERSONA_URL", ""), os.environ.get("DIALOGUE_PERSONA_TOKEN", ""))
+            os.environ.get("DIALOGUE_PERSONA_URL", ""), os.environ.get("DIALOGUE_PERSONA_TOKEN", ""),
+            os.environ.get("DIALOGUE_MEMORY_ENABLED", "1") == "1",
+            int(os.environ.get("DIALOGUE_CONTEXT_TOKENS", "8192")),
+            os.environ.get("DIALOGUE_REACTIONS_ENABLED", "1") == "1",
+            os.environ.get("DIALOGUE_REACTION_CACHE_DIR", str(base / "capstone-server" / "reaction-cache")))
 
 
 def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tts=None, personas=None):
@@ -92,10 +102,11 @@ def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tt
         reference_gate = asyncio.Lock()
         app.state.frontend = frontend or await asyncio.to_thread(
             SenseVoiceFrontend, settings.model_dir)
-        app.state.llm = llm or LLMClient(settings.normal, settings.reasoning)
+        app.state.llm = llm or LLMClient(settings.normal, settings.reasoning, context_limit=settings.context_tokens)
         app.state.tts = tts or (TTSClient(settings.tts_url, settings.tts_token) if settings.tts_url else None)
         app.state.personas = personas or (PersonaClient(settings.persona_url, settings.persona_token)
                                         if settings.persona_url else None)
+        app.state.reactions = ReactionCache(settings.reaction_cache_dir) if settings.reactions_enabled else None
         yield
         for connection in list(active):
             await connection.close()
@@ -174,10 +185,15 @@ def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tt
                 "llm_ready": llm_ready, "reasoning_configured": bool(settings.reasoning),
                 "reasoning_ready": reason_ready, "connections": len(active),
                 "tts": bool(app.state.tts), "tts_ready": tts_ready,
-                "tts_streaming": "phrase_pcm" if app.state.tts else None,
+                "tts_streaming": getattr(app.state.tts, "streaming_mode", None),
                 "tts_voice_mode": "reference_icl" if app.state.tts else None,
                 "interruption_policy": "semantic_v1",
                 "prompt_version": PROMPT_VERSION,
+                "memory": {"enabled": settings.memory_enabled and callable(getattr(app.state.llm, "extract_memory", None)),
+                           "version": MEMORY_VERSION, "scope": "connection"},
+                "reactions": {"enabled": bool(app.state.reactions and app.state.tts
+                              and callable(getattr(app.state.llm, "generate_reactions", None))),
+                              "version": REACTION_VERSION},
                 "persona_source": "http" if settings.persona_url else "legacy_files",
                 "test_mode_available": settings.allow_test_mode}
 
@@ -238,11 +254,14 @@ def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tt
                 return
             detector = (detector_factory() if detector_factory else
                         TurnDetector(silence_ms=settings.silence_ms))
+            memory = (SessionMemory(app.state.llm.extract_memory, getattr(app.state.llm, "resolve_memory_forget", None))
+                      if settings.memory_enabled and callable(getattr(app.state.llm, "extract_memory", None)) else None)
             connection = Dialogue(system, examples, app.state.frontend, app.state.llm,
                                   emit, detector=detector,
-                                  semantic_interruptions=hello.get("interruption_policy") == "semantic_v1")
+                                  semantic_interruptions=hello.get("interruption_policy") == "semantic_v1", memory=memory)
             active.add(connection)
             reference_info = None
+            reaction_info = {"version": REACTION_VERSION, "ready": False, "count": 0}
             if app.state.tts:
                 await emit({"type": "voice.preparing", "message": "참조 목소리와 말투를 준비하고 있습니다."})
                 if test_mode and hello.get("reference_id"):
@@ -263,10 +282,34 @@ def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tt
                 connection.tts = bound_voice
                 reference_info = reference.details()
                 reference_info["text"] = reference_text or reference.text
+                generate = getattr(app.state.llm, "generate_reactions", None)
+                if app.state.reactions is not None and callable(generate):
+                    # 등록 지식·사용자 대화는 리액션 생성 입력에 넣지 않는다.
+                    profile = (build_persona(persona_bundle["persona"], rules=persona_bundle["rules"])[0]
+                               if persona_bundle else system)
+                    scope = ("test" if test_mode else
+                             [settings.persona_url or settings.sessions_dir, hello["session"]])
+                    await emit({"type": "voice.preparing", "message": "캐릭터의 짧은 리액션을 준비하고 있습니다."})
+                    try:
+                        identity = getattr(app.state.tts, "reaction_identity", None)
+                        synthesis = await identity() if callable(identity) else [settings.tts_url]
+                        connection.reactions, reaction_info = await asyncio.wait_for(
+                            app.state.reactions.prepare(profile, scope, reference, reference_info["text"],
+                                bound_voice, generate, persistent=not test_mode,
+                                generator_identity=[settings.normal.url, settings.normal.model, settings.normal.extra],
+                                synthesis_identity=synthesis), timeout=35)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        # 리액션 준비 실패는 본 대화의 시작을 막지 않는다. 다음 연결에서 재시도한다.
+                        log.warning("reaction preparation skipped: %s", type(error).__name__)
+                        reaction_info["reason"] = "preparation_failed"
             await emit({"type": "ready", "protocol": 1, "sample_rate": 16000,
                         "session": "test" if test_mode else hello["session"],
                         "persona_revision": persona_bundle["revision"] if persona_bundle else None,
                         "prompt_version": PROMPT_VERSION,
+                        "memory": {"enabled": memory is not None, "version": MEMORY_VERSION, "scope": "connection"},
+                        "reactions": reaction_info,
                         "test_mode": test_mode, "tts": bool(app.state.tts),
                         "voice_mode": "reference_icl" if bound_voice else None,
                         "interruption_policy": "semantic_v1" if connection.semantic_interruptions else "cancel",
@@ -290,6 +333,19 @@ def create_app(settings=None, frontend=None, llm=None, detector_factory=None, tt
                     connection.context.update(control)
                 elif kind == "text" and test_mode:
                     await connection.text(control.get("text"))
+                elif kind == "memory.inspect" and test_mode:
+                    if connection.memory is None:
+                        raise ValueError("memory is disabled")
+                    await emit({"type": "memory.snapshot", "status": connection.memory.status(),
+                                "facts": connection.memory.fact_rows(max_chars=12000),
+                                "summary": connection.memory.summary()})
+                elif kind == "memory.flush" and test_mode:
+                    if connection.memory is None:
+                        raise ValueError("memory is disabled")
+                    idle = connection.active is None and connection.held is None
+                    if idle:
+                        connection.memory.kick(force=True)
+                    await emit({"type": "memory.scheduled", "idle": idle})
                 elif kind == "cancel":
                     await connection.interrupt("client_cancel")
                 elif kind in ("playback.progress", "playback.done"):

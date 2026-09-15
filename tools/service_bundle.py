@@ -26,9 +26,10 @@ def files_for(area):
             "requirements-registration.txt", "session.env.example")]
         return [(path, path.relative_to(ROOT).as_posix()) for path in paths]
     names = ("dialogue_server.py", "persona_client.py", "realtime_dialogue.py", "realtime_audio.py",
-             "realtime_llm.py", "realtime_tts.py", "interruption_policy.py", "persona_context.py",
-             "voice_reference.py", "tts_server.py", "service.sh", "dialogue.sh", "platform.sh",
-             "requirements-dialogue.txt", "requirements-tts.txt", "dialogue.env.example", "tts.env.example")
+             "realtime_llm.py", "realtime_tts.py", "interruption_policy.py", "persona_context.py", "dialogue_memory.py",
+             "voice_reference.py", "dialogue_reactions.py", "tts_server.py", "tts_omni.py", "tts_streaming.yaml", "setup_tts_streaming.py",
+             "service.sh", "dialogue.sh", "platform.sh", "requirements-dialogue.txt",
+             "requirements-tts.txt", "requirements-tts-streaming.txt", "dialogue.env.example", "tts.env.example")
     return [(ROOT / "Server" / name, name) for name in names]
 
 

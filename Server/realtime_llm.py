@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import httpx
 
 from interruption_policy import INSTRUCTION, TurnDecision
+from dialogue_memory import EXTRACT_INSTRUCTION, FORGET_INSTRUCTION
+from dialogue_reactions import REACTION_INSTRUCTION
+
+
+class ContextLimitError(RuntimeError):
+    """인물 설정과 현재 발화만으로도 답변 공간을 남길 수 없는 경우."""
 
 
 @dataclass
@@ -71,9 +77,10 @@ class SpokenTextFilter:
 
 
 class LLMClient:
-    def __init__(self, normal, reasoning=None, *, client=None):
+    def __init__(self, normal, reasoning=None, *, client=None, context_limit=0):
         self.normal = normal
         self.reasoning = reasoning
+        self.context_limit = context_limit
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(45.0, connect=5.0), trust_env=False)
 
@@ -125,6 +132,7 @@ class LLMClient:
         endpoint = self.reasoning if route == "reasoning" else self.normal
         if endpoint is None:
             raise RuntimeError("reasoning endpoint is not configured")
+        messages = await self.fit_messages(messages, endpoint)
         filtered = SpokenTextFilter()
         got_text = False
         finished = False
@@ -169,6 +177,71 @@ class LLMClient:
                 yield tail
         if not finished or not got_text or filtered.hidden:
             raise RuntimeError("LLM stream ended without a complete spoken answer")
+
+    async def fit_messages(self, messages, endpoint, *, output_tokens=None, trim=True):
+        """실제 vLLM 토큰 수를 세고 인물·현재 발화를 보존하며 오래된 원문을 줄인다."""
+        if not self.context_limit:
+            return messages
+        output_tokens = endpoint.max_tokens if output_tokens is None else output_tokens
+        api = endpoint.url.rsplit("/chat/completions", 1)[0]
+        url = (api[:-3] if api.endswith("/v1") else api) + "/tokenize"
+
+        async def fits(candidate):
+            response = await self.client.post(url, headers=self.headers(endpoint), json={
+                "model": endpoint.model, "messages": candidate, "add_generation_prompt": True,
+                "chat_template_kwargs": endpoint.extra.get("chat_template_kwargs", {})}, timeout=4)
+            response.raise_for_status()
+            info = response.json()
+            count, maximum = info.get("count"), info.get("max_model_len")
+            if type(count) is not int or type(maximum) is not int or count < 0 or maximum < 1:
+                raise ValueError("Invalid tokenizer response")
+            return count + output_tokens + 64 <= min(self.context_limit, maximum)
+
+        if await fits(messages):
+            return messages
+        if not trim or not messages or messages[0]["role"] != "system":
+            raise ContextLimitError("인물 정보나 현재 발화가 너무 깁니다. 내용을 줄여 다시 시도해 주세요.")
+        starts = [i for i in range(1, len(messages)) if messages[i]["role"] == "user"]
+        if not starts or not await fits([messages[0]] + messages[starts[-1]:]):
+            raise ContextLimitError("인물 정보나 현재 발화가 너무 깁니다. 내용을 줄여 다시 시도해 주세요.")
+        low, high = 0, len(starts)-1
+        while low < high:
+            middle = (low + high) // 2
+            if await fits([messages[0]] + messages[starts[middle]:]):
+                high = middle
+            else:
+                low = middle + 1
+        return [messages[0]] + messages[starts[low]:]
+
+    async def memory_json(self, instruction, payload, max_tokens):
+        # 같은 모델을 비추론 모드로 짧게 호출한다. 실제 값은 메모리 모듈이 원문에서 가져온다.
+        extra = {**self.normal.extra, "chat_template_kwargs": {
+            **self.normal.extra.get("chat_template_kwargs", {}), "enable_thinking": False}}
+        endpoint = replace(self.normal, extra=extra)
+        messages = [{"role": "system", "content": instruction},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
+        messages = await self.fit_messages(messages, endpoint, output_tokens=max_tokens, trim=False)
+        response = await self.client.post(endpoint.url, headers=self.headers(endpoint),
+            json=self.body(endpoint, messages, stream=False, max_completion_tokens=max_tokens,
+                           temperature=0, response_format={"type": "json_object"}), timeout=10)
+        response.raise_for_status()
+        choice = response.json()["choices"][0]
+        if choice.get("finish_reason") != "stop":
+            raise ValueError("Incomplete memory decision")
+        raw = choice["message"].get("content") or ""
+        if not isinstance(raw, str):
+            raise ValueError("Invalid memory content")
+        return json.loads(SpokenTextFilter().feed(raw, final=True).strip())
+
+    async def extract_memory(self, payload):
+        return await self.memory_json(EXTRACT_INSTRUCTION, payload, 768)
+
+    async def resolve_memory_forget(self, payload):
+        return await self.memory_json(FORGET_INSTRUCTION, payload, 512)
+
+    async def generate_reactions(self, profile):
+        # 캐릭터 준비 때만 호출한다. 실제 사용자 대화/기억은 입력하지 않는다.
+        return await self.memory_json(REACTION_INSTRUCTION, {"profile": profile}, 512)
 
     async def decide_interruption(self, messages, pending):
         # Reuse the loaded normal model; choose the action and compute route in

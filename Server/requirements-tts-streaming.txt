@@ -1,0 +1,8 @@
+# 별도 ~/venv/qwentts-stream 환경. 기존 Gemma/qwentts 환경에 설치하지 않는다.
+vllm==0.26.0
+vllm-omni==0.26.0
+transformers==5.17.0
+# torch 2.11.0 cu130의 헤더와 nvcc 버전 일치 (미고정 시 최신 13.x 혼합).
+nvidia-cuda-nvcc==13.0.88
+nvidia-cuda-crt==13.0.88
+nvidia-nvvm==13.0.88

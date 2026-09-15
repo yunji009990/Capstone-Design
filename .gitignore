@@ -116,6 +116,9 @@ Web/__pycache__/
 Server/**/__pycache__/
 Server/dialogue.env
 Server/dialogue.log
+Server/tts.log
+Server/tts-engine.log
+Server/reaction-cache/
 Server/dialogue.pid
 Server/*.env
 Server/*.pid

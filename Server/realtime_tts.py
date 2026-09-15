@@ -34,14 +34,20 @@ class PhraseBuffer:
 class TTSClient:
     def __init__(self, url, token=""):
         self.url = url.rstrip("/")
+        self.streaming_mode = None
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), trust_env=False,
                                       headers={"X-Token": token} if token else {})
 
     async def available(self):
+        self.streaming_mode = None
         try:
             r = await self.http.get(self.url + "/health", timeout=3)
-            return (r.status_code == 200 and r.json().get("status") == "ready"
-                    and r.json().get("voice_mode") == "reference_icl")
+            info = r.json()
+            ready = (r.status_code == 200 and info.get("status") == "ready"
+                     and info.get("voice_mode") == "reference_icl")
+            if ready:
+                self.streaming_mode = info.get("streaming")
+            return ready
         except (httpx.HTTPError, ValueError):
             return False
 
@@ -51,6 +57,12 @@ class TTSClient:
             "sample_rate": reference.sample_rate, "text": text or reference.text})
         response.raise_for_status()
         return BoundVoice(self, response.json()["voice_id"])
+
+    async def reaction_identity(self):
+        response = await self.http.get(self.url + "/health", timeout=3)
+        response.raise_for_status()
+        info = response.json()
+        return [self.url, info.get("model"), info.get("streaming"), info.get("voice_mode")]
 
     async def stream(self, text, voice_id):
         complete = False

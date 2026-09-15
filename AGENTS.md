@@ -1,6 +1,6 @@
 # 다시, 봄 — 공통 AI 작업 지침
 
-기준일: 2026-09-13. 이 파일이 도구에 공통으로 적용할 프로젝트 지침이다.
+기준일: 2026-09-15. 이 파일이 도구에 공통으로 적용할 프로젝트 지침이다.
 사용자의 현재 지시와 실제 세션의 도구·권한을 우선한다. 다른 PC의 권한 제한을 현재 환경에 일반화하지 않는다.
 
 ## 현재 담당과 목표
@@ -10,9 +10,14 @@
 `Scene_1`, `Scene_2`는 당분간 기능 개발 대상에서 제외한다.
 팀원이 Tripo 작업 지시서를 명시적으로 전달한 세션에서는 그 담당 범위를 따른다.
 
-- 현재 흐름: Unity 입력 → SenseVoiceSmall/STT·VAD → 의도 판정 → Gemma → 텍스트 응답.
+- 현재 흐름: Unity 입력 → SenseVoiceSmall/STT·VAD → 의도 판정 → Gemma → Qwen3-TTS → Unity 음성·자막.
 - 의미 기반 끼어들기 정책은 `semantic_v1`이다. 일반/추론은 현재 같은 Gemma의 thinking 설정 차이다.
-- TTS는 꺼진 상태를 유지한다. `DIALOGUE_TTS_URL=`이며 TTS 재활성화는 별도 작업이다.
+- 2026-09-14 사용자 요청으로 TTS를 재연결했다. `DIALOGUE_TTS_URL=http://127.0.0.1:8003`이며 Qwen3-TTS Base를 사용한다.
+- 같은 날 생성 중 PCM 전송으로 전환했다. TTS API 8003이 별도 `qwentts-stream` venv의 vLLM-Omni 엔진 8004를 관리한다.
+  현재 설치·예열·복구·검증은 [TTS 실시간 스트리밍](docs/TTS_실시간_스트리밍.md)을 따른다.
+- 2026-09-15 페르소나별 대기 대사·음성을 사전 준비해 추론 중 재생한다.
+  [캐릭터 대기 리액션](docs/캐릭터_대기_리액션.md)을 따른다. 첫 리액션 시간과 첫 본답변 시간을 구별한다.
+- 눈맞춤·몸짓 반응·동작 따라 하기 등 VR 추가 기능은 현재 음성 대화 안정화 이후로 보류한다.
 - Raon 모델·전용 환경·구형 실행기는 폐기했다. 과거 문서의 실행 명령으로 복원하지 않는다.
 - Unity는 2022.3.62f2다. 기존 개발선은 `jw`이며 실제 브랜치는 작업 시작 때 확인한다.
 
@@ -23,6 +28,9 @@
 | 하네스 사용·검사·완료 기준 | [AI 하네스](docs/AI_하네스.md) |
 | 대화 AI 담당의 작업 순서 | [대화 AI 개발 가이드](docs/대화_AI_개발가이드.md) |
 | 대화 구조·모델·취소 계약 | [서버 음성 대화 구조](docs/서버_음성대화_구조.md) |
+| 핵심 기억·정정·삭제 | [대화 메모리](docs/대화_메모리.md) |
+| TTS 설치·예열·복구 | [TTS 실시간 스트리밍](docs/TTS_실시간_스트리밍.md) |
+| 캐릭터별 대기 음성·최신 검증 | [캐릭터 대기 리액션](docs/캐릭터_대기_리액션.md) |
 | 실제 Unity 검사 | [AI 응답 테스트 씬](docs/AI_응답_테스트_씬.md) |
 | 판정기 실제 사례 | [판정기 텍스트 검사](docs/판정기_텍스트_검사.md) |
 | 서비스 경계·배포 | [서비스 분리](docs/웹_Tripo_대화AI_서비스_분리.md), [서버 운영](Server/README.md) |
@@ -35,7 +43,7 @@
 
 | 담당 | 주된 수정 범위 |
 |---|---|
-| 대화 AI | `Server/dialogue_server.py`, `persona_client.py`, `realtime_*.py`, `interruption_policy.py`, `persona_context.py`, `voice_reference.py`, 대화 검사·설정 예시 |
+| 대화 AI | `Server/dialogue_*.py`, `persona_client.py`, `realtime_*.py`, `interruption_policy.py`, `persona_context.py`, `voice_reference.py`, `tts_*.py`, TTS 엔진 설정·설치, 대화 검사·설정 예시 |
 | 대화 AI Unity | `Assets/Scripts/Dialogue/`, `Assets/Editor/DialogueTestScene*`, `Assets/Scenes/AI_Response_Test.unity` |
 | T포즈·3D 팀원 | 제작용 `Web/`, `Survey/`, `tools/tripo_trial.py`, `tools/tripo_motion_pack.py`, Tripo Editor 도구·`Tripo_Model_Test.unity` |
 | 공통 | 하네스·문서·검사 실행기·인계 도구, `Server/registration/`, `service.sh`, `Assets/Scripts/Persona/PersonaSpawner.cs`, 패키지·공통 설정 |
@@ -62,7 +70,7 @@
 
 ## 서버와 자료
 
-- 대화 코드: `~/capstone-server`, API 8002. LLM은 기존 8001, TTS 8003은 현재 중지.
+- 대화 코드: `~/capstone-server`, API 8002. LLM은 기존 8001, TTS는 8003 loopback의 별도 프로세스다.
 - 웹·등록·Tripo: `~/webapp`, 웹 8500·등록 8000·별도 Tripo 작업자. 대화 개발을 위해 재시작하지 않는다.
 - SSH 별칭 `raon`은 이 PC의 접속 설정이다. 팀원은 자기 접속 권한과 별칭을 준비한다.
 - 대화 제어는 `~/capstone-server/dialogue.sh api {start|stop|status}`다. 기존 `start.sh`는 등록 서비스 호환 명령이다.

@@ -1,7 +1,7 @@
-"""Qwen3-TTS worker. One GPU generation at a time, cancelled on disconnect.
+"""Qwen3-TTS worker: 생성 중 PCM 전송, 연결별 참조 음성, 끊김 시 추론 취소.
 
-The official Python API returns a complete phrase. This service streams its PCM
-in bounded packets; the dialogue service submits phrases before the LLM finishes.
+기본 vllm_omni 엔진은 별도 환경에서 실행한다. TTS_BACKEND=legacy 설정은
+이전의 구절 완성 후 전송 방식으로 돌아가는 명시적 복구 경로다.
 """
 from __future__ import annotations
 
@@ -24,6 +24,15 @@ from pydantic import BaseModel, Field
 log = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def closing_stream(stream):
+    try:
+        yield stream
+    finally:
+        with anyio.CancelScope(shield=True):
+            await stream.aclose()
+
+
 class SpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=300)
     voice_id: str = Field(min_length=32, max_length=32)
@@ -36,6 +45,8 @@ class ReferenceRequest(BaseModel):
 
 
 class QwenVoice:
+    streaming = "phrase_pcm"
+
     def __init__(self):
         import torch
         from qwen_tts import Qwen3TTSModel
@@ -84,28 +95,51 @@ def create_app(voice=None, token=None):
         if token and not hmac.compare_digest(value, token):
             raise HTTPException(403, "Unauthorized")
 
-    def purge():
+    async def release_prompt(prompt):
+        if hasattr(app.state.voice, "release_prompt"):
+            await app.state.voice.release_prompt(prompt)
+
+    async def purge():
         # Normal connection teardown deletes immediately. Bound orphaned prompts
         # after a client/process failure, including a cancelled preparation.
-        for key, (_, used) in list(prompts.items()):
+        for key, (prompt, used) in list(prompts.items()):
             if time.monotonic() - used > 6 * 3600:
+                await release_prompt(prompt)
                 del prompts[key]
 
     @asynccontextmanager
     async def lifespan(app):
         nonlocal gate
         gate = asyncio.Lock()
-        app.state.voice = voice or await asyncio.to_thread(QwenVoice)
-        yield
-        prompts.clear()
+        backend = os.environ.get("TTS_BACKEND", "vllm_omni")
+        if voice is not None:
+            app.state.voice = voice
+        elif backend == "legacy":
+            app.state.voice = await asyncio.to_thread(QwenVoice)
+        elif backend == "vllm_omni":
+            from tts_omni import OmniVoice
+            app.state.voice = OmniVoice()
+        else:
+            raise ValueError("TTS_BACKEND must be vllm_omni or legacy")
+        try:
+            if hasattr(app.state.voice, "start"):
+                await app.state.voice.start()
+            yield
+        finally:
+            prompts.clear()
+            if hasattr(app.state.voice, "close"):
+                await app.state.voice.close()
 
     app = FastAPI(title="Qwen3-TTS worker", lifespan=lifespan)
 
     @app.get("/health")
-    def health():
-        return {"status": "ready", "model": app.state.voice.model_id,
+    async def health():
+        ready = (await app.state.voice.available()
+                 if hasattr(app.state.voice, "available") else True)
+        return {"status": "ready" if ready else "unavailable", "model": app.state.voice.model_id,
                 "voice_mode": "reference_icl", "device": "cuda:0",
-                "streaming": "phrase_pcm", "busy": gate.locked(), "references": len(prompts)}
+                "streaming": getattr(app.state.voice, "streaming", "phrase_pcm"),
+                "busy": gate.locked(), "references": len(prompts)}
 
     @app.post("/voices")
     async def prepare(body: ReferenceRequest, x_token: str = Header("")):
@@ -118,17 +152,22 @@ def create_app(voice=None, token=None):
                 or not body.text.strip()):
             raise HTTPException(400, "Reference requires 3–12 seconds of PCM and its transcript")
         async with gate:
-            purge()
+            await purge()
             if len(prompts) >= 8:
                 raise HTTPException(503, "Reference prompt capacity reached")
-            task = asyncio.create_task(asyncio.to_thread(
-                app.state.voice.create_prompt, pcm, body.sample_rate, body.text.strip()))
+            worker = app.state.voice
+            preparation = (worker.create_prompt(pcm, body.sample_rate, body.text.strip())
+                           if hasattr(worker, "stream") else asyncio.to_thread(
+                               worker.create_prompt, pcm, body.sample_rate, body.text.strip()))
+            task = asyncio.create_task(preparation)
             try:
                 prompt = await asyncio.shield(task)
-            finally:
+            except asyncio.CancelledError:
                 with anyio.CancelScope(shield=True):
                     with suppress(Exception, asyncio.CancelledError):
-                        await asyncio.shield(task)
+                        prompt = await asyncio.shield(task)
+                        await release_prompt(prompt)
+                raise
             voice_id = uuid.uuid4().hex
             prompts[voice_id] = prompt, time.monotonic()
         return {"voice_id": voice_id, "voice_mode": "reference_icl"}
@@ -137,7 +176,9 @@ def create_app(voice=None, token=None):
     async def release(voice_id: str, x_token: str = Header("")):
         auth(x_token)
         async with gate:
-            prompts.pop(voice_id, None)
+            if voice_id in prompts:
+                await release_prompt(prompts[voice_id][0])
+                del prompts[voice_id]
         return {"released": True}
 
     @app.post("/synthesize")
@@ -145,7 +186,6 @@ def create_app(voice=None, token=None):
         auth(x_token)
         if not body.text.strip():
             raise HTTPException(400, "Empty speech")
-        purge()
         if body.voice_id not in prompts:
             raise HTTPException(404, "Reference expired; reconnect to prepare it again")
 
@@ -157,19 +197,35 @@ def create_app(voice=None, token=None):
             # Disconnect cancels this generator, including while waiting for gate.
             async with gate:
                 try:
+                    await purge()
                     if body.voice_id not in prompts:
                         raise ValueError("Reference was released")
                     prompt, _ = prompts[body.voice_id]
                     prompts[body.voice_id] = prompt, time.monotonic()
                     yield line({"type": "started"})
-                    task = asyncio.create_task(asyncio.to_thread(
-                        app.state.voice.synthesize, body.text.strip(), prompt, cancelled))
-                    pcm, rate, elapsed = await asyncio.shield(task)
-                    for offset in range(0, len(pcm), 9600):  # 200 ms, 12.8 KB JSON
-                        yield line({"type": "audio", "sample_rate": rate,
-                                    "pcm": base64.b64encode(pcm[offset:offset + 9600]).decode()})
+                    started = time.monotonic()
+                    audio_bytes = 0
+                    if hasattr(app.state.voice, "stream"):
+                        # Explicit aclose propagates a downstream disconnect even
+                        # when this generator was suspended while yielding PCM.
+                        async with closing_stream(app.state.voice.stream(body.text.strip(), prompt)) as stream:
+                            async for pcm in stream:
+                                if not pcm or len(pcm) > 9600 or len(pcm) % 2:
+                                    raise ValueError("Invalid streaming PCM packet")
+                                audio_bytes += len(pcm)
+                                yield line({"type": "audio", "sample_rate": 24000,
+                                            "pcm": base64.b64encode(pcm).decode()})
+                        elapsed = time.monotonic() - started
+                    else:
+                        task = asyncio.create_task(asyncio.to_thread(
+                            app.state.voice.synthesize, body.text.strip(), prompt, cancelled))
+                        pcm, rate, elapsed = await asyncio.shield(task)
+                        audio_bytes = len(pcm)
+                        for offset in range(0, len(pcm), 9600):
+                            yield line({"type": "audio", "sample_rate": rate,
+                                        "pcm": base64.b64encode(pcm[offset:offset + 9600]).decode()})
                     yield line({"type": "done", "synthesis_sec": elapsed,
-                                "audio_sec": len(pcm) / (rate * 2)})
+                                "audio_sec": audio_bytes / 48000})
                 except asyncio.CancelledError:
                     raise
                 except Exception:
