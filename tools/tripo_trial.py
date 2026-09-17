@@ -109,6 +109,9 @@ def main() -> int:
                         help="T포즈 이미지 모델. 기본 gemini_2.5_flash_image_preview(5). gemini_3_pro_image_preview 등은 10")
     parser.add_argument("--tpose-only", action="store_true",
                         help="T포즈 이미지까지만 받고 멈춘다. 같은 --out 으로 다시 실행하면 이어서 생성한다")
+    parser.add_argument("--tpose-prompt", default=TPOSE_PROMPT,
+                        help="T포즈 이미지 프롬프트를 바꿔 스타일을 실험한다. 프롬프트가 다르면 "
+                             "다른 시험이므로 새 --out 폴더를 쓴다")
     parser.add_argument("--multiview", action="store_true",
                         help="4뷰를 먼저 만들고(generate_multiview_image, 10) multiview_to_model 로 생성한다. "
                              "한 장에서 뒤·옆을 지어내지 않아 좌우 비대칭이 준다")
@@ -136,7 +139,7 @@ def main() -> int:
     base = 85 if args.multiview else 75
     if args.tpose:
         # 기존 폴더의 request 와 그대로 비교되도록 --tpose 일 때만 키를 더한다.
-        identity["tpose"] = {"model_version": args.tpose_model, "prompt": TPOSE_PROMPT, "t_pose": True}
+        identity["tpose"] = {"model_version": args.tpose_model, "prompt": args.tpose_prompt, "t_pose": True}
     if args.dry_run:
         print(json.dumps({"request": identity, "estimated_credits": base + extra, "network_calls": 0}, indent=2))
         return 0
@@ -267,7 +270,7 @@ def main() -> int:
             if "tpose" not in manifest["tasks"]:
                 token = client._upload_image(image_path)
                 tpose_body = {"type": "generate_image", "model_version": args.tpose_model,
-                              "prompt": TPOSE_PROMPT, "file": {"type": image_type, "file_token": token},
+                              "prompt": args.tpose_prompt, "file": {"type": image_type, "file_token": token},
                               "t_pose": True}
             else:
                 tpose_body = manifest["tasks"]["tpose"]["request"]
