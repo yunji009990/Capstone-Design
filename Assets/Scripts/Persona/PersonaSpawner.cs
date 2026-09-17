@@ -116,6 +116,39 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("어깨가 오르내리는 진폭(도).")]
     [Range(0f, 5f)] public float breathShoulderDeg = 0.7f;
 
+    [Header("시선")]
+    // 얼굴 뼈도 블렌드셰이프도 없어서 표정으로는 아무것도 못 한다. 대신 "나를 보고 있다"는
+    // 신호가 VR 에서 가장 강한 살아있음이 된다. 호흡과 같은 방식으로 뼈 위에 얹는다.
+    [Tooltip("체험자를 바라본다. 목과 머리가 나눠 돌아간다.")]
+    public bool gaze = true;
+
+    [Tooltip("바라볼 대상. 비워두면 Camera.main(HMD)을 쓴다.")]
+    public Transform gazeTarget;
+
+    [Tooltip("좌우 한계(도). 넘어가면 그 각도에서 멈추고 더 돌지 않는다.")]
+    [Range(0f, 90f)] public float gazeMaxYaw = 55f;
+
+    [Tooltip("위아래 한계(도).")]
+    [Range(0f, 60f)] public float gazeMaxPitch = 22f;
+
+    [Tooltip("목이 맡는 비율. 나머지는 머리가 맡는다. 0 이면 머리만 꺾여 뻣뻣하다.")]
+    [Range(0f, 0.8f)] public float gazeNeckShare = 0.35f;
+
+    [Tooltip("따라붙는 빠르기(초). 작을수록 빠르게 쫓는다.")]
+    [Range(0.05f, 1.5f)] public float gazeResponseSec = 0.28f;
+
+    [Tooltip("가끔 시선을 뗀다. 계속 응시하면 사람은 부담을 느낀다.")]
+    public bool gazeBreaks = true;
+
+    [Tooltip("시선이 정반대로 간다면 켠다. 얼굴 앞 방향의 부호를 뒤집는다.")]
+    public bool gazeFlipForward;
+
+    [Tooltip("읽기용. 지금 얼굴이 향한다고 계산한 방향(월드).")]
+    public Vector3 gazeForwardNow;
+
+    [Tooltip("읽기용. 그 방향과 대상 사이의 각도(도). 0 에 가까워야 정상이다.")]
+    public float gazeErrorDeg;
+
     [Header("텍스처")]
     // glTFast 는 기본값으로 밉맵을 만들지 않는다(ImportSettings.GenerateMipMaps).
     // 밉맵 없는 2K 얼굴 텍스처는 VR 에서 조금만 멀어져도 픽셀이 지글거려서,
@@ -186,6 +219,12 @@ public class PersonaSpawner : MonoBehaviour
     Quaternion _spineBase, _chestBase, _neckBase, _lClavBase, _rClavBase;
     // 인물이 보는 방향(루트 기준). 루트의 forward 가 얼굴 방향이라는 보장이 없어 뼈로 잰다.
     Vector3 _faceForwardLocal = Vector3.forward, _faceRightLocal = Vector3.right;
+    // 시선. _aim 은 지금 보고 있는 방향(월드)이고 목표를 서서히 따라간다.
+    Transform _head, _lFootBone, _lToeBone, _rFootBone, _rToeBone;
+    Quaternion _headBase;
+    Vector3 _aim, _gazeBreakDir;
+    Camera _gazeCamera;
+    float _gazeBreakAt, _gazeBreakUntil;
 
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
@@ -232,19 +271,25 @@ public class PersonaSpawner : MonoBehaviour
     void LateUpdate()
     {
         if (_spawnedInstance == null) return;
-        if (!breathe) return;
         // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
         bool driven = _poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying;
         if (driven) CaptureBreathBase();
-        float phase = Mathf.Sin(Time.time * breathsPerMinute / 60f * Mathf.PI * 2f);
-        // 뼈의 로컬 축은 리깅마다 달라서 인물이 보는 방향 기준 축(옆·앞)으로 돌린다.
         Transform body = _spawnedInstance.transform;
-        Vector3 side = body.TransformDirection(_faceRightLocal), front = body.TransformDirection(_faceForwardLocal);
-        Breathe(_spine, _spineBase, -phase * breathChestDeg * 0.5f, side);
-        Breathe(_chest, _chestBase, -phase * breathChestDeg, side);
-        Breathe(_neck,  _neckBase,   phase * breathChestDeg * 1.5f, side);   // 머리는 수평을 지킨다
-        Breathe(_lClav, _lClavBase,  phase * breathShoulderDeg, front);
-        Breathe(_rClav, _rClavBase, -phase * breathShoulderDeg, front);
+
+        if (breathe)
+        {
+            float phase = Mathf.Sin(Time.time * breathsPerMinute / 60f * Mathf.PI * 2f);
+            // 뼈의 로컬 축은 리깅마다 달라서 인물이 보는 방향 기준 축(옆·앞)으로 돌린다.
+            Vector3 side = body.TransformDirection(_faceRightLocal), front = body.TransformDirection(_faceForwardLocal);
+            Breathe(_spine, _spineBase, -phase * breathChestDeg * 0.5f, side);
+            Breathe(_chest, _chestBase, -phase * breathChestDeg, side);
+            Breathe(_neck,  _neckBase,   phase * breathChestDeg * 1.5f, side);   // 머리는 수평을 지킨다
+            Breathe(_lClav, _lClavBase,  phase * breathShoulderDeg, front);
+            Breathe(_rClav, _rClavBase, -phase * breathShoulderDeg, front);
+        }
+
+        // 시선은 호흡 다음이다. 호흡이 목에 써 놓은 결과 위에 얹는다.
+        if (gaze) AimGaze(body);
     }
 
     /// <summary>인물이 보는 방향을 발목→발가락 뼈로 잰다. 루트 회전이나 뼈의 로컬 축과 무관하다.</summary>
@@ -268,6 +313,7 @@ public class PersonaSpawner : MonoBehaviour
         }
         _faceForwardLocal = body.InverseTransformDirection(forward);
         _faceRightLocal = body.InverseTransformDirection(Vector3.Cross(body.up, forward).normalized);
+        _lFootBone = lFoot; _lToeBone = lToe; _rFootBone = rFoot; _rToeBone = rToe;
         if (verboseLog) Debug.Log($"[PersonaSpawner] 얼굴 방향(월드): {forward}");
     }
 
@@ -319,6 +365,92 @@ public class PersonaSpawner : MonoBehaviour
         return quiet;
     }
 
+    /// <summary>
+    /// 목과 머리를 체험자 쪽으로 돌린다. 뼈의 로컬 축이 리깅마다 달라서 호흡과 같이
+    /// 월드 회전 델타로 얹는다. 목이 일부를 맡고 남은 각도를 머리가 마저 돌린다 —
+    /// 머리만 꺾으면 목이 꺾인 인형처럼 보인다.
+    /// </summary>
+    void AimGaze(Transform body)
+    {
+        if (_head == null) return;
+        Transform look = gazeTarget;
+        if (look == null)
+        {
+            if (_gazeCamera == null) _gazeCamera = Camera.main;   // VR 에서는 HMD 다
+            if (_gazeCamera == null) return;
+            look = _gazeCamera.transform;
+        }
+
+        Vector3 up = body.up;
+        // 캐시된 방향 대신 매 프레임 발 뼈로 다시 잰다. 다른 스크립트가 뼈대를 돌려도 흔들리지 않는다.
+        Vector3 forward = MeasureFaceForward(body, up);
+        if (gazeFlipForward) forward = -forward;
+        gazeForwardNow = forward;
+        Vector3 want = ClampAim(look.position - _head.position, forward, up, gazeMaxYaw, gazeMaxPitch);
+        if (gazeBreaks) want = GazeBreak(want, up);
+
+        if (_aim.sqrMagnitude < 1e-6f) _aim = forward;
+        _aim = Vector3.Slerp(_aim, want, 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.01f, gazeResponseSec))).normalized;
+
+        // 머리를 기준 자세로 되돌린다. 안 그러면 델타가 프레임마다 쌓인다.
+        _head.localRotation = _headBase;
+
+        Vector3 reached = forward;
+        if (_neck != null && gazeNeckShare > 0.001f)
+        {
+            Quaternion share = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(forward, _aim), gazeNeckShare);
+            _neck.rotation = share * _neck.rotation;   // 머리는 자식이라 같이 따라간다
+            reached = share * forward;
+        }
+        _head.rotation = Quaternion.FromToRotation(reached, _aim) * _head.rotation;
+        gazeErrorDeg = Vector3.Angle(_aim, Vector3.Normalize(look.position - _head.position));
+    }
+
+    /// <summary>얼굴이 보는 방향(월드)을 발목→발가락으로 잰다. 앉은 자세에서도 발은 앞을 향한다.</summary>
+    Vector3 MeasureFaceForward(Transform body, Vector3 up)
+    {
+        Vector3 f = Vector3.zero;
+        if (_lFootBone && _lToeBone) f += _lToeBone.position - _lFootBone.position;
+        if (_rFootBone && _rToeBone) f += _rToeBone.position - _rFootBone.position;
+        f = Vector3.ProjectOnPlane(f, up);
+        return f.sqrMagnitude > 1e-8f ? f.normalized : body.TransformDirection(_faceForwardLocal);
+    }
+
+    /// <summary>바라볼 방향을 몸 기준 좌우·상하 한계 안으로 자른다. 뒤를 보려 해도 꺾이지 않는다.</summary>
+    static Vector3 ClampAim(Vector3 toTarget, Vector3 forward, Vector3 up, float maxYaw, float maxPitch)
+    {
+        if (toTarget.sqrMagnitude < 1e-6f) return forward;
+        Vector3 dir = toTarget.normalized;
+        Vector3 flatFwd = Vector3.ProjectOnPlane(forward, up);
+        Vector3 flatDir = Vector3.ProjectOnPlane(dir, up);
+        if (flatFwd.sqrMagnitude < 1e-6f) return forward;
+        if (flatDir.sqrMagnitude < 1e-6f) flatDir = flatFwd;
+        flatFwd.Normalize(); flatDir.Normalize();
+
+        float yaw = Mathf.Clamp(Vector3.SignedAngle(flatFwd, flatDir, up), -maxYaw, maxYaw);
+        // 상하는 수평 성분에서 잰다. 축을 세울 때와 되돌릴 때 같은 규칙을 써서 부호를 맞춘다.
+        float pitch = Mathf.Clamp(Vector3.SignedAngle(flatDir, dir, Vector3.Cross(up, flatDir)), -maxPitch, maxPitch);
+
+        Vector3 aimed = Quaternion.AngleAxis(yaw, up) * flatFwd;
+        return (Quaternion.AngleAxis(pitch, Vector3.Cross(up, aimed)) * aimed).normalized;
+    }
+
+    /// <summary>가끔 시선을 뗀다. 한 점만 계속 응시하면 사람은 부담을 느낀다.</summary>
+    Vector3 GazeBreak(Vector3 want, Vector3 up)
+    {
+        float now = Time.time;
+        if (_gazeBreakAt <= 0f) { _gazeBreakAt = now + UnityEngine.Random.Range(4f, 9f); return want; }
+        if (now >= _gazeBreakAt)
+        {
+            _gazeBreakAt = now + UnityEngine.Random.Range(4f, 9f);
+            _gazeBreakUntil = now + UnityEngine.Random.Range(0.5f, 1.2f);
+            Quaternion away = Quaternion.AngleAxis(UnityEngine.Random.Range(-28f, 28f), up)
+                            * Quaternion.AngleAxis(UnityEngine.Random.Range(-8f, 14f), Vector3.Cross(up, want));
+            _gazeBreakDir = (away * want).normalized;
+        }
+        return now < _gazeBreakUntil && _gazeBreakDir.sqrMagnitude > 1e-6f ? _gazeBreakDir : want;
+    }
+
     static void Breathe(Transform bone, Quaternion baseLocal, float angleDeg, Vector3 worldAxis)
     {
         if (bone == null) return;
@@ -329,7 +461,7 @@ public class PersonaSpawner : MonoBehaviour
 
     void FindBreathBones(GameObject root)
     {
-        _spine = _chest = _neck = _lClav = _rClav = null;
+        _spine = _chest = _neck = _lClav = _rClav = _head = null;
         foreach (var t in root.GetComponentsInChildren<Transform>(true))
         {
             string n = t.name.ToLowerInvariant();
@@ -338,11 +470,12 @@ public class PersonaSpawner : MonoBehaviour
             else if (_neck == null && n.Contains("neck")) _neck = t;
             else if (_lClav == null && n.Contains("l_clavicle")) _lClav = t;
             else if (_rClav == null && n.Contains("r_clavicle")) _rClav = t;
+            else if (_head == null && n.EndsWith("head")) _head = t;
         }
         CaptureBreathBase();
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 호흡 뼈: spine={_spine?.name} chest={_chest?.name} neck={_neck?.name} " +
-                      $"clavicle={_lClav?.name}/{_rClav?.name}");
+                      $"clavicle={_lClav?.name}/{_rClav?.name} head={_head?.name}");
     }
 
     void CaptureBreathBase()
@@ -352,6 +485,7 @@ public class PersonaSpawner : MonoBehaviour
         if (_neck)  _neckBase  = _neck.localRotation;
         if (_lClav) _lClavBase = _lClav.localRotation;
         if (_rClav) _rClavBase = _rClav.localRotation;
+        if (_head)  _headBase  = _head.localRotation;
     }
 
     /// <summary>
