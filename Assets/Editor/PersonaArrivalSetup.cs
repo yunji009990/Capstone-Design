@@ -74,6 +74,11 @@ public static class PersonaArrivalSetup
         var sitDown = Exact("Sitting") ?? Loose("Sit Down") ?? Loose("Stand To Sit");
         var seated = Exact("Sitting Clap") ?? Loose("Clap") ?? Loose("Sitting Idle");
 
+        // 앉은 뒤 상반신에 얹을 제스처. 서 있는 클립이어도 된다 — 마스크가 다리를 잘라낸다.
+        var talk = Exact("Talking") ?? Loose("Talk");
+        var nod = Exact("Head Nod Yes") ?? Loose("Nod") ?? Loose("Agree");
+        var shake = Exact("Shaking Head No") ?? Loose("Head Shake") ?? Loose("Shaking Head");
+
         // 3) 프로브를 세운다.
         var spawnerForProbe = Object.FindObjectOfType<PersonaSpawner>();
         if (spawnerForProbe == null)
@@ -98,6 +103,9 @@ public static class PersonaArrivalSetup
         probe.turnClip = turn;
         probe.sitDownClip = sitDown;
         probe.seatedClip = seated;
+        probe.talkClip = talk;
+        probe.nodClip = nod;
+        probe.shakeClip = shake;
 
         // 4) 입구 표시를 만든다. 씬 뷰에서 카페 문 앞으로 끌어다 놓으면 된다.
         if (probe.entrance == null)
@@ -165,6 +173,9 @@ public static class PersonaArrivalSetup
         report.Add($"  돌기   : {Name(turn)}");
         report.Add($"  앉기   : {Name(sitDown)}");
         report.Add($"  앉음   : {Name(seated)}");
+        report.Add($"  말할때 : {Name(talk)}   (상반신만)");
+        report.Add($"  끄덕임 : {Name(nod)}   (상반신만)");
+        report.Add($"  고개젓 : {Name(shake)}   (상반신만)");
         report.Add($"  경유지 : {(probe.waypoints != null ? probe.waypoints.Length : 0)}개");
         report.Add($"  입구   : {(probe.entrance != null ? probe.entrance.name : "없음")}  " +
                    $"의자: {(probe.seat != null ? probe.seat.name : "없음 — 스포너 spawnPoint 를 확인할 것")}");

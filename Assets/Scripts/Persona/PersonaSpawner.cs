@@ -126,6 +126,12 @@ public class PersonaSpawner : MonoBehaviour
     // 다시 잡게 해서, 낡은 기준으로 상체를 되돌려 팔다리가 따로 노는 걸 막는다.
     [HideInInspector] public bool posedExternally;
 
+    /// <summary>
+    /// 인물이 보는 방향을 정확히 아는 쪽(도착 연출)이 여기에 꽂는다. 비어 있으면 발 뼈로 잰다.
+    /// 앉으면 발목→발가락이 거의 수직이 돼서 발로 잰 방향이 못 쓰게 된다.
+    /// </summary>
+    [System.NonSerialized] public System.Func<Vector3> facingSource;
+
     [Header("시선")]
     // 얼굴 뼈도 블렌드셰이프도 없어서 표정으로는 아무것도 못 한다. 대신 "나를 보고 있다"는
     // 신호가 VR 에서 가장 강한 살아있음이 된다. 호흡과 같은 방식으로 뼈 위에 얹는다.
@@ -155,6 +161,12 @@ public class PersonaSpawner : MonoBehaviour
 
     [Tooltip("읽기용. 지금 얼굴이 향한다고 계산한 방향(월드).")]
     public Vector3 gazeForwardNow;
+
+    [Tooltip("진단용. 발 뼈로만 잰 방향. 위와 크게 어긋나면 발 기준이 못 쓰는 자세라는 뜻이다.")]
+    public Vector3 gazeForwardFromFeet;
+
+    /// <summary>시선이 쓸 머리 뼈를 찾았는지. 이게 false 면 시선은 아무것도 하지 않는다.</summary>
+    public bool GazeReady => _head != null;
 
     [Tooltip("읽기용. 그 방향과 대상 사이의 각도(도). 0 에 가까워야 정상이다.")]
     public float gazeErrorDeg;
@@ -416,13 +428,25 @@ public class PersonaSpawner : MonoBehaviour
         gazeErrorDeg = Vector3.Angle(_aim, Vector3.Normalize(look.position - _head.position));
     }
 
-    /// <summary>얼굴이 보는 방향(월드)을 발목→발가락으로 잰다. 앉은 자세에서도 발은 앞을 향한다.</summary>
+    /// <summary>
+    /// 얼굴이 보는 방향(월드). 도착 연출이 방향을 알려 주면 그걸 쓰고, 없으면 발목→발가락으로 잰다.
+    ///
+    /// 발 기준은 서 있을 때만 믿을 수 있다. 앉으면 발목이 접혀 발목→발가락이 거의 수직이 되고,
+    /// 수평 성분이 거의 0 이라 방향이 잡음처럼 튄다. 그 상태로는 시선이 사람을 못 따라온다.
+    /// </summary>
     Vector3 MeasureFaceForward(Transform body, Vector3 up)
     {
         Vector3 f = Vector3.zero;
         if (_lFootBone && _lToeBone) f += _lToeBone.position - _lFootBone.position;
         if (_rFootBone && _rToeBone) f += _rToeBone.position - _rFootBone.position;
         f = Vector3.ProjectOnPlane(f, up);
+        gazeForwardFromFeet = f.sqrMagnitude > 1e-8f ? f.normalized : Vector3.zero;
+
+        if (facingSource != null)
+        {
+            Vector3 given = Vector3.ProjectOnPlane(facingSource(), up);
+            if (given.sqrMagnitude > 1e-8f) return given.normalized;
+        }
         return f.sqrMagnitude > 1e-8f ? f.normalized : body.TransformDirection(_faceForwardLocal);
     }
 
@@ -651,6 +675,11 @@ public class PersonaSpawner : MonoBehaviour
         // 도착 연출을 쓰면 자세는 그쪽이 잡는다. 여기서 preset:sit 을 틀면 서로 덮어쓴다.
         bool useArrival = arrival != null && arrival.CanRun;
         if (applyPoseAnimation && !useArrival) ApplyPose(_spawnedInstance);
+
+        // 자세를 잡은 뒤에 뼈를 찾는다 — 기준 자세를 그때 저장하기 때문이다.
+        // ApplyPose 안에 두면 도착 연출을 쓸 때(=ApplyPose 를 건너뛸 때) 뼈가 안 잡혀
+        // 시선과 호흡이 통째로 죽는다. 시선은 호흡을 꺼도 머리 뼈가 필요하다.
+        if (breathe || gaze) FindBreathBones(_spawnedInstance);
         if (sanitizeMaterials) SanitizeMaterials(_spawnedInstance);
 
         // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
@@ -724,7 +753,6 @@ public class PersonaSpawner : MonoBehaviour
             if (verboseLog)
                 Debug.Log($"[PersonaSpawner] 자세 재생: {anim.clip.name} 루프");
         }
-        if (breathe) FindBreathBones(root);
     }
 
     // ── 머티리얼 보정 ─────────────────────────────────────────
