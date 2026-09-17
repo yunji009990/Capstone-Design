@@ -71,6 +71,67 @@ class TaskResult:
     error: str | None = None
 
 
+# ── 전처리: 사진 → T포즈 이미지 ─────────────────────────────
+#
+# 손이 몸에 닿은 사진(팔을 내린 자세, 팔짱)은 자동 리깅에서 접촉면의 정점이
+# 손 뼈에 함께 묶여, 팔을 들면 옷이 띠처럼 딸려 올라온다(2026-09-14 두 모델에서
+# 재현). 유족이 가진 사진의 자세를 고를 수는 없으므로, Tripo 의 generate_image
+# (t_pose=true)로 얼굴·머리·옷을 유지한 채 팔을 벌린 이미지를 먼저 만들고 그
+# 결과를 image_to_model 에 넣는다. 문서의 t_pose 템플릿이 권장하는 모델은
+# Nano Banana(gemini_2.5_flash_image_preview, 5 크레딧)이고, 아래 목록은 10 크레딧이다.
+TPOSE_MODEL = "gemini_2.5_flash_image_preview"
+TPOSE_PREMIUM_MODELS = {"gpt_image_1.5", "gpt_image_2", "midjourney",
+                        "gemini_3_pro_image_preview", "gemini_3.1_flash_image_preview"}
+TPOSE_PROMPT = (
+    "Redraw the person in the reference photo as a full-body character reference for 3D rigging. "
+    "Keep the exact same identity: same face, age, hairstyle, skin tone, body shape, clothing and shoes. "
+    "Pose: standing upright, facing the camera, in a standard T-pose with both arms stretched straight "
+    "out horizontally at shoulder height, palms facing down, a clear gap between the arms and the torso, "
+    "legs straight with a visible gap between them, feet flat and slightly apart. Fingertips and toes "
+    "fully inside the frame. Plain white background, soft even lighting, no shadows on the body, "
+    "photographic realism, no text."
+)
+
+
+def tpose_credits(model_version: str) -> int:
+    return 10 if model_version in TPOSE_PREMIUM_MODELS else 5
+
+
+def image_url(output: dict) -> str | None:
+    """generate_image 결과에서 이미지 주소를 고른다.
+
+    문서가 output 의 키 이름을 적어 두지 않아 흔한 이름을 차례로 보고, 없으면
+    http 로 시작하는 값 아무거나 쓴다."""
+    def pick(value):
+        if isinstance(value, dict):
+            value = value.get("url")
+        if isinstance(value, list):
+            value = next((pick(v) for v in value if pick(v)), None)
+        return value if isinstance(value, str) and value.startswith("http") else None
+    for key in ("generated_image", "image", "images", "rendered_image", "result", "url"):
+        found = pick(output.get(key))
+        if found:
+            return found
+    return next((pick(v) for v in output.values() if pick(v)), None)
+
+
+def image_extension(head: bytes) -> str | None:
+    """파일 머리 바이트로 이미지 형식을 판정한다. 모르면 None."""
+    if head.startswith(b"\x89PNG"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def file_type(image_path: Path) -> str:
+    """Tripo 의 file.type 값. jpeg 는 jpg 로 적는다."""
+    ext = image_path.suffix.lower().lstrip(".")
+    return "jpg" if ext == "jpeg" else ext
+
+
 class TripoClient:
     """API 키 없으면 stub 모드로 동작 — DB만 'stub' 상태로 표시하고 종료."""
 
@@ -122,6 +183,32 @@ class TripoClient:
         if not task_id:
             raise RuntimeError(f"Tripo 응답에서 task_id를 찾지 못함: {resp}")
         return task_id
+
+    def submit_tpose_image(
+        self,
+        image_path: Path,
+        *,
+        model_version: str = TPOSE_MODEL,
+        prompt: str = TPOSE_PROMPT,
+    ) -> str:
+        """사진을 올려 T포즈 이미지 생성 작업을 만든다. task_id 반환 (5~10 크레딧).
+
+        결과는 get_task 의 output 에 이미지 주소로 오며 image_url() 로 고른다."""
+        if self.is_stub:
+            log.info("[stub] submit_tpose_image 건너뜀 (API 키 없음)")
+            return ""
+        token = self._upload_image(image_path)
+        return self._submit({
+            "type": "generate_image",
+            "model_version": model_version,
+            "prompt": prompt,
+            "file": {"type": file_type(image_path), "file_token": token},
+            "t_pose": True,
+        })
+
+    def download_file(self, url: str, dest: Path) -> Path:
+        """이미지 등 다른 산출물도 같은 CDN·같은 UA 로 받는다."""
+        return self.download_glb(url, dest)
 
     # ── 자세 (리깅 → 리타겟) ────────────────────────────────────
     #

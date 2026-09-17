@@ -198,6 +198,9 @@ public static class TripoAnimationTrial
         spawner.useSpawnRotation = false;
         spawner.freezePose = freeze;
         spawner.applyPoseAnimation = true;
+        // 이 비교는 "굳힘 vs 클립 전체 재생" 이다. 체험용 왕복·호흡은 여기서 끈다.
+        spawner.quietLoop = false;
+        spawner.breathe = false;
         spawner.verboseLog = false;
         var flags = BindingFlags.NonPublic | BindingFlags.Instance;
         var method = typeof(PersonaSpawner).GetMethod("SpawnAsync", flags);

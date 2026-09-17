@@ -15,7 +15,7 @@ def load_settings():
     """Read only worker settings; never import the web app or AI dependencies."""
     path = Path(os.environ.get("MODEL_WORKER_ENV") or
                 Path(__file__).resolve().parents[1] / "Web" / ".env")
-    allowed = {"TRIPO_API_KEY", "TRIPO_POSE", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR"}
+    allowed = {"TRIPO_API_KEY", "TRIPO_POSE", "TRIPO_TPOSE", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR"}
     values = {}
     if path.is_file():
         for line in path.read_text(encoding="utf-8-sig").splitlines():
