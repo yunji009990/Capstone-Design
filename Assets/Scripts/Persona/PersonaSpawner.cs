@@ -92,6 +92,15 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("왕복 구간 끝(초). 클립보다 길면 클립 끝까지. 새 인물을 넣으면 실제 클립에서 다시 재 볼 것.")]
     public float quietEndSec = 1.4f;
 
+    [Tooltip("왕복 구간 끝을 로드 때 클립에서 직접 재서 정한다. 끄면 위 quietEndSec 을 그대로 쓴다.")]
+    public bool autoQuietEnd = true;
+
+    // 실측 두 클립으로 쓸어 본 값. 50 은 앉은 직후 안정화 노이즈(53°/s)에 걸려 오검출하고,
+    // 120 이상은 손 들기가 이미 시작한 뒤에 걸린다. 80 은 둘 다 피한다(7.21초→1.83s, 5.77초→1.47s).
+    [Tooltip("동작이 시작됐다고 볼 기준(뼈 각속도 합, °/초). 조용한 구간은 30 안팎이다.")]
+    public float quietThresholdDegPerSec = 80f;
+
+
     [Tooltip("재생 속도 배수. 0.5 면 절반 속도, 1.5초 구간을 3초에 한 번 왕복.")]
     [Range(0.1f, 2f)] public float quietSpeed = 0.5f;
 
@@ -260,6 +269,54 @@ public class PersonaSpawner : MonoBehaviour
         _faceForwardLocal = body.InverseTransformDirection(forward);
         _faceRightLocal = body.InverseTransformDirection(Vector3.Cross(body.up, forward).normalized);
         if (verboseLog) Debug.Log($"[PersonaSpawner] 얼굴 방향(월드): {forward}");
+    }
+
+    /// <summary>
+    /// 클립을 직접 찍어 보며 동작이 시작되는 지점을 찾는다. preset:sit 은 인물마다 다른 길이로
+    /// 리타겟돼서(실측 7.21초 / 5.77초) 조용한 구간의 끝이 고정값이 아니다. 커브를 읽는
+    /// AnimationUtility 는 에디터 전용이라, 런타임에서도 되는 SampleAnimation 으로 자세를
+    /// 찍어 뼈 회전이 프레임마다 얼마나 도는지 잰다.
+    /// </summary>
+    float MeasureQuietEnd(Animation anim, float start, float length)
+    {
+        var bones = anim.GetComponentsInChildren<Transform>();
+        if (bones.Length == 0) return quietEndSec;
+
+        const float step = 1f / 30f;
+        const float scanSec = 4f;            // 이보다 긴 왕복은 쓸 일이 없다. 로드 때 찍는 횟수도 묶어 둔다
+        float limit = Mathf.Min(length, start + scanSec);
+        var subject = anim.gameObject;
+        var previous = new Quaternion[bones.Length];
+
+        anim.clip.SampleAnimation(subject, start);
+        for (int i = 0; i < bones.Length; i++) previous[i] = bones[i].localRotation;
+
+        float quiet = limit;
+        for (float t = start + step; t <= limit; t += step)
+        {
+            anim.clip.SampleAnimation(subject, t);
+            float degrees = 0f;
+            for (int i = 0; i < bones.Length; i++)
+            {
+                degrees += Quaternion.Angle(previous[i], bones[i].localRotation);
+                previous[i] = bones[i].localRotation;
+            }
+            if (degrees / step > quietThresholdDegPerSec) { quiet = t - step; break; }
+        }
+        anim.clip.SampleAnimation(subject, start);   // 재느라 흐트러진 자세를 되돌린다
+
+        // 시작하자마자 걸렸으면 자세가 잡히는 흔들림을 동작으로 오해한 것이다. 설정값으로 물러난다.
+        if (quiet < start + 0.3f)
+        {
+            if (verboseLog)
+                Debug.LogWarning($"[PersonaSpawner] 조용한 구간이 너무 짧게 잡혔다({quiet:0.00}s) — " +
+                                 $"quietEndSec {quietEndSec:0.00}s 를 쓴다");
+            return quietEndSec;
+        }
+        if (verboseLog)
+            Debug.Log($"[PersonaSpawner] 조용한 구간 측정: {start:0.00}~{quiet:0.00}s " +
+                      $"(기준 {quietThresholdDegPerSec:0}°/s, 클립 {length:0.00}s)");
+        return quiet;
     }
 
     static void Breathe(Transform bone, Quaternion baseLocal, float angleDeg, Vector3 worldAxis)
@@ -489,14 +546,15 @@ public class PersonaSpawner : MonoBehaviour
             // 조용한 구간만 느리게 왕복. 방향 전환은 Update 가 맡는다.
             float len = anim.clip.length;
             _quietStart = Mathf.Clamp(quietStartSec, 0f, len);
-            _quietEnd = Mathf.Clamp(quietEndSec, _quietStart + 0.05f, len);
+            float measured = autoQuietEnd ? MeasureQuietEnd(anim, _quietStart, len) : quietEndSec;
+            _quietEnd = Mathf.Clamp(measured, _quietStart + 0.05f, len);
             anim.wrapMode = WrapMode.ClampForever;
             anim.Play(anim.clip.name);
             var state = anim[anim.clip.name];
             if (state != null) { state.time = _quietStart; state.speed = Mathf.Max(0.1f, quietSpeed); }
             if (verboseLog)
                 Debug.Log($"[PersonaSpawner] 자세 왕복: {anim.clip.name} {_quietStart:0.00}~{_quietEnd:0.00}s " +
-                          $"x{quietSpeed} (클립 {len:0.00}s)");
+                          $"x{quietSpeed} (클립 {len:0.00}s, 구간 끝 {(autoQuietEnd ? "자동 측정" : "설정값")})");
         }
         else if (freezePose)
         {
