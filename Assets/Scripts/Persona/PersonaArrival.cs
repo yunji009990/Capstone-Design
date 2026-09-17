@@ -15,6 +15,10 @@
 // 무관하게 뼈대에서 얼굴 방향을 바로 받기 때문에(facingSource) 걸어도 기준이 안 흔들린다.
 // 좌우 55도·상하 22도 안에서만 돌아가므로 몸을 등지면 알아서 앞으로 돌아온다.
 //
+// 앉은 뒤 몸짓은 두 갈래다. 인물이 말할 때는 강조하는 대목에서 손짓을 한 번 내고,
+// 체험자가 말할 때는 이따금 끄덕인다(맞장구). 끄덕임은 무슨 말인지 알아들어서가 아니라
+// 듣고 있다는 신호라, 서버가 감정을 알려 주지 않아도 마이크 크기만으로 낼 수 있다.
+//
 // 앉은 뒤에는 상반신만 따로 움직인다. Mixamo 에 쓸 만한 '앉은 채 말하는' 클립이 없어,
 // 서 있는 제스처 클립에서 척추 위쪽만 떼어다 앉은 자세 위에 얹는다(아바타 마스크).
 // 다리·골반은 앉은 자세가 계속 붙들고 있으므로 의자에서 뜨지 않는다.
@@ -58,7 +62,7 @@ public class PersonaArrival : MonoBehaviour
     [Tooltip("말하다가 이따금 한 번씩 낼 제스처. 서 있는 클립이어도 된다 — 상반신만 쓴다.")]
     public AnimationClip talkClip;
 
-    [Tooltip("긍정·호응. 대화 쪽에서 Nod() 로 부른다.")]
+    [Tooltip("끄덕임. 체험자가 말하는 동안 저절로 나오고, 대화 쪽에서 Nod() 로도 부른다.")]
     public AnimationClip nodClip;
 
     [Tooltip("부정·갸웃. 대화 쪽에서 Shake() 로 부른다.")]
@@ -84,6 +88,16 @@ public class PersonaArrival : MonoBehaviour
 
     [Tooltip("평소 목소리 크기 대비 이 배수를 넘으면 '강조'로 본다. 올리면 덜 난다.")]
     public float emphasisFactor = 1.6f;
+
+    [Tooltip("체험자가 말하는 동안 이따금 끄덕인다. 듣고 있다는 신호다.")]
+    public bool autoNodWhileListening = true;
+
+    [Tooltip("체험자가 이만큼 말한 뒤부터 끄덕이기 시작한다(초). 기침 한 번에 끄덕이지 않게.")]
+    public float nodAfterListeningSec = 1.2f;
+
+    [Tooltip("끄덕임 사이 간격(초). 이 범위에서 무작위로 흩뜨린다.")]
+    public float nodMinGapSec = 3f;
+    public float nodMaxGapSec = 6.5f;
 
     [Header("경로")]
     [Tooltip("걷기 시작 지점(카페 입구). 비워두면 이 오브젝트의 위치를 쓴다.")]
@@ -165,6 +179,7 @@ public class PersonaArrival : MonoBehaviour
     AudioSource _voiceSource;
     readonly float[] _voiceSamples = new float[256];
     float _voiceAvg, _spokeFor, _sinceGesture;
+    float _heardFor, _sinceNod, _quietFor, _nextNodAt;
     int _active = -1;                      // 지금 무게를 올리고 있는 입력
     AnimationClip _current;
     float _clipTime, _blend, _holdAt = -1f;
@@ -264,7 +279,7 @@ public class PersonaArrival : MonoBehaviour
     {
         if (phase == Phase.대기 || _persona == null) return;
         Advance();
-        if (phase == Phase.앉음) DriveTalkGesture();
+        if (phase == Phase.앉음) { DriveTalkGesture(); DriveNodGesture(); }
 
         if (phase == Phase.인사)
         {
@@ -365,6 +380,44 @@ public class PersonaArrival : MonoBehaviour
 
         PlayGesture(talkClip);                   // 한 번만. 끝나면 스스로 걷힌다
         _sinceGesture = 0f;
+    }
+
+    /// <summary>
+    /// 체험자가 말하는 동안 이따금 끄덕인다. 맞장구다 — 무슨 말인지 알아들어서가 아니라
+    /// 듣고 있다는 신호라서, 서버가 감정을 알려 주지 않아도 지금 붙일 수 있다.
+    ///
+    /// 인물이 말하는 중에는 끄덕이지 않는다. 제 말에 제가 맞장구치는 꼴이 된다.
+    /// </summary>
+    void DriveNodGesture()
+    {
+        if (!autoNodWhileListening || nodClip == null) return;
+        var voice = _spawner != null ? _spawner.voiceClient : null;
+        if (voice == null) return;
+
+        if (voice.IsSpeaking) { ResetNod(); return; }
+
+        bool loud = voice.IsListening && voice.MicLevel > Mathf.Max(0.0001f, voice.VadThreshold);
+        _quietFor = loud ? 0f : _quietFor + Time.deltaTime;
+
+        // 음절 사이가 끊기는 건 말이 끝난 게 아니다. 짧은 공백은 이어서 센다.
+        if (!loud && _quietFor >= 0.4f) { ResetNod(); return; }
+
+        _heardFor += Time.deltaTime;
+        _sinceNod += Time.deltaTime;
+
+        if (_gestureClip != null) return;            // 뭔가 이미 얹혀 있다
+        if (_heardFor < nodAfterListeningSec) return;
+        if (_sinceNod < _nextNodAt) return;
+
+        Nod();
+        _sinceNod = 0f;
+        _nextNodAt = UnityEngine.Random.Range(nodMinGapSec, Mathf.Max(nodMinGapSec, nodMaxGapSec));
+    }
+
+    void ResetNod()
+    {
+        _heardFor = _sinceNod = 0f;
+        _nextNodAt = UnityEngine.Random.Range(nodMinGapSec, Mathf.Max(nodMinGapSec, nodMaxGapSec));
     }
 
     /// <summary>지금 나오고 있는 TTS 의 크기(RMS). 소리를 못 찾으면 0 — 그러면 시간 간격만으로 낸다.</summary>
