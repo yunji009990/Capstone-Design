@@ -1,8 +1,7 @@
 """다시, 봄 — 세션 등록 도구.
 
-영상/오디오에서 화자를 분리해 목소리를 고르고, 인물 설정과 함께 등록 서버에
-등록한다. 화자 분리는 새로 만들지 않고 기존 voice_clone_studio 의 NeMo MSDD
-엔진을 그대로 호출한다(engine/extraction).
+한 사람의 목소리가 담긴 음성/영상 파일 하나를 받아 참조 음성으로 만들고, 인물
+설정과 함께 등록 서버에 등록한다. 화자 분리는 하지 않는다.
 
 실행:  python -m uvicorn app:app --port 8500
 """
@@ -10,20 +9,26 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
-import threading
+import tempfile
 import time
-import uuid
 
 import httpx
 import librosa
 import numpy as np
 import soundfile as sf
 
-import persona as persona_builder
-from registration_input import parse_survey, registration_survey, survey_revision
+# 배포용 정적 ffmpeg 바이너리. 없으면 PATH 의 ffmpeg 를 찾고, 그것도 없으면
+# 변환이 필요한 형식만 명확한 오류로 거절한다. 설치는 Web/requirements.txt 를 따른다.
+try:
+    import imageio_ffmpeg
+except ImportError:
+    imageio_ffmpeg = None
+
+import survey_v2
 
 # 설문 저장과 3D 모델 생성은 Survey/ 의 것을 그대로 쓴다. 스키마와 작업 추적이 이미
 # 있어서 다시 만들 이유가 없고, Survey/pages/2_관리자.py 로 같은 DB 를 들여다볼 수 있다.
@@ -49,7 +54,7 @@ for _s in (sys.stdout, sys.stderr):
 #
 # 끄는 게 아니라 **잘 돌아간 폴링만** 가린다. 200 이 아니면 그대로 올라오므로
 # 서버가 죽거나 경로가 틀린 것은 여전히 보인다.
-POLLING = ("/status", "/extract/")
+POLLING = ("/status",)
 
 
 class _HidePolling(logging.Filter):
@@ -108,12 +113,6 @@ from core import storage as survey_store        # noqa: E402
 from core import jobs as survey_jobs            # noqa: E402
 from core import model_queue                   # noqa: E402
 
-# 화자 분리 엔진 — 저장소 안에 있다. 예전에는 바탕화면의 voice_clone_studio 를
-# VCS_DIR 로 가리켰는데, 그 PC 에서만 돌아서 코드를 들여왔다. 무거운 nemo_env 만
-# 저장소 밖이며, 만드는 법은 extraction/README.md 에 있다.
-EXTRACT_DIR = os.path.join(HERE, "extraction")
-EXTRACT_RUNNER = os.path.join(EXTRACT_DIR, "extract_runner.py")
-
 SESSION_URL = os.environ.get("SESSION_URL", "http://220.69.208.201:8000")
 SESSION_TOKEN = os.environ.get("SESSION_TOKEN", "")
 
@@ -122,119 +121,24 @@ ALLOWED = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".mp4", ".webm", ".m
 os.makedirs(WORK, exist_ok=True)
 app = FastAPI(title="다시, 봄 세션 등록")
 
-JOBS = {}       # job_id -> {"state","stage","messages","result","error"}
 LAST_REF = os.path.join(WORK, "last_ref.wav")
-
-
-def load_jobs():
-    """재시작해도 추출 결과가 살아 있게 디스크에서 복원한다.
-    CPU 화자 분리는 몇 분씩 걸리므로 메모리에만 두면 재시작마다 다시 돌려야 한다."""
-    for d in sorted(os.listdir(WORK)) if os.path.isdir(WORK) else []:
-        rp = os.path.join(WORK, d, "extract", "result.json")
-        if not os.path.exists(rp):
-            continue
-        try:
-            JOBS[d] = {"state": "done", "stage": "완료", "messages": [], "error": None,
-                       "result": json.load(open(rp, encoding="utf-8")), "name": d}
-        except Exception:
-            pass
-    if JOBS:
-        print(f"[작업] {len(JOBS)}개 복원", flush=True)
-
-
-load_jobs()
 
 
 def _headers():
     return {"X-Token": SESSION_TOKEN} if SESSION_TOKEN else {}
 
 
-def job_dir(job):
-    return os.path.join(WORK, job)
+def _record_and_model(sid: str, answers: dict, compiled: dict, image: bytes, image_name: str):
+    """등록 후 저장·모델 접수 결과를 별도로 반환하여 부분 실패를 화면에 알린다.
 
-
-def _utf8_env():
-    """자식 프로세스를 UTF-8 로 못박는다.
-
-    윈도우 파이썬은 출력이 파이프일 때 콘솔이 아니라 **로케일**(이 PC 는 cp949)로
-    인코딩한다. 우리는 utf-8 로 읽으므로 그대로 두면 진행 문구의 한글이 전부
-    깨져서 화면에 나온다.
-
-    두 가지를 함께 넘긴다. 화자 분리는 세 겹으로 실행되고(여기 → extract_runner
-    → nemo_env 의 nemo_diarize), 가운데 단은 손자를 `text=True` 로만 읽어 로케일
-    인코딩을 쓴다. PYTHONIOENCODING 만 넘기면 자식은 utf-8 로 쓰는데 가운데 단은
-    cp949 로 읽어 이번엔 거기서 깨진다. PYTHONUTF8 은 로케일 자체를 utf-8 로
-    바꿔서 그 단까지 함께 맞춘다."""
-    env = dict(os.environ)
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    return env
-
-
-def _run_extract(job, src, n_speakers):
-    """NeMo 화자 분리를 서브프로세스로 돌린다. CPU 라 몇 분 걸릴 수 있다."""
-    j = JOBS[job]
-    out = os.path.join(job_dir(job), "extract")
-    os.makedirs(out, exist_ok=True)
-    cmd = [sys.executable, EXTRACT_RUNNER,
-           "--extraction-dir", EXTRACT_DIR, "--input", src,
-           "--out-dir", out, "--engine", "nemo"]
-    if n_speakers:
-        cmd += ["--speakers", str(n_speakers)]
-    try:
-        # NeMo 하위 프로세스가 config 를 상대경로로 열기 때문에 cwd 를 맞춰야 한다
-        p = subprocess.Popen(cmd, cwd=EXTRACT_DIR, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, env=_utf8_env(),
-                             encoding="utf-8", errors="replace", bufsize=1)
-        for line in p.stdout:
-            line = line.strip()
-            if not line or line == "EXTRACT_DONE":
-                continue
-            j["stage"] = line
-            j["messages"].append(line)
-            del j["messages"][:-40]
-        p.wait()
-        rp = os.path.join(out, "result.json")
-        if p.returncode != 0 or not os.path.exists(rp):
-            j["state"], j["error"] = "error", "\n".join(j["messages"][-8:]) or "추출 실패"
-            return
-        j["result"] = json.load(open(rp, encoding="utf-8"))
-        j["stage"] = "품질 측정"
-        _measure_speakers(job)
-        j["state"], j["stage"] = "done", "완료"
-    except Exception as e:
-        j["state"], j["error"] = "error", str(e)
-
-
-def _measure_speakers(job):
-    """화자별 참조를 **실제 등록 경로에 태워** 품질을 미리 재둔다.
-
-    사용자가 화자를 고를 때 근거가 필요하다. 분리기가 주는 SNR 만으로는 못 고른다 —
-    SNR 은 길이 폭주와는 관계있지만 **지지직과는 무관**하다는 것이 실측으로 확인됐다
-    (35dB 가 통과하며 실패하고, 59dB 로 올려도 그대로였다).
-
-    지지직을 가르는 것은 **1~4kHz 비율**이고, 꼬리 무음을 가르는 것은 **쉼 비율**이다.
-    `_to_wav24` 를 그대로 통과시키므로 여기 나온 값이 실제로 서버에 갈 음성의 값이다."""
-    j = JOBS[job]
-    for s in (j.get("result") or {}).get("speakers", []):
-        p = os.path.join(job_dir(job), "extract", s["ref"]["file"].replace("/", os.sep))
-        try:
-            _, dur, q = _to_wav24(open(p, "rb").read(), "ref.wav")
-            s["quality"] = {**q, "sec": round(dur, 1)}
-        except Exception as e:
-            s["quality"] = {"error": str(e)}
-
-
-def _record_and_model(sid: str, d: dict, image: bytes, image_name: str):
-    """등록 후 저장·모델 접수 결과를 별도로 반환하여 부분 실패를 화면에 알린다."""
+    설문 원문과 등록 스냅샷(변환기 버전·최종 세 텍스트)을 같은 payload에 함께 남긴다."""
     result = {"survey_saved": False, "model_queued": False, "registration_warning": ""}
+    image_ok, voice_ok, understand_ok = survey_v2.consent_flags(answers)
     try:
         survey_db.insert_session(
-            session_id=sid, payload=d,
-            consent_image=bool(d.get("consent_image")),
-            consent_voice=bool(d.get("consent_voice")),
-            consent_understand=bool(d.get("consent_understand")),
-            bereavement_weeks=d.get("bereavement_weeks"),
+            session_id=sid, payload=survey_v2.stored_payload(answers, compiled),
+            consent_image=image_ok, consent_voice=voice_ok, consent_understand=understand_ok,
+            bereavement_weeks=answers.get("bereavement_weeks"),
             has_image=bool(image), has_voice=True,
         )
     except Exception as e:
@@ -454,93 +358,109 @@ def model_state(sid: str):
 
 @app.post("/persona")
 async def persona_from_survey(survey: str = Form(...)):
-    """설문 응답을 인물·사전지식으로 바꾼다.
+    """설문 응답을 인물·사전지식·추가 규칙과 확인 화면 자료로 바꾼다.
 
-    자동 생성이 끝이 아니라 시작이다 — 웹은 이 결과를 편집 가능한 상자에 채워 넣고,
-    운영자가 확인하고 고친 뒤에 등록한다. 설문 답이 부실할 때 손쓸 데가 있어야 한다."""
+    결정적 변환이므로 사람이 고치는 것은 설문뿐이다. 편집한 프롬프트를 따로 두지 않아
+    등록 때 서버가 같은 설문에서 다시 만든 결과와 어긋나지 않는다."""
     try:
-        d = parse_survey(survey)
+        return survey_v2.build(survey)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return {**persona_builder.build(d), "survey_revision": survey_revision(d)}
 
 
-@app.post("/extract")
-async def extract(file: UploadFile = File(...), speakers: int = Form(0)):
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ALLOWED:
-        raise HTTPException(400, f"지원하지 않는 형식입니다: {ext}")
-    if not os.path.exists(EXTRACT_RUNNER):
-        raise HTTPException(500, f"화자 분리 엔진을 찾을 수 없습니다: {EXTRACT_RUNNER}")
-
-    job = uuid.uuid4().hex[:12]
-    os.makedirs(job_dir(job), exist_ok=True)
-    src = os.path.join(job_dir(job), "input" + ext)
-    with open(src, "wb") as o:
-        o.write(await file.read())
-
-    JOBS[job] = {"state": "running", "stage": "시작", "messages": [],
-                 "result": None, "error": None, "name": file.filename}
-    threading.Thread(target=_run_extract, args=(job, src, speakers), daemon=True).start()
-    return {"job": job}
+# ── 업로드 오디오 디코딩 ──────────────────────────────────────────
+# libsndfile 이 직접 읽는 형식은 빌드와 버전에 따라 다르다(WAV·FLAC·OGG 는 기본이고
+# MP3 처럼 빌드에 따라 읽히는 것도 있다). 운영 환경의 M4A/AAC 는 읽지 못해
+# 「Format not recognised」가 났고, 처리되지 않은 그 예외가 text/plain 「Internal Server
+# Error」 500 으로 나가 화면이 JSON 으로 읽다가 터졌다(2026-09-16 사용자 보고).
+# 그래서 먼저 그대로 읽어 보고, 안 되면 ffmpeg 로 넘기며, 그것도 안 되면 뜻이 분명한
+# JSON 오류를 준다. 어느 쪽으로 읽었든 결과는 같은 24kHz 모노 파형이다.
+TARGET_SR = 24000
+FFMPEG_TIMEOUT_SEC = 120
 
 
-@app.get("/extract/{job}")
-def extract_state(job: str):
-    j = JOBS.get(job)
-    if not j:
-        raise HTTPException(404, "없는 작업")
-    return {"state": j["state"], "stage": j["stage"], "error": j["error"],
-            "messages": j["messages"][-6:], "result": j["result"]}
+def _ffmpeg_path():
+    """번들 바이너리 → PATH 순서로 찾는다. 둘 다 없으면 None."""
+    if imageio_ffmpeg is not None:
+        try:
+            path = imageio_ffmpeg.get_ffmpeg_exe()
+            if path and os.path.exists(path):
+                return path
+        except Exception as e:                      # 다운로드 실패·플랫폼 미지원 등
+            print(f"[변환] 번들 ffmpeg 를 쓸 수 없습니다: {type(e).__name__}", flush=True)
+    return shutil.which("ffmpeg")
 
 
-@app.get("/file/{job}/{path:path}")
-def file(job: str, path: str):
-    p = os.path.normpath(os.path.join(job_dir(job), "extract", path))
-    if not p.startswith(os.path.normpath(job_dir(job))) or not os.path.exists(p):
-        raise HTTPException(404, "없는 파일")
-    mt = "audio/mpeg" if p.endswith(".mp3") else "audio/wav"
-    return FileResponse(p, media_type=mt)
+def _temp_upload(raw, name):
+    """요청마다 다른 임시 파일을 만든다.
+
+    예전에는 `_upload<확장자>` 한 이름을 함께 썼다. 두 사람이 같은 순간에 올리면
+    서로의 파일을 덮어쓰고, 한쪽 정리가 다른 쪽을 지웠다.
+    확장자는 이름에서 가져오되 짧은 영숫자만 허용한다 — 디코더는 확장자가 아니라
+    내용으로 형식을 찾으므로, 이상한 이름은 그냥 `.bin` 으로 둔다."""
+    ext = os.path.splitext(name or "")[1].lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext):
+        ext = ".bin"
+    handle, path = tempfile.mkstemp(prefix="upload-", suffix=ext, dir=WORK)
+    with os.fdopen(handle, "wb") as out:
+        out.write(raw)
+    return path
 
 
+def _decode_libsndfile(path):
+    """기존 경로. 이 환경의 libsndfile 이 읽는 형식은 여기서 끝나고 ffmpeg 를 거치지 않는다."""
+    y, _ = librosa.load(path, sr=TARGET_SR, mono=True)
+    return y
 
-@app.post("/publish")
-async def publish(job: str = Form(...), spk_id: str = Form(...), session: str = Form(""),
-                  persona: str = Form(...), knowledge: str = Form(""),
-                  survey: str = Form(""), survey_revision: str = Form(""),
-                  image: UploadFile = File(None)):
+
+def _decode_ffmpeg(path, ffmpeg):
+    """첫 오디오 트랙만 24kHz 모노 float 로 뽑는다. 쉼과 길이는 그대로 둔다."""
+    command = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+               "-i", path, "-vn", "-map", "0:a:0", "-ac", "1",
+               "-ar", str(TARGET_SR), "-f", "f32le", "-"]
+    # 셸을 거치지 않는 인수 배열이고, 사용자 입력은 파일 내용으로만 들어간다.
+    done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          timeout=FFMPEG_TIMEOUT_SEC)
+    if done.returncode != 0:
+        # stderr 원문에는 서버 경로가 들어 있다. 로그에만 남기고 화면에는 보내지 않는다.
+        print(f"[변환] ffmpeg 실패({done.returncode}): "
+              f"{done.stderr.decode('utf-8', 'replace').strip()[-400:]}", flush=True)
+        raise HTTPException(400, "이 파일에서 소리를 읽지 못했습니다. "
+                                 "손상되었거나 소리가 없는 파일일 수 있습니다. 다른 파일을 올려 주세요.")
+    return np.frombuffer(done.stdout, dtype="<f4").astype(np.float32)
+
+
+def _decode_media(raw, name):
+    """업로드 바이트 → 24kHz 모노 float 파형. 실패는 원인별로 구분해 알린다."""
+    if not raw:
+        raise HTTPException(400, "업로드된 파일이 비어 있습니다. 파일을 다시 골라 주세요.")
+    path = _temp_upload(raw, name)
     try:
-        answers = registration_survey(survey, survey_revision, persona, session)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    j = JOBS.get(job)
-    if not j or not j.get("result"):
-        raise HTTPException(400, "추출이 끝나지 않았습니다")
-    spk = next((s for s in j["result"]["speakers"] if s["spk_id"] == spk_id), None)
-    if not spk:
-        raise HTTPException(400, "없는 화자")
-
-    ref = os.path.join(job_dir(job), "extract", spk["ref"]["file"].replace("/", os.sep))
-    if not os.path.exists(ref):
-        raise HTTPException(400, "참조 음성 파일이 없습니다")
-
-    # 분리기와 직접 지정 경로 모두 PCM 변환·음량 조정만 한다. 내부 쉼은 보존한다.
-    wav, dur, qual = _to_wav24(open(ref, "rb").read(), "ref.wav")
-    with open(LAST_REF, "wb") as o:      # 보낸 것을 그대로 들어볼 수 있게 남긴다
-        o.write(wav)
-    try:
-        r = httpx.post(f"{SESSION_URL}/session/start", headers=_headers(),
-                       data={"persona": persona, "knowledge": knowledge},
-                       files={"voice": ("voice.wav", wav, "audio/wav")}, timeout=180)
-    except Exception as e:
-        raise HTTPException(502, f"등록 서버에 연결할 수 없습니다: {e}")
-    if r.status_code != 200:
-        raise HTTPException(r.status_code, f"등록 실패: {r.text}")
-    out = r.json()
-    img = await image.read() if image is not None and image.filename else b""
-    recorded = _record_and_model(out["session"], answers, img, image.filename if image else "")
-    return {**out, **recorded,
-            "sent": {"spk_id": spk_id, "sec": round(dur, 2), **qual}}
+        try:
+            return _decode_libsndfile(path)
+        except Exception as e:          # 형식 미지원·손상 모두 여기로 온다
+            reason = type(e).__name__
+        ffmpeg = _ffmpeg_path()
+        if not ffmpeg:
+            print(f"[변환] {reason} 이후 쓸 수 있는 ffmpeg 가 없습니다", flush=True)
+            raise HTTPException(503, "이 형식을 변환할 도구가 서버에 준비되지 않았습니다. "
+                                     "WAV 파일로 올리시거나 운영자에게 알려 주세요.")
+        try:
+            return _decode_ffmpeg(path, ffmpeg)
+        except subprocess.TimeoutExpired:
+            print("[변환] ffmpeg 시간 초과", flush=True)
+            raise HTTPException(504, "변환이 너무 오래 걸립니다. 더 짧은 녹음을 올려 주세요.") from None
+        except OSError as e:
+            # 경로는 찾았지만 실행되지 않는 경우다(지워짐·권한 없음·플랫폼 불일치).
+            # 파일 잘못이 아니므로 400 으로 돌리지 않고, 실행 오류 원문도 화면에 보내지 않는다.
+            print(f"[변환] ffmpeg 를 실행하지 못했습니다: {type(e).__name__}", flush=True)
+            raise HTTPException(503, "이 형식을 변환할 도구가 서버에 준비되지 않았습니다. "
+                                     "WAV 파일로 올리시거나 운영자에게 알려 주세요.") from None
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _to_wav24(raw, name):
@@ -549,15 +469,9 @@ def _to_wav24(raw, name):
     The dialogue service chooses a contiguous reference span and transcribes
     that exact span. The former Raon silence-splicing rule does not apply.
     """
-    tmp = os.path.join(WORK, "_upload" + os.path.splitext(name)[1].lower())
-    with open(tmp, "wb") as o:
-        o.write(raw)
-    try:
-        y, _ = librosa.load(tmp, sr=24000, mono=True)
-    finally:
-        os.remove(tmp)
+    y = _decode_media(raw, name)
     if len(y) == 0:
-        raise HTTPException(400, "오디오를 읽지 못했습니다")
+        raise HTTPException(400, "오디오를 읽지 못했습니다. 소리가 들어 있는 파일인지 확인해 주세요.")
 
     quiet_before = _quality(y)[1]
 
@@ -629,15 +543,14 @@ def _quality(y, sr=24000):
 
 
 @app.post("/publish_direct")
-async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...),
-                         knowledge: str = Form(""), session: str = Form(""),
+async def publish_direct(voice: UploadFile = File(...), session: str = Form(""),
                          survey: str = Form(""), survey_revision: str = Form(""),
-                         image: UploadFile = File(None)):
-    """화자 분리를 건너뛰고 올린 오디오를 그대로 참조로 등록한다.
-    분리기가 만든 참조는 조각을 이어붙인 것이라 무엇이 넘어갔는지 알기 어렵다.
-    직접 지정하면 보낸 것과 서버가 쓰는 것이 같다는 게 보장된다."""
+                         preview_revision: str = Form(""), image: UploadFile = File(None)):
+    """올린 오디오를 그대로 참조로 등록한다. 한 사람이 말하는 녹음 하나를 받는다.
+    PCM 변환·음량 조정 후 등록하며 원래 쉼과 말하기 속도는 보존한다."""
     try:
-        answers = registration_survey(survey, survey_revision, persona, session)
+        answers, compiled = survey_v2.registration_bundle(survey, survey_revision,
+                                                          preview_revision, session)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     ext = os.path.splitext(voice.filename)[1].lower()
@@ -648,7 +561,8 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         o.write(wav)
     try:
         r = httpx.post(f"{SESSION_URL}/session/start", headers=_headers(),
-                       data={"persona": persona, "knowledge": knowledge},
+                       data={"persona": compiled["persona"], "knowledge": compiled["knowledge"],
+                             "rules": compiled["rules"]},
                        files={"voice": ("voice.wav", wav, "audio/wav")}, timeout=180)
     except Exception as e:
         raise HTTPException(502, f"등록 서버에 연결할 수 없습니다: {e}")
@@ -656,7 +570,7 @@ async def publish_direct(voice: UploadFile = File(...), persona: str = Form(...)
         raise HTTPException(r.status_code, f"등록 실패: {r.text}")
     out = r.json()
     img = await image.read() if image is not None and image.filename else b""
-    recorded = _record_and_model(out["session"], answers, img, image.filename if image else "")
+    recorded = _record_and_model(out["session"], answers, compiled, img, image.filename if image else "")
     return {**out, **recorded,
             "sent": {"file": voice.filename, "sec": round(dur, 2), **qual}}
 
@@ -682,7 +596,8 @@ def end(session: str = Form(...)):
 def status():
     # 키 자체는 절대 내보내지 않는다. 있는지 없는지만 알면 "3D 모델이 왜 안 뜨지"에
     # 답할 수 있고, 그 이상은 화면에 띄울 이유가 없다.
-    out = {"url": SESSION_URL, "engine": os.path.exists(EXTRACT_RUNNER),
+    # engine 은 화자 분리를 쓰던 구형 Unity 상태창을 위한 호환 필드다. 늘 false 다.
+    out = {"url": SESSION_URL, "engine": False,
            "tripo": bool(os.environ.get("TRIPO_API_KEY")),
            "model_worker": model_queue.status()}
     try:

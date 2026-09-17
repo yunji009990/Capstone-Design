@@ -101,8 +101,8 @@ public partial class DialogueTestPanel : MonoBehaviour
         _url.interactable = _token.interactable = _persona.interactable = editable;
         _check.interactable = editable;
         UpdateReferencePanel(editable);
-        _subtitle.text = Voice.TtsEnabled ? "마이크 입력 · SenseVoice 분석 · Qwen3-TTS 음성 답변     /     인물 등록 없이 바로 테스트" :
-            "마이크 입력 · SenseVoice 분석 · LLM 텍스트 답변     /     TTS 꺼짐";
+        _subtitle.text = Voice.TtsEnabled ? "마이크 입력 · 음성 인식 · 음성 답변     /     인물 등록 없이 바로 테스트" :
+            "마이크 입력 · 음성 인식 · 텍스트 답변     /     TTS 꺼짐";
         _start.interactable = editable && Voice.MicDevices.Length > 0;
         _nextMic.interactable = editable && Voice.MicDevices.Length > 1;
         _stop.interactable = active;
@@ -120,15 +120,15 @@ public partial class DialogueTestPanel : MonoBehaviour
                 "TTS 꺼짐 · 생성 중 끼어들면 의도를 판정하고, 완료된 답변은 대화 기록으로 남깁니다.") :
             "끼어들기  " + DecisionName(Voice.InterruptionAction) + " · " + Voice.InterruptionReason +
             (Voice.DecisionSeconds >= 0 ? $" · {Voice.DecisionSeconds:F2}초" : "");
-        string inputSource = Voice.VoiceAudioEvent == "text" ? "텍스트 입력 · STT·감정 추출 생략" :
-            "SenseVoiceSmall · CPU · " + (Voice.TranscriptIsFinal ? "최종 결과" : "중간 결과");
+        string inputSource = Voice.VoiceAudioEvent == "text" ? "텍스트 입력 · 음성 인식 생략" :
+            "음성 인식 · " + (Voice.TranscriptIsFinal ? "최종 결과" : "중간 결과");
         _metadata.text = inputSource +
-            "\n감정  " + EmotionName(Voice.VoiceEmotion) + " (" + Voice.VoiceEmotion + ")    ·    소리  " + Voice.VoiceAudioEvent +
-            $"\n언어  {Voice.VoiceLanguage}    ·    발화 {Voice.VoiceDuration:F1}초    ·    음량 {Voice.VoiceRmsDb:F1} dBFS    ·    처리 {RouteName(Voice.ResponseRoute)}";
+            $"\n소리  {Voice.VoiceAudioEvent}    ·    언어  {Voice.VoiceLanguage}" +
+            $"\n발화 {Voice.VoiceDuration:F1}초    ·    음량 {Voice.VoiceRmsDb:F1} dBFS    ·    처리 {RouteName(Voice.ResponseRoute)}";
         if (Voice.VoiceAudioEvent == "text")
-            _metadata.text = inputSource + "\n음성 감정·소리·음량: 측정하지 않음" +
+            _metadata.text = inputSource + "\n소리 종류·발화 길이·음량: 측정하지 않음" +
                 $"\n언어  {Voice.VoiceLanguage}    ·    처리 {RouteName(Voice.ResponseRoute)}";
-        _timing.text = Voice.TotalResponseSeconds < 0 ? "음성 감정은 모델의 추정입니다. 정확도 점수는 제공하지 않습니다." :
+        _timing.text = Voice.TotalResponseSeconds < 0 ? "답변을 받으면 생성에 걸린 시간을 표시합니다." :
             !Voice.TtsEnabled ? $"첫 글자 {Voice.FirstTextSeconds:F2}초  ·  생성 완료 {Voice.TotalResponseSeconds:F2}초" :
             $"첫 글자 {Voice.FirstTextSeconds:F2}초  ·  첫 음성 {Voice.FirstAudioSeconds:F2}초  ·  생성 완료 {Voice.TotalResponseSeconds:F2}초";
         _level.rectTransform.sizeDelta = new Vector2(146f * Mathf.Clamp01(Voice.MicLevel * 12f), 8f);
@@ -256,21 +256,6 @@ public partial class DialogueTestPanel : MonoBehaviour
         if (devices.Length == 0) return;
         int current = Array.IndexOf(devices, Voice.CurrentMic);
         Voice.SelectMic(devices[(current + 1) % devices.Length]);
-    }
-
-    static string EmotionName(string value)
-    {
-        switch (value)
-        {
-            case "neutral": return "중립";
-            case "happy": return "기쁨";
-            case "sad": return "슬픔";
-            case "angry": return "분노";
-            case "fearful": return "두려움";
-            case "disgusted": return "혐오";
-            case "surprised": return "놀람";
-            default: return "미확인";
-        }
     }
 
     static string RouteName(string value) => value == "normal" ? "일반" : value == "reasoning" ? "추론" :

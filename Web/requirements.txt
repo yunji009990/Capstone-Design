@@ -1,5 +1,5 @@
 # Registration web environment observed on Python 3.12.3, 2026-09-13.
-# Speaker extraction's NeMo environment remains separate; it is not needed for Tripo development.
+# Speaker separation was removed on 2026-09-17; this flow needs no NeMo environment.
 fastapi==0.141.1
 uvicorn==0.52.4
 python-multipart==0.0.32
@@ -8,3 +8,7 @@ numpy==2.5.3
 scipy==1.18.1
 librosa==1.0.0
 soundfile==0.14.0
+# libsndfile 이 직접 읽지 못한 파일(이 환경의 M4A/AAC·영상 컨테이너 등)을 변환한다.
+# 정적 바이너리를 함께 배포하므로 sudo 나 시스템 ffmpeg 설치가 필요 없다.
+# PATH 에 ffmpeg 가 있으면 그것도 쓴다. 0.6.0 배포본은 Linux Web 환경에서 설치·동작을 확인했다.
+imageio-ffmpeg==0.6.0

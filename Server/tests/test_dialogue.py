@@ -11,11 +11,15 @@ from starlette.websockets import WebSocketDisconnect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dialogue_server import Settings, create_app
-from realtime_audio import FRAME_BYTES, Observation, TurnDetector
+from realtime_audio import FRAME_BYTES, SAMPLE_RATE, Observation, TurnDetector
 from realtime_dialogue import Dialogue, UnityContext, load_persona
 from realtime_llm import LLMClient, ModelEndpoint, SpokenTextFilter
+from speech_gate import SpeechEvidence
 
 SPEECH = b"\x01\x00" * (FRAME_BYTES // 2)
+# TurnDetector 는 말로 보지만 음성 검증기는 기각하는 입력. 실측에서 WebRTC VAD(2)가
+# hum·white 를 speech 로 통과시킨 상황을 모의한다.
+NOISE = b"\x02\x00" * (FRAME_BYTES // 2)
 QUIET = bytes(FRAME_BYTES)
 
 
@@ -23,9 +27,41 @@ def detector():
     return TurnDetector(is_speech=lambda frame: frame[0] != 0)
 
 
+class Gate:
+    """검사용 음성 검증기. 실제 Silero 가 아니라 SPEECH 표식 프레임만 센다.
+
+    모의 검사 결과를 실제 모델의 잡음 판별 성능으로 읽으면 안 된다.
+    """
+
+    def __init__(self, min_speech_ms=150):
+        self.min_speech_seconds = min_speech_ms / 1000.0
+        self.calls = []
+
+    def settings(self):
+        return {"version": "test_gate", "acoustic": "fake",
+                "min_speech_ms": round(self.min_speech_seconds * 1000)}
+
+    async def verify(self, pcm):
+        self.calls.append(len(pcm))
+        voiced = sum(pcm[i] == 1 for i in range(0, len(pcm), FRAME_BYTES))
+        seconds = voiced * (FRAME_BYTES / 2) / SAMPLE_RATE
+        return SpeechEvidence(seconds, len(pcm) / 2 / SAMPLE_RATE, 1 if voiced else 0,
+                              seconds >= self.min_speech_seconds - .001, source="fake")
+
+    def close(self):
+        pass
+
+
+async def eventually(predicate, timeout=1):
+    async def wait():
+        while not predicate():
+            await asyncio.sleep(.001)
+    await asyncio.wait_for(wait(), timeout)
+
+
 class Frontend:
     async def transcribe(self, pcm):
-        return Observation("사용자의 말", emotion="sad", audio_event="speech", language="ko")
+        return Observation("사용자의 말", audio_event="speech", language="ko")
 
 
 class FakeLLM:
@@ -143,8 +179,9 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
         self.llm = FakeLLM()
 
         async def emit(event): self.events.append(event)
+        self.gate = Gate()
         self.dialogue = Dialogue("인물 설정", [], Frontend(), self.llm, emit,
-                                 detector=detector(), partial_seconds=60)
+                                 detector=detector(), partial_seconds=60, speech_gate=self.gate)
 
     async def asyncTearDown(self):
         await self.dialogue.close()
@@ -152,36 +189,41 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
     async def utterance(self):
         await feed(self.dialogue, SPEECH, 25)
         await feed(self.dialogue, QUIET, 40)
+        await self.dialogue.settle_input()
 
     async def test_voice_and_unity_context_reach_llm_then_stream_to_client(self):
         self.dialogue.context.update({"kind": "action", "text": "사진을 집어 들었다"})
         await self.utterance()
-        task = self.dialogue.active.task
-        await task
+        await eventually(lambda: self.events[-1]["type"] == "response.done")
         types = [e["type"] for e in self.events]
         self.assertLess(types.index("transcript.final"), types.index("response.started"))
         self.assertEqual(types.count("response.delta"), 2)
         self.assertEqual(types[-1], "response.done")
         prompt = self.llm.messages[-1]["content"]
         self.assertIn("사진을 집어 들었다", prompt)
-        self.assertIn('"emotion": "sad"', prompt)
+        self.assertIn('"audio_event": "speech"', prompt)
+        self.assertNotIn("emotion", prompt)
         self.assertEqual(self.dialogue.history[-1]["content"], "먼저 보낸 말. 마지막 말.")
 
     async def test_barge_in_cancels_llm_and_retains_only_delivered_prefix(self):
         self.llm.block = True
         await self.utterance()
         await asyncio.wait_for(self.llm.entered.wait(), timeout=1)
-        await feed(self.dialogue, SPEECH, 10)
+        # 확인된 발화만 기존 답변을 멈춘다. 검증을 통과한 다음 발화로 끼어든다.
+        await self.utterance()
         self.assertTrue(self.llm.cancelled.is_set())
-        self.assertIsNone(self.dialogue.active)
-        self.assertEqual(self.dialogue.history[-1]["content"], "먼저 보낸 말.")
+        self.assertEqual([m["content"] for m in self.dialogue.history
+                          if m["role"] == "assistant"], ["먼저 보낸 말."])
         types = [e["type"] for e in self.events]
-        self.assertIn("response.cancelled", types)
-        self.assertNotIn("response.done", types)
-        self.assertEqual(types[-1], "speech.started")
+        cancelled = [e for e in self.events if e["type"] == "response.cancelled"]
+        self.assertEqual(cancelled[0]["reason"], "user_speech")
+        self.assertLess(types.index("response.cancelled"), types.index("speech.started", 1))
+        first_id = cancelled[0]["response_id"]
         self.llm.release.set()
         await asyncio.sleep(0)
-        self.assertNotIn("마지막 말", json.dumps(self.events, ensure_ascii=False))
+        leaked = [e for e in self.events if e.get("response_id") == first_id]
+        self.assertNotIn("마지막 말", json.dumps(leaked, ensure_ascii=False))
+        self.assertNotIn("response.done", [e["type"] for e in leaked])
 
     async def test_text_interrupts_response_and_reset_preserves_vad_settings(self):
         self.llm.block = True
@@ -194,7 +236,7 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.events[-1]["type"], "response.done")
         final = [e for e in self.events if e["type"] == "transcript.final"][-1]
         self.assertEqual(final["text"], "직접 입력한 질문")
-        self.assertEqual(final["audio"]["emotion"], "unknown")
+        self.assertNotIn("emotion", final["audio"])
         original_detector = self.dialogue.detector
         original_detector.silence_frames = 42
         await self.dialogue.reset()
@@ -203,7 +245,7 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dialogue.history, [])
         self.assertEqual(self.dialogue.context.snapshot()["recent_actions"], [])
 
-    async def test_barge_in_during_stt_discards_late_result(self):
+    async def test_reset_during_candidate_recognition_discards_the_late_result(self):
         entered, release = asyncio.Event(), asyncio.Event()
 
         class SlowFrontend:
@@ -213,13 +255,19 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
                 return Observation("옛 발화")
 
         self.dialogue.frontend = SlowFrontend()
-        await self.utterance()
+        await feed(self.dialogue, SPEECH, 25)
+        await feed(self.dialogue, QUIET, 40)
         await asyncio.wait_for(entered.wait(), timeout=1)
-        await feed(self.dialogue, SPEECH, 10)
+        # 검증이 끝나기 전에는 입력 턴도 화면 전사도 만들어지지 않는다.
+        self.assertIsNone(self.dialogue.active)
+        self.assertNotIn("speech.started", [e["type"] for e in self.events])
+        await self.dialogue.reset()
         release.set()
-        await asyncio.sleep(0)
+        await self.dialogue.settle_input()
         self.assertEqual(self.dialogue.history, [])
+        self.assertIsNone(self.dialogue.active)
         self.assertNotIn("transcript.final", [e["type"] for e in self.events])
+        self.assertNotIn("speech.started", [e["type"] for e in self.events])
 
     async def test_end_experience_cancels_and_does_not_emit_late_events(self):
         self.llm.block = True
@@ -283,7 +331,8 @@ class WebSocketTests(unittest.TestCase):
             async def stream(self, messages, route):
                 yield "먼저 보낸 말."
                 yield " 마지막 말."
-        self.app = create_app(self.settings, frontend=Frontend(), llm=WireLLM(), detector_factory=detector)
+        self.app = create_app(self.settings, frontend=Frontend(), llm=WireLLM(),
+                              detector_factory=detector, speech_gate=Gate())
         self.hello = {"type": "start", "protocol": 1, "session": "person",
                       "sample_rate": 16000, "channels": 1, "format": "pcm_s16le"}
 
@@ -342,7 +391,7 @@ class TestSceneProtocolTests(unittest.TestCase):
 
         self.settings = Settings(self.tmp.name, "unused", token="test-token", allow_test_mode=True)
         self.frontend, self.llm = TextOnlyFrontend(), CapturingLLM()
-        self.app = create_app(self.settings, frontend=self.frontend, llm=self.llm)
+        self.app = create_app(self.settings, frontend=self.frontend, llm=self.llm, speech_gate=Gate())
         self.hello = {"type": "start", "protocol": 1, "test_mode": True,
                       "test_persona": "임시 테스트 도우미", "sample_rate": 16000,
                       "channels": 1, "format": "pcm_s16le"}
@@ -372,7 +421,7 @@ class TestSceneProtocolTests(unittest.TestCase):
                 ws.send_json({"type": "context", "kind": "action", "text": "사진을 집어 들었다"})
                 events = self.answer(ws, "첫 질문")
                 final = next(e for e in events if e["type"] == "transcript.final")
-                self.assertEqual(final["audio"]["emotion"], "unknown")
+                self.assertNotIn("emotion", final["audio"])
                 self.assertEqual(final["audio"]["audio_event"], "text")
                 self.assertIn("임시 테스트 도우미", self.messages[-1][0]["content"])
                 self.assertIn("사진을 집어 들었다", self.messages[-1][-1]["content"])

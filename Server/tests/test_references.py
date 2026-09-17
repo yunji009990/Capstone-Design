@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dialogue_server import Settings, create_app
 from realtime_audio import Observation
+from test_dialogue import Gate
 from tts_server import QwenVoice, create_app as tts_app
 from voice_reference import ReferenceStore, decode_reference, session_recording
 
@@ -109,12 +110,26 @@ class ReferenceProtocolTests(unittest.TestCase):
                 bound.append((reference, text))
                 return Voice()
         self.app = create_app(Settings(self.tmp.name, "unused", token="test-token", allow_test_mode=True),
-                              frontend=Frontend(), llm=LLM(), tts=TTS())
+                              frontend=Frontend(), llm=LLM(), tts=TTS(), speech_gate=Gate())
         self.hello = {"type": "start", "protocol": 1, "sample_rate": 16000,
                       "channels": 1, "format": "pcm_s16le", "test_mode": True, "test_persona": "인물",
                       "interruption_policy": "semantic_v1"}
 
     def tearDown(self): self.tmp.cleanup()
+
+    def test_reference_audio_mode_reaches_health_and_voice_ready(self):
+        with TestClient(self.app) as client:
+            self.app.state.tts.voice_mode = "reference_audio"
+            self.assertEqual(client.get("/health").json()["tts_voice_mode"], "reference_audio")
+            ref = client.post("/references", headers=self.headers,
+                              files={"voice": ("sample.wav", wav_bytes(4))}).json()
+            with client.websocket_connect("/dialogue", headers=self.headers) as ws:
+                ws.send_json(dict(self.hello, reference_id=ref["reference_id"]))
+                self.assertEqual(ws.receive_json()["type"], "voice.preparing")
+                self.assertEqual(ws.receive_json()["voice_mode"], "reference_audio")
+                ws.send_json({"type": "stop"})
+                self.assertEqual(ws.receive_json()["type"], "stopped")
+            client.delete("/references/" + ref["reference_id"], headers=self.headers)
 
     def test_upload_preview_corrected_transcript_and_prompt_release(self):
         with TestClient(self.app) as client:

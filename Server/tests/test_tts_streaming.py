@@ -180,7 +180,7 @@ class StreamingWorkerTests(unittest.IsolatedAsyncioTestCase):
             async def create_prompt(self, *args): return "prompt"
             async def stream(self, text, prompt):
                 try:
-                    yield bytes(8000)
+                    yield bytes(9600)
                     if self.fail: raise RuntimeError("upstream failed")
                     await asyncio.Event().wait()
                 finally:

@@ -51,9 +51,23 @@ public class ExperienceControl : MonoBehaviour
 
     public void Toggle()
     {
-        if (Started) Finish();
+        // 어떤 입력이 단추를 눌렀는지 확정할 수는 없다. 이 시점에 눌려 있던 키만 관측으로 남긴다.
+        // EventSystem 의 Submit 바인딩(Space/Enter)으로도 onClick 이 불릴 수 있어 함께 본다.
+        _lastToggleKeys =
+            (Input.GetKey(KeyCode.Space) ? "space" : "") +
+            (Input.GetKey(KeyCode.Return) || Input.GetKey(KeyCode.KeypadEnter) ? "enter" : "");
+        if (Started)
+        {
+            // 이 Toggle 에서 바로 끝내는 경우에만 지금 관측한 키를 원인에 붙인다.
+            FinishWith("ui_finish" + (string.IsNullOrEmpty(_lastToggleKeys) ? "" : "_" + _lastToggleKeys));
+        }
         else Begin();
     }
+
+    /// <summary>마지막 Toggle 시점에 눌려 있던 키. 확정 원인이 아니라 관측값이다.
+    /// 프로그램이 부르는 종료에는 이 값을 쓰지 않는다. 지난 클릭의 키가 섞이면 안 된다.</summary>
+    public string LastToggleKeys => _lastToggleKeys;
+    string _lastToggleKeys = "";
 
     /// <summary>대화 맥락과 기록을 비우고 듣기 시작한다. 앞사람 이야기를 이어받으면 안 된다.</summary>
     public void Begin()
@@ -69,9 +83,14 @@ public class ExperienceControl : MonoBehaviour
     /// 듣기를 닫는다. 기록은 지우지 않는다 — 끝난 뒤에 무슨 이야기가 오갔는지
     /// 확인할 일이 있다. 다음 사람을 위해 비우는 것은 다시 시작할 때 한다.
     /// </summary>
-    public void Finish()
+    public void Finish() => FinishWith("ui_finish");
+
+    /// <summary>종료 원인을 코드로 넘겨 끝낸다. 지난 Toggle 의 키를 다시 붙이지 않는다.</summary>
+    void FinishWith(string reason)
     {
-        if (voice != null) voice.EndExperience();
+        // 이미 실패 등으로 끝난 뒤라면 그때 잡힌 실제 원인을 덮어쓰지 않는다.
+        if (voice != null && (voice.ExperienceActive || string.IsNullOrEmpty(voice.LastEndReason)))
+            voice.EndExperience(reason);
         Started = false;
         Refresh();
     }
@@ -82,7 +101,8 @@ public class ExperienceControl : MonoBehaviour
         Refresh();
     }
 
-    void OnDisable() => Finish();
+    // 사용자가 단추를 누른 것이 아니다. ui_finish 로 위장하지 않는다.
+    void OnDisable() => FinishWith("control_disabled");
 
     void Refresh()
     {

@@ -16,9 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def files_for(area):
     if area == "platform":
-        paths = [ROOT / "Web/app.py", ROOT / "Web/persona.py", ROOT / "Web/registration_input.py", ROOT / "Web/.env.example", ROOT / "Web/requirements.txt",
+        paths = [ROOT / "Web/app.py", ROOT / "Web/survey_v2.py", ROOT / "Web/.env.example", ROOT / "Web/requirements.txt",
                  ROOT / "Survey/model_worker.py", ROOT / "Survey/requirements-worker.txt"]
-        paths += [ROOT / "Web/static" / name for name in ("index.html", "admin.html", "after.html", "style.css")]
+        paths += [ROOT / "Web/static" / name for name in ("index.html", "admin.html", "after.html",
+                                                          "style.css", "presets_v2.json")]
         paths += sorted((ROOT / "Survey/core").glob("*.py"))
         paths += sorted((ROOT / "Server/registration").glob("*.py"))
         paths += [ROOT / "Server" / name for name in (
@@ -27,7 +28,10 @@ def files_for(area):
         return [(path, path.relative_to(ROOT).as_posix()) for path in paths]
     names = ("dialogue_server.py", "persona_client.py", "realtime_dialogue.py", "realtime_audio.py",
              "realtime_llm.py", "realtime_tts.py", "interruption_policy.py", "persona_context.py", "dialogue_memory.py",
-             "voice_reference.py", "dialogue_reactions.py", "tts_server.py", "tts_omni.py", "tts_streaming.yaml", "setup_tts_streaming.py",
+             "speech_gate.py", "setup_dialogue_models.py", "dialogue_diagnostics.py",
+             "voice_reference.py", "dialogue_reactions.py", "dialogue_system_lines.py",
+             "tts_server.py", "tts_omni.py", "tts_vox.py", "tts_vox_native.py",
+             "tts_streaming.yaml", "setup_tts_streaming.py",
              "service.sh", "dialogue.sh", "platform.sh", "requirements-dialogue.txt",
              "requirements-tts.txt", "requirements-tts-streaming.txt", "dialogue.env.example", "tts.env.example")
     return [(ROOT / "Server" / name, name) for name in names]

@@ -11,7 +11,7 @@ public static partial class DialogueTestScene
     class SemanticCase
     {
         public string expected, action, reason, transcript, answer, route, error;
-        public string originalResponseId, finalResponseId, emotion;
+        public string originalResponseId, finalResponseId;
         public string resumeAction, resumeTranscript;
         public bool passed, paused, pauseStable, sameResponseResumed, heldUntilRequested;
         public int cancellations;
@@ -112,7 +112,6 @@ public static partial class DialogueTestScene
                 if (failure != null) throw new Exception(failure);
                 if (current.action != expected) throw new Exception("Expected " + expected + ", got " + current.action);
                 if (!current.paused || !current.pauseStable) throw new Exception("Pause was not observed and stable.");
-                current.emotion = voice.VoiceEmotion;
                 if (expected == "hold")
                 {
                     long position = voice.ConsumedAudioSamples;

@@ -68,7 +68,8 @@ class HandoffTests(unittest.TestCase):
         shared = {"AGENTS.md": "shared rules\n", "CLAUDE.md": "@AGENTS.md\n",
                   "tools/check.py": "# shared runner\n", ".claude/settings.json": "{}\n",
                   ".github/workflows/checks.yml": "name: checks\n",
-                  "Web/registration_input.py": "# web registration contract\n",
+                  "Web/survey_v2.py": "# survey v2 contract\n",
+                  "Web/static/presets_v2.json": "{\"profiles\": []}\n",
                   "Web/tests/test_registration_flow.py": "# web API checks\n",
                   "Web/tests/test_registration_flow.cjs": "// browser script checks\n",
                   "docs/웹_등록_흐름_개선.md": "registration workflow\n"}

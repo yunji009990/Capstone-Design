@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dialogue_server import Settings, create_app
 from persona_client import PersonaClient
-from test_dialogue import Frontend, SPEECH, QUIET, detector
+from test_dialogue import Frontend, Gate, SPEECH, QUIET, detector
 
 
 class BundleLLM:
@@ -48,7 +48,7 @@ class DialogueBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty_root:
             settings = Settings(empty_root, "unused", token="dialogue-token", persona_url="http://registration")
             llm = BundleLLM()
-            app = create_app(settings, frontend=Frontend(), llm=llm,
+            app = create_app(settings, frontend=Frontend(), llm=llm, speech_gate=Gate(),
                              detector_factory=detector, personas=source)
             with TestClient(app) as web:
                 with web.websocket_connect("/dialogue", headers={"X-Token": "dialogue-token"}) as ws:

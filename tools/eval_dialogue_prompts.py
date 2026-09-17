@@ -113,8 +113,7 @@ async def run(args):
                         simulated_time[0] = 100.0 + number * 2
                         if turn.get("context"):
                             dialogue.context.update(turn["context"])
-                        observation = Observation(turn["text"], emotion=turn.get("emotion", "unknown"),
-                                                  audio_event="text", language="ko")
+                        observation = Observation(turn["text"], audio_event="text", language="ko")
                         messages = dialogue.messages(observation)
                         route = turn.get("route", "normal")
                         row = {"scenario": scenario["id"], "variant": variant, "repeat": repeat + 1,

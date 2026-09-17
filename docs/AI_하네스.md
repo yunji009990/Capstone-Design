@@ -8,7 +8,7 @@
 | 계층 | 파일·도구 | 역할 |
 |---|---|---|
 | 공통 지침 | `AGENTS.md` | 담당 영역, 코드·문서 기준, 작업 절차, 검증·운영 경계 |
-| Claude 진입점 | `CLAUDE.md` → `@AGENTS.md` | 같은 규칙을 가져오며 공통 규칙을 중복 작성하지 않음 |
+| Claude 진입점 | `CLAUDE.md` → `@AGENTS.md`, `@docs/TTS_작업인계_20260918.md` | 공통 규칙과 최신 TTS 완료 상태·남은 작업을 자동으로 읽음 |
 | Claude 설정 | `.claude/settings.json` | 기존 모델 설정과 명령·파일 접근 규칙 |
 | 선택적 보조 작업 | `.claude/agents/`, `.claude/commands/verify.md`, `impl.md` | 사용자가 요청한 조사·독립 검증·구현안. 메인이 적용 |
 | 모의 검사 | `tools/check.py`, `Server/tests/`, `Survey/tests/`, `Web/tests/`, `tools/tests/` | 영역별 검사 실행, 실패 전파, 결과 보관 |
@@ -129,6 +129,25 @@ Claude Code는 프로젝트 루트에서 시작한다. `.claude/settings.json`�
 운영 대화 로직과 프로토콜은 이 수정의 대상이 아니다. 최종 실행 결과는 해당 실행의 `report.json`을 기준으로 확인한다.
 
 ## 7. 검증 기록
+
+### 2026-09-18 고인 전제·사망 경위 — 최종 검사와 운영 반영
+
+`--area all`에서 **553개(하네스 195 · 서버 296 · 작업자 5 · 웹 57) 통과, 건너뜀 0개**를 확인했다.
+결과: `tools/_work/checks/20260917T160551Z-all-5dd3b644/report.json`.
+웹 57개 중 한 검사가 Node 화면 검사를 실행한다. 553에 더해 세지 않는다.
+수정 전 기준은 486개(하네스 195 · 서버 291)였다.
+
+**모의 검사다.** 실제 모델 답변 품질은 별도 판정이며, 결과 경로·범주별 수동 판정·남은 관찰
+여섯 가지는 `tools/_work/deceased_prompt_fix_20260917/final-report-revised.md` 에 있다.
+함께 수행한 것: 실제 Edge 화면 검사 24개, 실제 Gemma **231턴**(본 대본 4인물 × 3회 171턴 +
+대본 밖 60턴, 생성·API 오류 0 — **답변 품질 오류 0이라는 뜻이 아니다**),
+실제 `/tokenize` 예산 재측정(최소 여유 14토큰).
+
+**2026-09-17T16:15:29Z 운영 반영을 마쳤다.** 런타임 7개를 교체하고 대화 8002·웹 8500만
+다시 시작했다. `prompt_version` 이 `gemma4_dialogue_v3`, 설문 변환기가 `survey_v2_compile_3` 다.
+vLLM 8001·등록 8000·TTS 8003 은 재시작하지 않았고 현재 등록 인물도 바꾸지 않았다.
+절차·백업·되돌리기·인계는
+`tools/_work/deceased_prompt_fix_20260917/deployment-report.md` 를 따른다.
 
 ### 2026-09-15 웹 등록 개선 후 최신 검사
 

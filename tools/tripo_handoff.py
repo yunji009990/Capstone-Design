@@ -18,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = {
     "웹_등록_흐름_개선.md", "웹_설문_항목_사용현황.md",
+    "웹_설문_v2_사용법.md", "웹_설문_사전지식_개편_기획.md",
     "AI_하네스.md", "대화_AI_개발가이드.md",
     "Tripo_팀원_AI_작업지시서.md", "Tripo_개발환경_실행가이드.md",
     "Tripo_모델_테스트_씬.md", "Tripo_T포즈_전처리_실험.md",
@@ -40,7 +41,9 @@ def selected(name):
                 "tools/eval_turn_judge.py", "tools/turn_judge_cases.json",
                 "tools/tripo_trial.py", "tools/tripo_motion_pack.py", "tools/tripo_handoff.py",
                 "tools/tests/test_tripo_handoff.py", "Survey/model_worker.py", "Survey/requirements-worker.txt",
-                "Web/app.py", "Web/persona.py", "Web/registration_input.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt"}:
+                "Web/app.py", "Web/survey_v2.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt",
+                # 설문 v2로 대체된 v1 변환 모듈. 삭제가 전달되도록 범위에 남겨 둔다.
+                "Web/persona.py", "Web/registration_input.py"}:
         return True
     if path.parent.as_posix() == "docs":
         return path.name in DOCS
@@ -56,7 +59,8 @@ def selected(name):
     if name.startswith(("Survey/core/", "Survey/tests/", "Server/")):
         return path.suffix in {".py", ".sh", ".md", ".txt"} or path.name.endswith(".env.example")
     if name.startswith("Web/static/"):
-        return path.suffix in {".html", ".css", ".js"}
+        # presets_v2.json은 화면과 검사가 함께 쓰는 가상 예시다. 참여자 자료가 아니다.
+        return path.suffix in {".html", ".css", ".js"} or name == "Web/static/presets_v2.json"
     if name.startswith("Web/tests/"):
         return path.suffix in {".py", ".cjs"}
     return False

@@ -143,7 +143,7 @@ public partial class DialogueTestPanel
         }
         StopReferencePreview();
         _referenceBusy = true;
-        _referenceStatus.text = "참조 음성을 불러오고 SenseVoice로 전사하고 있습니다…";
+        _referenceStatus.text = "참조 음성을 불러오고 전사하고 있습니다…";
         var form = new List<IMultipartFormSection>();
         if (wav != null) form.Add(new MultipartFormFileSection("voice", wav, Path.GetFileName(path), "audio/wav"));
         else form.Add(new MultipartFormDataSection("current", "1"));

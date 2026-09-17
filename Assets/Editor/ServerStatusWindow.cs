@@ -378,7 +378,7 @@ public class ServerStatusWindow : EditorWindow
         Header("음성 대화 — STT · LLM · TTS", ready ? Green : Amber, ready ? "준비 완료" : "연결 확인 필요");
         Sub(DialogueUrl);
         if (_dialogueHealth == null) return;
-        Row("STT·감정", _dialogueHealth.stt, Grey);
+        Row("STT", _dialogueHealth.stt, Grey);
         Row("답변", _dialogueHealth.llm_ready ? "Gemma · 준비됨" : "연결 안 됨", Grey);
         Row("추론", _dialogueHealth.reasoning_ready ? "준비됨" : "연결 안 됨", Grey);
         Row("TTS", _dialogueHealth.tts_ready ? "Qwen3-TTS · 준비됨" : "연결 안 됨", Grey);

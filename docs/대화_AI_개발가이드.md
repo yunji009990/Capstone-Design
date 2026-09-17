@@ -1,22 +1,30 @@
 # 대화 AI 개발 가이드
 
+> 2026-09-18 03:49 KST 운영 TTS를 VoxCPM2로 전환했다. 현재 상태·검사·복구·Claude Code 재개는 [TTS 작업 인계](TTS_작업인계_20260918.md)를 따른다. Qwen 추가 진단은 중단했다. 사용자 청취·Scene_2 체험 판정은 남아 있다.
+
 기준일: 2026-09-15. 사용자 결정: **우리 작업은 대화 AI, 팀원 작업은 T포즈·3D 모델 제작**이다.
 공통 지침은 [AGENTS.md](../AGENTS.md), 검사 명령은 [AI 하네스](AI_하네스.md)를 따른다.
+되묻기·기억 삭제 안내를 캐릭터 말투로 준비하는 방법은 [캐릭터 확인·기억 삭제 안내](캐릭터_확인_안내.md)를 따른다.
 
 ## 1. 목표와 현재 기준
 
 `AI_Response_Test`에서 사용자의 말·Unity 상황을 이해하고 인물 설정과 대화 기록을 유지하며 음성·자막으로 답한다.
 말하는 도중 사용자가 끼어들면 의도에 따라 보류·재개·수정·주제 전환·대기를 처리한다.
 
-현재 구현은 SenseVoiceSmall·VAD → 의미 판정 → Gemma 4 31B QAT → Qwen3-TTS → Unity 음성·자막이다.
+현재 구현은 Whisper large-v3·VAD → 의미 판정 → Gemma 4 31B QAT → VoxCPM2 → Unity 음성·자막이다.
+2026-09-16 16:01 KST 사용자 결정으로 운영 STT를 SenseVoiceSmall에서 Whisper로 바꾸고 적용했다.
+같은 변경에서 음성 감정 분류 기능을 제거했다. 설정·설치·되돌리기와 적용 뒤 검증 기록은
+[Whisper STT 전환](Whisper_STT_전환.md)에 있다.
 일반/추론 경로는 같은 Gemma의 thinking 설정 차이다. TTS는 2026-09-14 사용자 요청으로 재연결했다.
 현재 음성 대화의 재현 가능한 품질 평가와 안정화를 우선한다. [재연결 검사](TTS_재연결_검증.md)를 참고한다.
-이후 TTS 내부를 vLLM-Omni 생성 스트리밍으로 교체했다. 현재 설치·예열·복구·실측은
-[TTS 실시간 스트리밍](TTS_실시간_스트리밍.md)을 따른다. Unity 오디오 계약은 유지한다.
+9월 14일의 Qwen/vLLM-Omni 설치·실측은 [TTS 실시간 스트리밍](TTS_실시간_스트리밍.md)에 보관한다.
+9월 18일부터는 VoxCPM2 참조 음성 복제·생성 중 PCM 전송을 사용한다. 운영·복구는 위 인계 문서를 따르며 Unity 오디오 계약은 유지한다.
 추론 대기 중에는 사전 준비한 페르소나별 음성을 한 번 재생한다.
 [캐릭터 대기 리액션](캐릭터_대기_리액션.md)에 캐시·재생·시간 측정과 검증을 기록한다.
-등록·테스트 인물은 `gemma4_dialogue_v1` 공통 프롬프트를 사용한다.
-규칙·예시 배치·기존 인물 호환·실제 비교 결과는 [Gemma 4 대화 프롬프트](Gemma4_대화프롬프트.md)에 있다.
+등록·테스트 인물은 `gemma4_dialogue_v3` 공통 프롬프트를 사용한다. 등록 체험에는 `[재회]` 층이 더 붙는다.
+규칙·예시 배치·기존 인물 호환과 v1 당시의 실제 비교 결과는 [Gemma 4 대화 프롬프트](Gemma4_대화프롬프트.md)에 있다.
+v2에서 더한 말버릇 반복 억제와 잡음 전사 거절(`weak_text`)은
+[말버릇·잡음 응답 개선](말버릇_잡음_응답_개선.md)을 따른다.
 연결 안의 최근 원문·핵심 기억·흐름 발췌 요약은 `session_memory_v1`이다.
 [대화 메모리](대화_메모리.md)에 사용법, 정정·삭제·초기화, 실제 60턴 검사와 서버 반영 결과가 있다.
 실제 서버·Unity의 판정·기억·음성 통합 결과는 [2026-09-15 전체 검증](전체_검증_20260915.md)에 있다.
@@ -35,13 +43,13 @@
 |---|---|---|
 | 인증·접속·테스트 모드 | `Server/dialogue_server.py` | 등록 체험과 임시 테스트 연결의 분리 |
 | 인물 조회 | `Server/persona_client.py` | 읽기 전용 API, revision·참조 음성 해시 |
-| STT·감정·VAD | `Server/realtime_audio.py` | 16kHz PCM 입력, 발화 관측과 종료 판단 |
+| STT·VAD | `Server/realtime_audio.py` | 16kHz PCM 입력, 발화 관측과 종료 판단 |
 | 대화 기록·응답 상태 | `Server/realtime_dialogue.py` | 전달한 답변만 기록, 늦게 도착한 취소 응답 배제 |
 | 연결별 핵심 기억·발췌 요약 | `Server/dialogue_memory.py` | 실제 사용자 근거, 정정·삭제·초기화, 연결 간 분리 |
 | 캐릭터별 대기 대사·음성 | `Server/dialogue_reactions.py` | 페르소나/목소리별 캐시, 추론에서 한 번 재생, 본답변·기억과 구분 |
 | 의도·일반/추론 판정 | `Server/interruption_policy.py`, `realtime_llm.py` | 현재 정책과 출력 검증, 미전달 초안 제외 |
 | TTS 생성 스트리밍 | `Server/realtime_tts.py`, `tts_server.py`, `tts_omni.py`, `tts_streaming.yaml` | 참조 ICL, 24kHz PCM, 취소 시 엔진 HTTP 해제 |
-| 인물·지식·공통 규칙 | `Server/persona_context.py` | 인물과 실제 제공된 정보의 일관성 |
+| 인물·지식·공통 규칙 | `Server/persona_context.py` | 인물과 실제 제공된 정보의 일관성, 등록 경로에만 붙는 `MEMORIAL_RULES` |
 | Unity 대화 | `Assets/Scripts/Dialogue/` | response_id, 입력/재생 턴, 중단·초기화, 자막 |
 | Unity 검사 | `Assets/Editor/DialogueTestScene*` | AI 전용 설정, 실제 검사 결과 기록 |
 
@@ -63,6 +71,7 @@
 | 모의 계약 | `python tools/check.py --area dialogue` | 대화·인물 API·취소·버퍼·참조 계약 |
 | 실제 판정 모델 | `tools/eval_turn_judge.py`와 [판정기 검사 문서](판정기_텍스트_검사.md) | 일반/추론·끼어들기 사례의 기대값 일치 |
 | 실제 답변 모델 | `tools/eval_dialogue_prompts.py`와 [프롬프트 문서](Gemma4_대화프롬프트.md) | 가상 인물의 여러 턴 기억·정정·말투·설명 비교. Unity 불필요 |
+| 고인 전제와 사망 경위 | `tools/eval_deceased_dialogue.py`와 [설문 v2 문서](웹_설문_v2_사용법.md) 8-1장 | 등록 체험의 [재회] 규칙, 사망 인식·원인 정정·날조 방지. Unity 불필요 |
 | 긴 대화의 기억 | `tools/eval_dialogue_memory.py`와 [메모리 문서](대화_메모리.md) | 실제 60턴에서 최근 원문 밖의 회상·정정·삭제·초기화. Unity 불필요 |
 | 되물음 뒤 단답의 기억 | `tools/eval_dialogue_clarifications.py`와 같은 메모리 문서 | 실제 WebSocket에서 자동 저장·요일 정정·주제 구분·34턴 뒤 회상. Unity 불필요 |
 | Unity 텍스트 연결 | AI 씬 Play 후 `Tools > Dialogue > Run text response check` | 실제 서버 응답·Unity 상황 전달·연결 설정 |
@@ -74,6 +83,35 @@
 Unity 설정과 결과 파일은 [AI 응답 테스트 씬](AI_응답_테스트_씬.md)에 있다.
 MCP에서는 현재 프로젝트를 확인하고 사용자가 편집 중인 씬 상태를 보존한다. 운영 TTS의 설정 변경·재시작은 작업 범위에 맞춰 진행한다.
 실제 GPU 모델을 쓰는 평가는 모의 검사 명령에 포함하지 않는다. 현재 등록 인물을 평가 인물로 교체하지 않는다.
+### 고인 전제 검사 (`tools/eval_deceased_dialogue.py`)
+
+가상 인물 4명(`tools/deceased_dialogue_cases.json`)으로 등록 체험과 같은
+`build_persona(..., memorial=True)` 시스템 문구를 만들고, 한 회차 안에서 history를
+유지한 채 13~15턴 대본을 서로 다른 고정 seed 3회로 진행한다.
+
+- 셋은 현재 설문 변환기를 지난다 — **사인 알려줌 / 경위 미입력 / AI 전달 제외**.
+- 하나는 `legacy` 항목으로 **1차 수정 전 변환기가 만든 구형 인물 원문**을 그대로 쓴다.
+  이미 등록된 인물의 재접속 호환(구형 "지금 뭐 하고 있었나" 예시 처리)을 확인한다.
+- 대본은 근황, 사망 인식, 원인, 반복 확인, **정정·새 정보 → 다른 주제 → 원인 재질문**,
+  부활, 사후 위치, 지켜봄, 책임, 생전 추억 회상, 일상 복귀, 헤어지는 인사를 덮는다.
+- 턴마다 `forbid`·`expect` 낱말을 적을 수 있다. 이것도 신호일 뿐 판정이 아니다.
+
+```bash
+# 서버에서 실행한다. 운영 인물·프로세스를 바꾸지 않고 별도 검사 폴더만 쓴다.
+~/venv/dialogue/bin/python eval_deceased_dialogue.py \
+    --cases deceased_dialogue_cases.json --output <새 파일> --repeat 3 \
+    --stage-dir <검사할 소스 폴더> --server-dir ~/capstone-server \
+    --from-pid ~/capstone-server/dialogue.pid
+```
+
+`--stage-dir` 없이 저장소에서 그대로 돌릴 수도 있다. 그때는 `Server/`와 `Web/`의 현재
+소스를 쓴다.
+
+**한계.** 결과의 `auto_flags` 는 좁은 문구 검사이며 통과 판정이 아니다. 부정문
+("지켜봤는지 잘 모르겠구나")도 걸리므로 답변 전문을 사람이 읽어야 한다. 결과 JSON의
+`verdict` 는 항상 `manual_review_required` 다. STT·TTS·Unity·등록 API는 쓰지 않는다.
+2026-09-17 결과 경로는 [설문 v2 문서](웹_설문_v2_사용법.md) 8-1장에 있다.
+
 `eval_dialogue_clarifications.py`의 기존 검사는 TTS 없는 API 전용이다. 음성 운영 서버를 끄지 말고 별도 텍스트 검사 API에서 실행한다.
 TTS와 기억의 결합 검사는 [재연결 검사](TTS_재연결_검증.md)의 7턴 결과와 재생 확인 방식으로 구분한다.
 

@@ -1,7 +1,9 @@
-"""Qwen3-TTS worker: 생성 중 PCM 전송, 연결별 참조 음성, 끊김 시 추론 취소.
+"""TTS worker: 생성 중 PCM 전송, 연결별 참조 음성, 끊김 시 추론 취소.
 
-기본 vllm_omni 엔진은 별도 환경에서 실행한다. TTS_BACKEND=legacy 설정은
-이전의 구절 완성 후 전송 방식으로 돌아가는 명시적 복구 경로다.
+TTS_BACKEND는 vllm_omni(Qwen3-TTS, 기본), voxcpm2(VoxCPM2 참조 전용),
+legacy(Qwen 구절 완성 후 전송 복구 경로)다. 엔진은 별도 환경에서 실행한다.
+공개 계약(NDJSON·24 kHz PCM16·청크 상한·source_samples)은 백엔드와 무관하게 같고,
+voice_mode는 백엔드가 실제로 쓰는 값을 그대로 보고한다.
 """
 from __future__ import annotations
 
@@ -22,6 +24,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
+
+# 24 kHz mono PCM16 기준 200 ms = 9600 bytes. 조각은 엔진이 만든 그대로 보내고
+# 이 값은 조각 크기 상한 검사와 legacy 분할에만 쓴다.
+MAX_PACKET_BYTES = 9600
 
 
 @asynccontextmanager
@@ -119,8 +125,11 @@ def create_app(voice=None, token=None):
         elif backend == "vllm_omni":
             from tts_omni import OmniVoice
             app.state.voice = OmniVoice()
+        elif backend == "voxcpm2":
+            from tts_vox import VoxVoice
+            app.state.voice = VoxVoice()
         else:
-            raise ValueError("TTS_BACKEND must be vllm_omni or legacy")
+            raise ValueError("TTS_BACKEND must be vllm_omni, voxcpm2 or legacy")
         try:
             if hasattr(app.state.voice, "start"):
                 await app.state.voice.start()
@@ -130,16 +139,19 @@ def create_app(voice=None, token=None):
             if hasattr(app.state.voice, "close"):
                 await app.state.voice.close()
 
-    app = FastAPI(title="Qwen3-TTS worker", lifespan=lifespan)
+    app = FastAPI(title="TTS worker", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
         ready = (await app.state.voice.available()
                  if hasattr(app.state.voice, "available") else True)
         return {"status": "ready" if ready else "unavailable", "model": app.state.voice.model_id,
-                "voice_mode": "reference_icl", "device": "cuda:0",
+                "voice_mode": getattr(app.state.voice, "voice_mode", "reference_icl"),
+                "device": "cuda:0",
                 "streaming": getattr(app.state.voice, "streaming", "phrase_pcm"),
-                "busy": gate.locked(), "references": len(prompts)}
+                "busy": gate.locked(), "references": len(prompts),
+                "audio_packet_mode": "passthrough", "audio_packet_max_ms": 200,
+                "audio_tail_padding": False}
 
     @app.post("/voices")
     async def prepare(body: ReferenceRequest, x_token: str = Header("")):
@@ -170,7 +182,8 @@ def create_app(voice=None, token=None):
                 raise
             voice_id = uuid.uuid4().hex
             prompts[voice_id] = prompt, time.monotonic()
-        return {"voice_id": voice_id, "voice_mode": "reference_icl"}
+        return {"voice_id": voice_id,
+                "voice_mode": getattr(app.state.voice, "voice_mode", "reference_icl")}
 
     @app.delete("/voices/{voice_id}")
     async def release(voice_id: str, x_token: str = Header("")):
@@ -204,33 +217,44 @@ def create_app(voice=None, token=None):
                     prompts[body.voice_id] = prompt, time.monotonic()
                     yield line({"type": "started"})
                     started = time.monotonic()
-                    audio_bytes = 0
+                    # 전송은 엔진이 내보낸 조각 그대로다. 모아 두거나 쪼개지 않고
+                    # 무음도 채우지 않으며 조각 크기만 MAX_PACKET_BYTES로 제한한다.
+                    source_bytes = 0
+
+                    def packet(chunk):
+                        return line({"type": "audio", "sample_rate": 24000,
+                                     "pcm": base64.b64encode(chunk).decode()})
+
                     if hasattr(app.state.voice, "stream"):
                         # Explicit aclose propagates a downstream disconnect even
                         # when this generator was suspended while yielding PCM.
                         async with closing_stream(app.state.voice.stream(body.text.strip(), prompt)) as stream:
                             async for pcm in stream:
-                                if not pcm or len(pcm) > 9600 or len(pcm) % 2:
+                                if not pcm or len(pcm) > MAX_PACKET_BYTES or len(pcm) % 2:
                                     raise ValueError("Invalid streaming PCM packet")
-                                audio_bytes += len(pcm)
-                                yield line({"type": "audio", "sample_rate": 24000,
-                                            "pcm": base64.b64encode(pcm).decode()})
+                                source_bytes += len(pcm)
+                                yield packet(pcm)
                         elapsed = time.monotonic() - started
                     else:
                         task = asyncio.create_task(asyncio.to_thread(
                             app.state.voice.synthesize, body.text.strip(), prompt, cancelled))
                         pcm, rate, elapsed = await asyncio.shield(task)
-                        audio_bytes = len(pcm)
-                        for offset in range(0, len(pcm), 9600):
-                            yield line({"type": "audio", "sample_rate": rate,
-                                        "pcm": base64.b64encode(pcm[offset:offset + 9600]).decode()})
+                        if rate != 24000 or not pcm or len(pcm) % 2:
+                            raise ValueError("Legacy audio must be non-empty 24 kHz mono PCM16")
+                        source_bytes = len(pcm)
+                        for offset in range(0, len(pcm), MAX_PACKET_BYTES):
+                            yield packet(pcm[offset:offset + MAX_PACKET_BYTES])
+                    if not source_bytes:
+                        raise ValueError("TTS stream produced no audio")
                     yield line({"type": "done", "synthesis_sec": elapsed,
-                                "audio_sec": audio_bytes / 48000})
+                                "audio_sec": source_bytes / 48000,
+                                "source_samples": source_bytes // 2,
+                                "padding_samples": 0})
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    log.exception("Qwen synthesis failed")
-                    yield line({"type": "error", "message": "Qwen3-TTS synthesis failed"})
+                    log.exception("TTS synthesis failed")
+                    yield line({"type": "error", "message": "TTS synthesis failed"})
                 finally:
                     cancelled.set()
                     if task is not None:

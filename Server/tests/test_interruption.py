@@ -10,29 +10,22 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from interruption_policy import TurnDecision
 from realtime_audio import Observation
-from realtime_dialogue import Dialogue
+from realtime_dialogue import CLARIFY_GUIDANCE, Dialogue
 from realtime_llm import LLMClient, ModelEndpoint
-from test_dialogue import SPEECH, QUIET, detector, feed
+from test_dialogue import SPEECH, QUIET, Gate, NOISE, detector, eventually, feed
 
 
 FIRST = "이미 전달한 안내입니다."
 REST = " 아직 말하지 않은 안내입니다."
 
 
-async def eventually(predicate, timeout=1):
-    async def wait():
-        while not predicate():
-            await asyncio.sleep(.001)
-    await asyncio.wait_for(wait(), timeout)
-
-
 class SemanticTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.events = []
-        self.words = ["산책 준비를 설명해 줘"]
+        self.heard = "말하는 중입니다"
         owner = self
         class Frontend:
-            async def transcribe(self, pcm): return Observation(owner.words.pop(0), emotion="neutral")
+            async def transcribe(self, pcm): return Observation(owner.heard)
         class LLM:
             def __init__(self):
                 self.decisions = []
@@ -63,16 +56,17 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
                 self.calls.append(text)
                 yield base64.b64encode(bytes([len(self.calls), 0]) * 4800).decode(), 4800
         async def emit(event): self.events.append(event)
-        self.llm, self.tts = LLM(), TTS()
+        self.llm, self.tts, self.gate = LLM(), TTS(), Gate()
         self.dialogue = Dialogue("인물", [], Frontend(), self.llm, emit,
-                                 detector=detector(), tts=self.tts, partial_seconds=60)
+                                 detector=detector(), tts=self.tts, partial_seconds=60,
+                                 speech_gate=self.gate)
 
     async def asyncTearDown(self): await self.dialogue.close()
 
     def events_of(self, kind): return [e for e in self.events if e["type"] == kind]
 
     async def start_answer(self, complete=True):
-        await self.dialogue.text(self.words.pop(0))
+        await self.dialogue.text("산책 준비를 설명해 줘")
         if complete:
             await eventually(lambda: self.events_of("response.done"))
         else:
@@ -83,14 +77,21 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
                                 "text_chars": boundary["text_chars"]})
         return old
 
-    async def start_input(self):
+    async def start_input(self, text="말하는 중입니다"):
+        """실제 발화를 말하기 시작한다. 이 단계에서는 아직 아무것도 멈추지 않는다."""
+        self.heard = text
         await feed(self.dialogue, SPEECH, 25)
+        self.assertFalse(self.dialogue.candidate.accepted)
 
     async def finish_input(self, text):
-        self.words.append(text)
+        """발화가 끝난다. 검증을 통과했을 때만 새 입력 턴의 작업을 돌려준다."""
+        self.heard = text
+        before = self.dialogue.input_stats["accepted"]
         await feed(self.dialogue, QUIET, 40)
-        task = self.dialogue.active.task
-        return task
+        await self.dialogue.settle_input()
+        if self.dialogue.input_stats["accepted"] == before:
+            return None
+        return self.dialogue.active.task if self.dialogue.active is not None else None
 
     async def complete_playback(self, state):
         await eventually(lambda: any(e["response_id"] == state.response_id for e in self.events_of("response.done")))
@@ -103,11 +104,14 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         before = list(self.events_of("response.audio"))
         self.llm.decisions.append(TurnDecision("resume", reason="계속 설명 요청"))
         await self.start_input()
-        self.assertIs(self.dialogue.held, old)
-        self.assertFalse(old.running.is_set())
-        self.assertFalse(self.events_of("response.cancelled"))
+        # 말하는 동안에는 아직 멈추지 않는다. 확인은 발화가 끝난 뒤에 이뤄진다.
+        self.assertIsNone(self.dialogue.held)
+        self.assertTrue(old.running.is_set())
+        self.assertFalse(self.events_of("response.paused"))
         task = await self.finish_input("응, 계속 말해")
         await asyncio.wait_for(task, 1)
+        self.assertTrue(self.events_of("response.paused"))
+        self.assertFalse(self.events_of("response.cancelled"))
         self.assertIs(self.dialogue.active, old)
         self.assertTrue(old.running.is_set())
         self.assertEqual(self.events_of("response.resumed")[0]["response_id"], old.response_id)
@@ -121,19 +125,28 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_generation_is_quiet_during_pause_and_continues_without_restart(self):
         self.llm.block_stream = True
         old = await self.start_answer(complete=False)
+        hold = asyncio.Event()
+
+        async def judge(messages, pending):
+            await hold.wait()
+            return TurnDecision("resume")
+
+        self.llm.decide_interruption = judge
         await self.start_input()
+        task = await self.finish_input("계속해 줘")
+        await eventually(lambda: self.events_of("response.paused"))
         count = len(self.events_of("response.audio"))
         self.llm.stream_release.set()
         await asyncio.sleep(.03)
         self.assertEqual(len(self.events_of("response.audio")), count)
         self.assertFalse(self.llm.stream_cancelled.is_set())
-        self.llm.decisions.append(TurnDecision("resume"))
-        task = await self.finish_input("계속해 줘")
-        await task
+        hold.set()
+        await asyncio.wait_for(task, 1)
         await self.complete_playback(old)
         self.assertEqual(len(self.llm.calls), 1)
         self.assertEqual(len(self.tts.calls), 2)
-        self.assertEqual(len(self.events_of("response.audio")), 2)
+        self.assertEqual([base64.b64decode(e["pcm"]) for e in self.events_of("response.audio")],
+                         [b"\x01\x00" * 4800, bytes(7200), b"\x02\x00" * 4800])
 
     async def test_text_generation_uses_same_judge_without_tts_or_playback_ack(self):
         self.dialogue.tts = None
@@ -171,6 +184,8 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         messages = self.llm.calls[-1]
         self.assertIn("전달되지 않은 참고 자료", messages[0]["content"])
         self.assertIn(REST.strip(), messages[0]["content"])
+        # 정정 경로에는 되묻기 지시가 붙지 않는다.
+        self.assertNotIn(CLARIFY_GUIDANCE, messages[0]["content"])
         assistants = [m["content"] for m in messages if m["role"] == "assistant"]
         self.assertEqual(assistants, [FIRST])
         await self.complete_playback(new)
@@ -183,6 +198,7 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         await eventually(lambda: len(self.llm.calls) == 2)
         new = self.dialogue.active
         messages = self.llm.calls[-1]
+        self.assertNotIn(CLARIFY_GUIDANCE, messages[0]["content"])
         self.assertNotIn(REST.strip(), json.dumps(messages, ensure_ascii=False))
         self.assertIn(FIRST, json.dumps(messages, ensure_ascii=False))
         self.dialogue.playback({"type": "playback.done", "response_id": old.response_id, "text_chars": 9999})
@@ -197,8 +213,10 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.dialogue.held, old)
         self.assertTrue(old.hold_requested)
         await self.start_input()
-        await (await self.finish_input(""))
+        # 무의미한 전사는 턴 자체를 만들지 않는다. 보류 상태는 그대로 유지된다.
+        self.assertIsNone(await self.finish_input(""))
         self.assertFalse(old.running.is_set())
+        self.assertIs(self.dialogue.held, old)
         self.assertEqual(len(self.llm.judgments), 1)
         self.assertEqual(len(self.llm.calls), 1)
         self.llm.decisions.append(TurnDecision("resume"))
@@ -207,14 +225,57 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         await self.complete_playback(old)
         self.assertEqual(len(self.llm.calls), 1)
 
-    async def test_empty_false_detection_resumes_without_judge_or_empty_history_entry(self):
+    async def test_noise_keeps_playback_running_and_lets_it_finish_during_verification(self):
+        old = await self.start_answer()
+        paused, started = len(self.events_of("response.paused")), len(self.events_of("speech.started"))
+        await feed(self.dialogue, NOISE, 60)
+        await feed(self.dialogue, QUIET, 40)
+        # 후보 검증이 진행되는 동안 원래 답변의 재생 완료가 도착해도 계약이 유지된다.
+        self.dialogue.playback({"type": "playback.done", "response_id": old.response_id,
+                                "text_chars": old.sent_chars})
+        await self.dialogue.settle_input()
+        self.assertEqual(len(self.events_of("response.paused")), paused)
+        self.assertEqual(len(self.events_of("speech.started")), started)
+        self.assertEqual(self.llm.judgments, [])
+        self.assertFalse(self.events_of("response.cancelled"))
+        await asyncio.wait_for(old.task, 1)
+        self.assertEqual(len(self.llm.calls), 1)
+
+    async def test_empty_false_detection_never_pauses_or_reaches_the_judge(self):
         old = await self.start_answer()
         await self.start_input()
-        await (await self.finish_input(""))
+        self.assertIsNone(await self.finish_input(""))
         self.assertEqual(self.llm.judgments, [])
         self.assertTrue(old.running.is_set())
+        self.assertFalse(self.events_of("response.paused"))
         self.assertEqual(len([m for m in self.dialogue.history if m["role"] == "user"]), 1)
         await self.complete_playback(old)
+
+    async def test_clarify_asks_about_the_content_through_the_ordinary_generator(self):
+        old = await self.start_answer()
+        self.llm.decisions.append(TurnDecision("clarify", reason="발화가 끊겨 의도를 확인합니다"))
+        await self.start_input()
+        await self.finish_input("아니 그게 좀")
+        await eventually(lambda: len(self.llm.calls) == 2)
+        new = self.dialogue.active
+        messages = self.llm.calls[-1]
+        # 되묻기도 인물의 보통 답변 생성 경로를 지나고 판정 호출은 늘지 않는다.
+        self.assertEqual(len(self.llm.judgments), 1)
+        self.assertEqual(self.llm.routes[-1], "normal")
+        self.assertIn(CLARIFY_GUIDANCE, messages[0]["content"])
+        body = json.dumps(messages, ensure_ascii=False)
+        # 사용자가 방금 한 말은 들어가고, 판정 이유·분류 이름·미전달 초안은 들어가지 않는다.
+        self.assertIn("아니 그게 좀", body)
+        self.assertNotIn("발화가 끊겨", body)
+        self.assertNotIn("clarify", body)
+        self.assertNotIn(REST.strip(), body)
+        # 진행 방식 선택지를 프롬프트로 시키지 않는다.
+        self.assertNotIn("계속할까", body)
+        # 기존 취소·턴 계약은 그대로다.
+        self.assertEqual(self.events_of("response.cancelled")[0]["reason"], "clarify")
+        self.assertEqual(self.events_of("response.cancelled")[0]["response_id"], old.response_id)
+        self.assertNotEqual(new.response_id, old.response_id)
+        await self.complete_playback(new)
 
     async def test_failed_judge_asks_for_clarification_instead_of_resuming(self):
         await self.start_answer()
@@ -223,11 +284,12 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("realtime_dialogue", level="ERROR"):
             await self.finish_input("그게 좀")
             await eventually(lambda: self.events_of("interruption.decision"))
-        await eventually(lambda: len(self.events_of("response.done")) == 2)
+        await eventually(lambda: len(self.llm.calls) == 2)
         self.assertEqual(self.events_of("interruption.decision")[-1]["action"], "clarify")
         self.assertFalse(self.events_of("response.resumed"))
-        self.assertEqual(len(self.llm.calls), 1)
-        self.assertIn("내용을 바꿔서", self.tts.calls[-1])
+        # 판정 실패도 같은 경로로 되묻는다. 고정 안내 문장은 더 이상 나가지 않는다.
+        self.assertIn(CLARIFY_GUIDANCE, self.llm.calls[-1][0]["content"])
+        self.assertNotIn("바꿔서", " ".join(self.tts.calls))
         await self.complete_playback(self.dialogue.active)
 
     async def test_newer_utterance_invalidates_a_late_resume_decision(self):
@@ -254,10 +316,16 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         await self.complete_playback(self.dialogue.active)
 
     async def test_reset_and_timeout_release_suspended_work_without_auto_playback(self):
-        self.dialogue.hold_seconds = .03
-        await self.start_answer()
+        # 보류가 성립할 시간은 주고, 만료는 검사가 기다릴 수 있을 만큼만 짧게 둔다.
+        # 더 짧게 잡으면 판정이 끝나기 전에 만료돼 hold 자체가 성립하지 않는다.
+        self.dialogue.hold_seconds = .3
+        old = await self.start_answer()
+        self.llm.decisions.append(TurnDecision("hold"))
         await self.start_input()
-        await eventually(lambda: self.events_of("response.cancelled"))
+        await (await self.finish_input("잠깐 기다려"))
+        self.assertIs(self.dialogue.held, old)
+        self.assertTrue(old.hold_requested)
+        await eventually(lambda: self.events_of("response.cancelled"), timeout=3)
         self.assertIsNone(self.dialogue.held)
         self.assertEqual(self.events_of("response.cancelled")[-1]["reason"], "hold_timeout")
         self.assertFalse(self.events_of("response.resumed"))
@@ -282,20 +350,23 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.events), count)
         self.assertIsNone(self.dialogue.held)
 
-    async def test_failed_stt_releases_the_suspended_answer_with_the_client(self):
+    async def test_failed_recognition_never_stops_the_original_answer(self):
+        """확인되지 않은 입력은 인식이 실패해도 기존 답변을 멈추지 않는다."""
         old = await self.start_answer()
         async def fail(pcm): raise RuntimeError("recognition failed")
         self.dialogue.frontend.transcribe = fail
-        await self.start_input()
         with self.assertLogs("realtime_dialogue", level="ERROR"):
-            task = await self.finish_input("unused")
-            await task
-        self.assertIsNone(self.dialogue.active)
+            await feed(self.dialogue, SPEECH, 25)
+            await feed(self.dialogue, QUIET, 40)
+            await self.dialogue.settle_input()
+        self.assertIs(self.dialogue.active, old)
         self.assertIsNone(self.dialogue.held)
-        self.assertTrue(old.task.done())
-        self.assertEqual(self.events_of("response.cancelled")[-1]["reason"], "turn_failed")
-        self.assertFalse(self.events_of("response.resumed"))
-
+        self.assertTrue(old.running.is_set())
+        self.assertFalse(self.events_of("response.paused"))
+        self.assertFalse(self.events_of("response.cancelled"))
+        self.assertEqual(len(self.events_of("speech.started")), 1)  # 첫 질문뿐이다
+        self.assertEqual(self.dialogue.input_stats["failed"], 1)
+        await self.complete_playback(old)
 
     async def test_text_stream_eof_during_hold_does_not_finish_or_forget_answer(self):
         self.dialogue.tts = None

@@ -36,8 +36,7 @@ def build_input(case, contexts):
         dialogue.context.update({"kind": "state", "text": unity["current_state"]})
     for event in unity.get("recent_actions", []):
         dialogue.context.update({"kind": "action", "text": event["description"]})
-    observation = Observation(case["text"], emotion=case.get("emotion", "unknown"),
-                              audio_event="text", language="ko")
+    observation = Observation(case["text"], audio_event="text", language="ko")
     return dialogue.messages(observation), context.get("pending")
 
 

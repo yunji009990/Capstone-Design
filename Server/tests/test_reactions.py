@@ -17,11 +17,12 @@ from dialogue_reactions import (MAX_PCM, ReactionBank, ReactionCache, ReactionCl
                                 validate_lines)
 from dialogue_server import Settings, create_app
 from interruption_policy import TurnDecision
+from persona_context import MEMORIAL_HEAD
 from realtime_audio import Observation
 from realtime_dialogue import Dialogue
 from realtime_llm import LLMClient, ModelEndpoint
 from voice_reference import Reference
-from test_dialogue import detector
+from test_dialogue import detector, Gate
 from test_interruption import eventually
 from test_references import wav_bytes
 
@@ -347,7 +348,7 @@ class ReactionProtocolTests(unittest.TestCase):
                 async def available(self): return True
                 async def bind(self, reference, text=None): return voice
             app = create_app(Settings(root, "unused", allow_test_mode=True),
-                             frontend=Frontend(), llm=LLM(), tts=TTS())
+                             frontend=Frontend(), llm=LLM(), tts=TTS(), speech_gate=Gate())
             with TestClient(app) as web:
                 info = web.post("/references", files={"voice": ("public.wav", wav_bytes())}).json()
                 with web.websocket_connect("/dialogue") as ws:
@@ -384,7 +385,7 @@ class ReactionProtocolTests(unittest.TestCase):
                     return voice
             settings = Settings(root, "unused", token="token", allow_test_mode=True,
                                 reaction_cache_dir=str(Path(root) / "cache"))
-            app = create_app(settings, frontend=Frontend(), llm=LLM(), tts=TTS())
+            app = create_app(settings, frontend=Frontend(), llm=LLM(), tts=TTS(), speech_gate=Gate())
             headers = {"X-Token": "token"}
             with TestClient(app) as web:
                 info = web.post("/references", headers=headers,
@@ -406,6 +407,55 @@ class ReactionProtocolTests(unittest.TestCase):
             self.assertEqual([len(v.calls) for v in voices], [6, 0])
             self.assertEqual([v.releases for v in voices], [1, 1])
             self.assertEqual(list(Path(root).iterdir()), [])
+
+    def test_registered_knowledge_and_extra_rules_stay_out_of_reaction_preparation(self):
+        """대기 리액션은 성격·말투만 쓴다. 사전지식·새 근황·언급 조건은 입력에 넣지 않는다."""
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / "person"
+            folder.mkdir()
+            (folder / "persona.md").write_text("[성격] 차분합니다.\n[말투] 존댓말로 말합니다.",
+                                               encoding="utf-8")
+            (folder / "knowledge.md").write_text(
+                "- 사용자가 이번에 새로 알려준 소식이다: 재검사를 받는다.\n"
+                "- 당신이 세상을 떠난 경위는 사용자가 알려준 대로 이렇다: 교통사고였다",
+                encoding="utf-8")
+            (folder / "rules.md").write_text("- 먼저 꺼내지 않을 주제: 병원에서의 마지막 며칠.",
+                                             encoding="utf-8")
+            (folder / "voice.wav").write_bytes(wav_bytes())
+            (Path(root) / "current.json").write_text('{"session":"person"}')
+            generated = []
+            class LLM:
+                async def available(self, endpoint=None): return True
+                async def route(self, messages): return "normal"
+                async def generate_reactions(self, profile):
+                    generated.append(profile)
+                    return {"reactions": LINES}
+            class Frontend:
+                async def transcribe(self, pcm, sample_rate=16000): return Observation("참조 전사")
+            class TTS:
+                async def available(self): return True
+                async def bind(self, reference, text=None): return PreparedVoice()
+            settings = Settings(root, "unused", token="token",
+                                reaction_cache_dir=str(Path(root) / "cache"))
+            app = create_app(settings, frontend=Frontend(), llm=LLM(), tts=TTS(), speech_gate=Gate())
+            with TestClient(app) as web:
+                with web.websocket_connect("/dialogue", headers={"X-Token": "token"}) as ws:
+                    ws.send_json({"type": "start", "protocol": 1, "session": "person",
+                                  "sample_rate": 16000, "channels": 1, "format": "pcm_s16le",
+                                  "interruption_policy": "semantic_v1"})
+                    event = ws.receive_json()
+                    while event["type"] == "voice.preparing":
+                        event = ws.receive_json()
+                    self.assertEqual(event["type"], "ready", event)
+                    self.assertTrue(event["reactions"]["ready"], event)
+            self.assertEqual(len(generated), 1)
+            self.assertIn("차분합니다", generated[0])
+            self.assertNotIn("재검사", generated[0])
+            self.assertNotIn("병원", generated[0])
+            # 사망 경위도, 등록 경로에 붙는 [재회] 규칙도 리액션 입력에 들어가지 않는다.
+            self.assertNotIn("교통사고", generated[0])
+            self.assertNotIn(MEMORIAL_HEAD, generated[0])
+            self.assertNotIn("세상을 떠난", generated[0])
 
 
 if __name__ == "__main__":

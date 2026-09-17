@@ -1,10 +1,17 @@
 # 다시, 봄 — 서버
 
+**2026-09-18 03:49 KST 운영 TTS는 VoxCPM2다.** 현재 설정·전환 검사·Qwen 복구 절차와
+Claude Code 재개는 [TTS 작업 인계](../docs/TTS_작업인계_20260918.md)를 먼저 읽는다.
+사용자 청취와 Scene_2 실제 체험 판정은 남아 있다.
+
 대화 AI 담당의 시작 문서는 [대화 AI 개발 가이드](../docs/대화_AI_개발가이드.md)다.
 기본 모의 검사는 `python tools/check.py --area dialogue`, 검사 전용 의존성은 `requirements-test.txt`다.
 검사 환경 선택과 결과 파일은 [공통 하네스](../docs/AI_하네스.md)를 따른다.
-등록·테스트 인물의 공통 규칙은 `gemma4_dialogue_v1`이다.
-[Gemma 4 프롬프트·비교 결과](../docs/Gemma4_대화프롬프트.md)에 변경 이유, 적용 경로, 재실행 방법이 있다.
+등록·테스트 인물의 공통 규칙은 `gemma4_dialogue_v3`다.
+등록 체험에는 여기에 `[재회]` 층이 더 붙는다(테스트 인물 제외). → [서버 음성 대화 구조](../docs/서버_음성대화_구조.md)
+[Gemma 4 프롬프트·비교 결과](../docs/Gemma4_대화프롬프트.md)에 v1 당시의 변경 이유, 적용 경로, 재실행 방법이 있다.
+v2의 말버릇 반복 억제와 약한 전사 거절(`weak_text`)은
+[말버릇·잡음 응답 개선](../docs/말버릇_잡음_응답_개선.md)을 따른다.
 같은 연결의 핵심 기억·정정·삭제는 `session_memory_v1`이다.
 [대화 메모리](../docs/대화_메모리.md)에 사용법, 범위, 검사·배포 결과가 있다. 재접속 후 복원은 아직 없다.
 
@@ -14,8 +21,8 @@
 2026-09-10부터 등록·대화·LLM·TTS를 별도 프로세스로 실행한다. Raon은 제거했다.
 2026-09-11에는 TTS를 끄고 텍스트 답변으로 판정기를 검증했다.
 2026-09-14 사용자 요청으로 Qwen3-TTS를 다시 연결했다. [재연결·실제 검사](../docs/TTS_재연결_검증.md)를 참고한다.
-같은 날 TTS를 생성 중 오디오를 보내는 vLLM-Omni 경로로 전환했다. 현재 설치·예열·복구와 검증은
-[TTS 실시간 스트리밍](../docs/TTS_실시간_스트리밍.md)을 따른다.
+같은 날 TTS를 생성 중 오디오를 보내는 vLLM-Omni 경로로 전환했다. 당시 설치·예열·실측은
+[TTS 실시간 스트리밍](../docs/TTS_실시간_스트리밍.md)에 보관하며 현재 운영 설정은 위 인계 문서를 따른다.
 2026-09-15 페르소나별 짧은 대사·음성을 준비해 추론 대기 중 재생한다.
 설정·캐시·재생 계약과 실측은 [캐릭터 대기 리액션](../docs/캐릭터_대기_리액션.md)을 따른다.
 [당시 텍스트 검사 결과·재실행](../docs/판정기_텍스트_검사.md)은 별도 기록이다.
@@ -26,16 +33,17 @@
 |---|---|---|---|
 | 8000 | session | `~/venv/registration` | 웹 영역의 CPU 인물·참조 WAV·3D 자료 관리 |
 | 8001 (loopback) | vLLM | `~/venv/vllm` | 기존 Gemma, API 이름 `exaone` |
-| 8002 | dialogue | `~/venv/dialogue` | CPU SenseVoiceSmall·VAD·상황·일반/추론 분류·중단 |
-| 8003 (loopback) | tts | `~/venv/qwentts` | CPU 인증·참조 ID·기존 PCM API, 엔진 생명주기 관리 |
-| 8004 (loopback) | TTS 엔진 | `~/venv/qwentts-stream` | vLLM-Omni / Qwen3-TTS 1.7B Base 생성 중 PCM·ICL 복제 |
+| 8002 | dialogue | `~/venv/dialogue` | GPU Whisper STT + CPU VAD·상황·일반/추론 분류·중단 |
+| 8003 (loopback) | tts | `~/venv/qwentts` | 인증·참조 ID·GPU VoxCPM2 참조 음성 복제·생성 중 PCM |
+| 8004 (현재 미사용) | 이전 Qwen 엔진 | `~/venv/qwentts-stream` | vLLM-Omni / Qwen3-TTS 환경은 복구용 보존 |
 | 8500 | web | `~/venv/web` | 등록 웹, 코드 위치 `~/webapp` |
 | 없음 | tripo | `~/venv/tripo` | 별도 CPU 작업자, SQLite 작업 복구·Tripo 요청·GLB 전달 |
 
 웹·Tripo 실행 코드: `~/webapp`. 등록 API: `~/webapp/Server/registration`.
-대화 AI 실행 코드: `~/capstone-server`. 인물 원본: `~/server/sessions`. STT: `~/dialogue-models/sensevoice`.
+대화 AI 실행 코드: `~/capstone-server`. 인물 원본: `~/server/sessions`.
+STT: `~/dialogue-models/whisper-large-v3`(되돌리기용 `~/dialogue-models/sensevoice`).
 대화 AI는 인물 원본 폴더를 직접 읽지 않고 등록 API를 조회한다.
-Qwen 가중치는 Hugging Face 캐시에 있다. TTS가 Gemma 환경을 변경하거나 중복 로드하지 않는다.
+VoxCPM2와 복구용 Qwen 가중치는 Hugging Face 캐시에 있다. TTS가 Gemma 환경을 변경하거나 중복 로드하지 않는다.
 서버는 공용 GPU이므로 다른 사용자의 프로세스를 종료하면 안 된다.
 
 ## 시작·종료·상태
@@ -60,17 +68,19 @@ ssh raon bash /home/crc_unity/capstone-server/service.sh dialogue stop
 Gemma는 기존 8001 프로세스를 사용한다. 꺼진 경우 `vllm_start.sh`를 별도로 실행한다.
 `start.sh`, `stop.sh`, `status.sh`는 CPU 등록 서비스의 호환 진입점이다.
 로그는 `session.log`, `dialogue.log`, `tts.log`. PID 파일의 명령행을 확인한 프로세스만 종료한다.
-TTS 모델 엔진 로그는 `tts-engine.log`다. `dialogue.sh tts` 명령이 자신이 시작한 엔진도 함께 관리한다.
+현재 VoxCPM2 합성 로그는 `tts.log`다. Qwen으로 복구하면 별도 엔진 로그는 `tts-engine.log`이며
+`dialogue.sh tts` 명령이 자신이 시작한 엔진도 함께 관리한다.
 재부팅 자동 시작은 설정하지 않았다.
 
 TTS는 `DIALOGUE_TTS_URL=`이면 사용하지 않는다. 다시 사용하려면 URL을 `http://127.0.0.1:8003`으로
 설정하고 `service.sh tts start` 후 dialogue를 재시작한다. 두 서비스의 TTS 토큰은 일치해야 한다.
 
 `http://220.69.208.201:8002/health`의 `status=ready`, `llm_ready=true`를 확인한다.
-현재는 `mode=streaming_voice`, `tts=true`, `tts_ready=true`, `tts_voice_mode=reference_icl`이어야 한다.
+현재는 `mode=streaming_voice`, `tts=true`, `tts_ready=true`, `tts_voice_mode=reference_audio`이어야 한다.
 `tts_streaming=generation_pcm`이면 생성 중 오디오 전송 경로다. TTS 준비에는 시작 시 모델 예열도 포함한다.
 `reasoning_ready`는 추론 경로 상태다.
-`prompt_version=gemma4_dialogue_v1`은 현재 적용한 공통 답변 규칙이다.
+`prompt_version=gemma4_dialogue_v3`는 현재 적용한 공통 답변 규칙이다. 설문 변환기 버전(`survey_v2_compile_3`)과는 다른 값이다.
+`input_gate.weak_text`의 `version`·`no_speech`·`avg_logprob`는 배포된 약한 전사 거절 임계값이다.
 `memory.enabled=true`, `memory.scope=connection`은 연결별 기억 활성화 상태다.
 `DIALOGUE_MEMORY_ENABLED=1`, `DIALOGUE_CONTEXT_TOKENS=8192`가 기본값이며 실제 vLLM 토큰 수로 답변 공간을 확보한다.
 `reactions.enabled=true`, `reactions.version=persona_reaction_v1`은 대기 리액션 설정 상태다.
@@ -82,11 +92,50 @@ TTS는 `DIALOGUE_TTS_URL=`이면 사용하지 않는다. 다시 사용하려면 
 ## 설치·배포
 
 등록 API는 `requirements-registration.txt`, Tripo 작업자는 `Survey/requirements-worker.txt`,
-대화 CPU 서비스는 `requirements-dialogue.txt`, TTS는 `requirements-tts.txt`를 사용한다.
-서버 검증 환경은 Python 3.12다. 새 엔진은 별도 `requirements-tts-streaming.txt`의
-vLLM/vLLM-Omni 0.26.0, torch 2.11.0/cu130을 사용한다. [설치 절차](../docs/TTS_실시간_스트리밍.md)를 따른다.
-기존 Gemma vLLM 환경에는 TTS 의존성을 설치하지 않는다. 이전 qwentts의 torch 2.8.0/cu128은 복구용으로 보존한다.
-SenseVoice 모델 설치는 `setup_dialogue_models.py --help`를 참고한다.
+대화 서비스는 `requirements-dialogue.txt`를 사용한다.
+현재 VoxCPM2는 기존 `qwentts` venv의 torch 2.8.0/cu128·soxr와 고정 커밋의 Vox 소스를 사용한다.
+실제 소스·모델 경로는 [인계 문서](../docs/TTS_작업인계_20260918.md)에 있다. 새 PC 설치는 아직 검증하지 않았다.
+`requirements-tts.txt`와 `requirements-tts-streaming.txt`는 이전 Qwen 경로의 의존성이다.
+당시 엔진은 vLLM/vLLM-Omni 0.26.0, torch 2.11.0/cu130이며 [설치 기록](../docs/TTS_실시간_스트리밍.md)에 보관한다.
+기존 Gemma vLLM 환경에는 TTS 의존성을 설치하지 않는다.
+STT·VAD 모델 설치는 `setup_dialogue_models.py --help`를 참고한다.
+
+**운영 STT는 Whisper large-v3다(2026-09-16 사용자 결정).** 새 PC에서는 다음 한 줄로 STT와 입력
+검증기를 함께 설치한다. 고정 리비전 `edaa852ec7e145841d8ffdb056a99866b5f0a478`만 내려받는다.
+
+```bash
+python setup_dialogue_models.py --whisper --vad
+```
+
+`--all`은 기존 의미 그대로 SenseVoice + Silero VAD이며 Whisper를 포함하지 않는다.
+설정·되돌리기·검증 상태는 [Whisper STT 전환](../docs/Whisper_STT_전환.md)을 따른다.
+
+**대화 API는 Silero VAD 입력 검증기를 필수로 요구한다.** 모델이 없으면 예전의 민감한 동작으로
+돌아가지 않고 시작을 거절한다. 이번 변경을 배포하기 전에 먼저 설치한다.
+
+```bash
+python setup_dialogue_models.py --vad     # 기본 경로 ~/dialogue-models/silero/silero_vad.onnx
+```
+
+설치기는 공식 릴리스 파일의 SHA256
+`9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6`(643854바이트)를 기본으로 고정한다.
+내려받은 파일은 해시와 크기를 확인한 뒤에만 목표 경로로 옮기고, 이미 있는 파일도 같은 기준으로
+검사한다. 어긋나면 교체하지 않고 오류를 낸다. 경로는 `DIALOGUE_VAD_MODEL`로 바꿀 수 있다.
+동작 확인은 `/health`의 `input_gate`를 본다.
+
+### 진단 로그 (선택, 기본 꺼짐)
+
+끊김·멈춤 원인을 가르려면 `dialogue.env`에 절대 경로로 넣고 대화 API만 다시 시작한다.
+
+```
+DIALOGUE_DIAGNOSTICS_LOG=/home/crc_unity/capstone-server/logs/dialogue-diagnostics.log
+```
+
+전용 로거(`dialogue.diagnostics`)에만 회전 핸들러를 붙인다(2 MB × 5). 전역 로깅 설정은
+바꾸지 않고, 경로·권한 오류는 진단만 끄고 서비스는 그대로 뜬다. 실제로 켜졌는지는
+`/health`의 `diagnostics.file`로 확인한다. 설정 문자열이 있다는 뜻이 아니라 파일이 열렸다는 뜻이다.
+집계와 정해진 코드만 남고 발화 원문·세션 ID·토큰·경로는 남지 않는다.
+읽는 법과 재시험 절차는 [음성 재생 끊김 진단](../docs/음성_재생_끊김_진단.md)을 따른다.
 
 ```powershell
 python tools/service_bundle.py platform

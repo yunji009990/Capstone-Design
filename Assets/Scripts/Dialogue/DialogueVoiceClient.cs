@@ -44,19 +44,25 @@ public partial class DialogueVoiceClient : MonoBehaviour
     DialogueAudioPlayer _playback;
 
 #if UNITY_EDITOR
-    volatile float _outputPeak;
-    public float OutputPeak => _outputPeak;
-    void OnAudioFilterRead(float[] data, int channels)
-    {
-        float peak = OutputPeak;
-        foreach (float sample in data) peak = Math.Max(peak, Math.Abs(sample));
-        _outputPeak = peak;
-    }
+    /// <summary>실제로 출력 버퍼에 쓴 PCM 의 최대 진폭이다. 누적값이므로 검사는 회차마다 0으로 되돌린다.
+    /// 예전에는 AudioSource 뒤의 필터에서 쟀지만, 이제 재생 렌더러가 쓰는 값을 그대로 읽는다.
+    /// 무음 여부 확인이라는 의미는 같고 믹서 이후의 음량은 반영하지 않는다.</summary>
+    public float OutputPeak => _playback != null ? _playback.OutputPeak : 0f;
+    public void ResetOutputPeak() { if (_playback != null) _playback.ResetPeak(); }
 #endif
 
     void Awake()
     {
+#if UNITY_EDITOR
+        // 재생 비교 모드는 에디터 선택값으로만 정하고 Play 중에는 바뀌지 않는다.
+        bool wholeResponse = DialoguePlaybackComparison.WholeResponseEnabled;
+        _playback = new DialogueAudioPlayer(GetComponent<AudioSource>(), wholeResponse);
+        Debug.Log(wholeResponse
+            ? "[Dialogue] 재생 모드: 응답 전체 수신 후 AudioClip 재생 (비교 모드)"
+            : "[Dialogue] 재생 모드: 수신 즉시 스트리밍");
+#else
         _playback = new DialogueAudioPlayer(GetComponent<AudioSource>());
+#endif
         if (Microphone.devices.Length > 0) _micDevice = Microphone.devices[0];
     }
 
@@ -68,9 +74,31 @@ public partial class DialogueVoiceClient : MonoBehaviour
         if (followServerSession && !useTestProfile) StartCoroutine(PollSession());
     }
 
-    void OnDisable() => EndExperience();
-    void OnDestroy() => _playback?.Dispose();
-    void OnApplicationPause(bool paused) { if (paused) EndExperience(); }
+    void OnDisable()
+    {
+        EndExperience("on_disable");
+#if UNITY_EDITOR
+        // 진단용. 비활성·Play 종료에서는 완료본까지 버린다.
+        DialogueReplayCache.Clear();
+#endif
+    }
+
+    void OnDestroy()
+    {
+        _playback?.Dispose();
+#if UNITY_EDITOR
+        DialogueReplayCache.Clear();
+#endif
+    }
+    void OnApplicationPause(bool paused)
+    {
+        // 기록이 먼저다. EndExperience 가 로거를 닫으면 남길 곳이 없다.
+        DiagnosticsPause(paused);
+        if (paused) EndExperience("app_pause");
+    }
+
+    // 소리가 멈춘 구간이 창 포커스와 겹치는지 보려면 상태 변화가 필요하다. 대화 동작은 바뀌지 않는다.
+    void OnApplicationFocus(bool focused) => DiagnosticsFocus(focused);
     void Update()
     {
         UpdateLevel();
@@ -144,7 +172,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
                         if (cur != sessionId || has != HasSession || s.has_model != SessionHasModel)
                         {
                             bool changed = cur != sessionId;
-                            if (changed) EndExperience();
+                            if (changed) EndExperience("session_changed");
                             sessionId = cur;
                             HasSession = has;
                             SessionHasModel = s.has_model;

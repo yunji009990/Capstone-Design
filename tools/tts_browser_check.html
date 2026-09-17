@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>같은 음원으로 재생 경로 비교</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #0d0f12; color: #e6e8ea;
+         font-family: "Malgun Gothic", system-ui, sans-serif; line-height: 1.6; }
+  .card { max-width: 640px; margin: 0 auto; background: #171a1f; border: 1px solid #2a2f37;
+          border-radius: 10px; padding: 18px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2.player { font-size: 14px; font-weight: normal; margin: 20px 0 0; color: #c6ccd3; }
+  .note { font-size: 13px; color: #a7aeb6; margin: 8px 0 14px; }
+  label { display: block; font-size: 13px; margin: 12px 0 4px; color: #c6ccd3; }
+  textarea, select { width: 100%; background: #0f1216; color: #e6e8ea; border: 1px solid #2a2f37;
+                     border-radius: 6px; padding: 8px; font: inherit; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  button { flex: 1 1 140px; padding: 10px 12px; border-radius: 6px; border: 1px solid #3a6ea5;
+           background: #1e4a77; color: #f2f5f8; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; border-color: #3a3f47; color: #c6ccd3; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  @media (max-width: 480px) { .row { flex-direction: column; } button { flex: 0 0 auto; width: 100%; } }
+  .state { margin: 14px 0 6px; font-size: 14px; }
+  .state.fail { color: #ff9a8c; }
+  .state.ok { color: #8fd694; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #23272e; }
+  th { width: 55%; font-weight: normal; color: #a7aeb6; }
+  audio { width: 100%; margin-top: 14px; }
+  details { margin-top: 12px; font-size: 13px; color: #a7aeb6; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0 0; }
+  dt { color: #8d949c; }
+  dd { margin: 0; word-break: break-all; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>같은 음원으로 재생 경로 비교</h1>
+  <p class="note">
+    현재 서버에 등록된 목소리로 <b>지금 새로 합성</b>합니다. Unity 체험을 끝낸 뒤에 실행하세요.
+    생성은 <b>한 번만</b> 합니다. 그 한 번의 PCM으로 A(서버에서 완성한 WAV)와 B(브라우저에서 조립한 WAV)를
+    함께 만들며, 모델을 A/B 따로 호출하지 않습니다.
+    이 음원은 Unity가 그 회차에 재생한 PCM과 같은 원본이 아니라 새로 합성한 음성입니다.
+  </p>
+
+  <label for="text">문장 (최대 500자)</label>
+  <textarea id="text" rows="3" maxlength="500">오늘 와 주셔서 정말 고맙습니다.</textarea>
+
+  <label for="mode">생성 방식</label>
+  <select id="mode">
+    <option value="phrase">문장별 생성 (유니티와 같은 방식)</option>
+    <option value="whole" selected>전체 문장 한 번에 생성</option>
+  </select>
+
+  <div class="row">
+    <button id="start" type="button">서버에서 새로 생성</button>
+    <button id="cancel" type="button" class="ghost" disabled>취소</button>
+  </div>
+
+  <p id="state" class="state">대기 중</p>
+
+  <table>
+    <tbody>
+      <tr><th>받은 조각 수</th><td id="n-chunks">-</td></tr>
+      <tr><th>받은 음원 길이 (초)</th><td id="n-seconds">-</td></tr>
+      <tr><th>생성 완료까지 (초)</th><td id="n-elapsed">-</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="player">A. 서버에서 완성한 WAV</h2>
+  <audio id="audio-server" controls preload="metadata"></audio>
+  <div class="row">
+    <button id="download-server" type="button" class="ghost" disabled>A WAV 내려받기</button>
+  </div>
+
+  <h2 class="player">B. 브라우저에서 조립한 WAV</h2>
+  <audio id="audio" controls preload="metadata"></audio>
+  <div class="row">
+    <button id="download" type="button" class="ghost" disabled>B WAV 내려받기</button>
+  </div>
+
+  <h2 class="player">C. 예전 비교 페이지의 Qwen 원본</h2>
+  <p class="note">
+    등록 음성 · 회차 1 / 오늘 와 주셔서 정말 고맙습니다.
+    새로 생성하지 않고 기존 파일을 그대로 재생합니다.
+  </p>
+  <div class="row">
+    <button id="baseline-load" type="button" class="ghost">예전 음원 불러오기</button>
+  </div>
+  <p id="baseline-state" class="state"></p>
+  <audio id="audio-baseline" controls preload="metadata"></audio>
+
+  <details>
+    <summary>상세</summary>
+    <dl id="detail"></dl>
+  </details>
+
+  <p class="note">
+    비교하는 법: A와 B를 번갈아 끝까지 듣고 발음·끊김이 다른지 사람이 직접 적어 두세요.
+    전체 바이트가 같다는 숫자는 같은 음원이라는 확인일 뿐 품질 합격이 아닙니다.
+    A 파일은 다음 생성 때 또는 10분 뒤 서버 메모리에서 사라집니다.
+  </p>
+</main>
+<script src="/app.js" defer></script>
+</body>
+</html>

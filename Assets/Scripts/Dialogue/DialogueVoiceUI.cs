@@ -120,6 +120,12 @@ public class DialogueVoiceUI : MonoBehaviour
 
     void HandleAnswer(string heard, string answer)
     {
+        // 체험을 새로 시작하면 빈 자막 신호가 온다. 그때 남아 있던 중단 문구를 지운다.
+        // 다만 클라이언트에 이미 새 실패가 잡혀 있으면 지우지 않는다. 늦게 온 신호가
+        // 방금 난 실패를 덮으면 안 된다.
+        if (string.IsNullOrEmpty(heard) && string.IsNullOrEmpty(answer) &&
+            client != null && string.IsNullOrEmpty(client.LastError))
+            _lastError = "";
         SetText(heardLabel, string.IsNullOrEmpty(heard) ? "" : "나: " + heard);
         SetText(answerLabel, string.IsNullOrEmpty(answer) ? "" : "캐릭터: " + answer);
         SetText(messageLabel, "");
@@ -130,9 +136,22 @@ public class DialogueVoiceUI : MonoBehaviour
         SetText(heardLabel, string.IsNullOrEmpty(heard) ? "" : "나: " + heard);
     }
 
-    void HandleError(string error) => SetText(messageLabel, "오류: " + error);
+    /// <summary>오류를 보여 줄 곳이 없으면 상태 줄로 내려보낸다. 그래도 없으면 Console 에 남긴다.
+    /// 예전에는 messageLabel 이 비어 있을 때 종료 원인이 아무 데도 남지 않았다.</summary>
+    void HandleError(string error)
+    {
+        _lastError = string.IsNullOrEmpty(error) ? "" : error;
+        if (messageLabel != null) { SetText(messageLabel, "오류: " + error); return; }
+        if (statusLabel != null) SetText(statusLabel, "오류: " + error);
+        else Debug.LogWarning("[DialogueVoiceUI] 표시할 라벨이 없어 오류를 Console 로 남깁니다: " + error);
+    }
 
-    void HandleHealth(bool ready, string info) => SetText(messageLabel, info);
+    void HandleHealth(bool ready, string info)
+    {
+        if (messageLabel != null) SetText(messageLabel, info);
+    }
+
+    string _lastError = "";
 
     void Update()
     {
@@ -144,7 +163,15 @@ public class DialogueVoiceUI : MonoBehaviour
         _wasWaiting = client.isWaiting;
 
         if (!client.ExperienceActive && client.serverReady && client.HasSession)
-        { color = Idle; state = "체험 시작을 눌러주세요"; }
+        {
+            color = Idle;
+            // 왜 끝났는지 한 줄이라도 남긴다. 표시할 라벨이 없어 사라지던 정보다.
+            // 클라이언트가 붙든 실패 문구가 있으면 그쪽이 더 정확하다.
+            string failure = string.IsNullOrEmpty(client.LastError) ? _lastError : client.LastError;
+            state = string.IsNullOrEmpty(failure)
+                ? "체험 시작을 눌러주세요"
+                : "중단됨 · " + failure + " · 다시 시작을 눌러주세요";
+        }
         else if (client.ExperienceActive && !client.DialogueConnected)
         { color = Waiting; state = "대화 연결 중…"; }
         else if (client.isRecording) { color = Recording; state = "● 듣고 있습니다"; }

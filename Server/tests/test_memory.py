@@ -18,7 +18,7 @@ from dialogue_memory import SessionMemory, looks_like_forget
 from dialogue_server import Settings, create_app
 from realtime_dialogue import Dialogue, ResponseState, build_persona
 from realtime_llm import ContextLimitError, LLMClient, ModelEndpoint
-from test_dialogue import detector, Frontend, FakeLLM, SPEECH, feed
+from test_dialogue import detector, Frontend, FakeLLM, Gate, NOISE, QUIET, SPEECH, feed
 
 
 def fact(key, ids, priority=2, ttl="connection"):
@@ -69,6 +69,39 @@ class MemoryValidationTests(unittest.TestCase):
             self.assertEqual(self.memory.facts, {})
             self.assertEqual(len(self.memory.pending), 2)
 
+    def test_extraction_input_separates_user_evidence_from_assistant_answers(self):
+        """설문을 반영한 AI 답변이 사용자 새 사실 후보로 보이지 않아야 한다."""
+        asked = self.memory.observe("user", "할머니, 할머니 이름이 뭐였지? 내 이름도 기억해?", 1)
+        told = self.memory.observe("assistant", "박순자란다. 우리 강아지 지훈이 이름은 어떻게 잊겠니.", 1)
+        mood = self.memory.observe("user", "요즘 기분이 좀 그래.", 2)
+        payload = self.memory.payload()
+        self.assertEqual(payload["new_user_ids"], [asked, mood])
+        self.assertEqual([e["id"] for e in payload["user_events"]], [asked, mood])
+        self.assertNotIn("박순자", json.dumps(payload["user_events"], ensure_ascii=False))
+        self.assertEqual([e["id"] for e in payload["assistant_context"]], [told])
+        with self.assertRaises(ValueError):  # AI가 말해 준 이름은 사용자 근거가 아니다.
+            self.memory.apply(update(fact("사용자.이름", [told])), payload)
+        self.assertEqual(self.memory.facts, {})
+        # 같은 AI 답변을 흐름 요약의 근거로는 쓸 수 있다.
+        self.memory.apply(update(fact("사용자.상태", [mood], 1, "today"), summary=[told]), payload)
+        self.assertEqual(self.memory.facts["사용자.상태"].source_ids, (mood,))
+        self.assertNotIn("박순자", json.dumps(self.memory.fact_rows(), ensure_ascii=False))
+
+    def test_only_the_users_own_clarification_answer_becomes_fact_evidence(self):
+        """AI가 되물은 뒤 사용자가 직접 답하거나 정정한 발화만 근거가 된다."""
+        self.memory.observe("assistant", "올해 봄부터 서울에서 일하고 있다고 들었단다.", 1)
+        answer = self.memory.observe("user", "응, 마포에서 일해.", 2)
+        self.memory.apply(update(fact("사용자.직장위치", [answer])), self.memory.payload())
+        fixed = self.memory.observe("user", "아니야, 마포가 아니라 종로로 옮겼어.", 3)
+        payload = self.memory.payload()
+        self.assertNotIn(answer, payload["new_user_ids"])
+        self.assertEqual([row["source_ids"] for row in payload["facts"]], [[answer]])
+        self.memory.apply(update(fact("사용자.직장위치", [fixed])), payload)
+        rows = self.memory.fact_rows("직장")
+        self.assertEqual([row["sources"][0]["text"] for row in rows], ["아니야, 마포가 아니라 종로로 옮겼어."])
+        with self.assertRaises(ValueError):  # 새 사용자 근거 없이 기존 근거만 다시 고를 수 없다.
+            self.memory.apply(update(fact("사용자.직장위치", [answer])), payload)
+
     def test_today_state_expires_and_unrelated_memory_survives(self):
         first = self.memory.observe("user", "오늘은 피곤해.", 1)
         second = self.memory.observe("user", "보리차를 좋아해.", 2)
@@ -107,7 +140,7 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await asyncio.Future()
             except asyncio.CancelledError:
-                return update(fact("취향", [payload["events"][0]["id"]]))
+                return update(fact("취향", [payload["user_events"][0]["id"]]))
         memory = SessionMemory(slow, idle_delay=0)
         memory.observe("user", "커피를 좋아해.", 1)
         memory.kick(force=True)
@@ -120,7 +153,7 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_isolates_connections_and_late_results(self):
         async def extract(payload):
-            return update(fact("취향", [payload["events"][0]["id"]]))
+            return update(fact("취향", [payload["user_events"][0]["id"]]))
         first, second = SessionMemory(extract, idle_delay=0), SessionMemory(extract, idle_delay=0)
         first.observe("user", "보리차를 좋아해.", 1)
         second.observe("user", "오렌지주스를 좋아해.", 1)
@@ -138,7 +171,7 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
             entered.set()
             try: await asyncio.Future()
             except asyncio.CancelledError:
-                return update(fact("옛 정보", [payload["events"][0]["id"]]))
+                return update(fact("옛 정보", [payload["user_events"][0]["id"]]))
         memory = SessionMemory(stale, idle_delay=0)
         memory.observe("user", "이전 연결의 정보", 1)
         memory.kick(force=True)
@@ -242,16 +275,26 @@ class DialogueMemoryTests(unittest.IsolatedAsyncioTestCase):
         async def emit(event): events.append(event)
         memory = SessionMemory(None)
         dialogue = Dialogue("인물", [], Frontend(), llm, emit, detector=detector(),
-                            partial_seconds=60, memory=memory)
+                            partial_seconds=60, memory=memory, speech_gate=Gate())
         try:
             await dialogue.text("확정한 사용자 발화")
             await asyncio.wait_for(llm.entered.wait(), 1)
-            await feed(dialogue, SPEECH, 10)
+            before = len(events)
+            # 검증되지 않은 짧은 잡음은 기존 답변도 기억도 건드리지 않는다.
+            await feed(dialogue, NOISE, 25)
+            await feed(dialogue, QUIET, 40)
+            await dialogue.settle_input()
+            self.assertEqual([(e.role, e.text) for e in memory.events.values()],
+                             [("user", "확정한 사용자 발화")])
+            self.assertEqual(len(events), before)
+            # 확인된 발화로 끼어들면 전달 확인된 답변만 기억에 남는다.
+            await feed(dialogue, SPEECH, 25)
+            await feed(dialogue, QUIET, 40)
+            await dialogue.settle_input()
             sources = list(memory.events.values())
-            self.assertEqual([(e.role, e.text) for e in sources],
+            self.assertEqual([(e.role, e.text) for e in sources[:2]],
                              [("user", "확정한 사용자 발화"), ("assistant", "먼저 보낸 말.")])
-            self.assertIsNone(dialogue.active)
-            self.assertNotIn("transcript.final", [e["type"] for e in events[4:]])
+            self.assertNotIn("transcript.final", [e["type"] for e in events[before:before + 2]])
         finally: await dialogue.close()
 
     async def test_tts_acknowledged_prefix_and_long_raw_text_keep_deletion_mapping(self):
@@ -276,8 +319,8 @@ class DialogueMemoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_55_turns_keep_a_fact_after_raw_history_expires_then_forget_and_reset(self):
         async def extract(payload):
             facts = []
-            for event in payload["events"]:
-                if event["role"] == "user" and "발표는" in event["text"]:
+            for event in payload["user_events"]:
+                if "발표는" in event["text"]:
                     facts = [fact("사용자.발표일정", [event["id"]])]
             return update(*facts)
         async def forget(payload):
@@ -362,12 +405,13 @@ class MemoryProtocolTests(unittest.TestCase):
             async def route(self, messages): return "normal"
             async def stream(self, messages, route): yield "잘 들었어요."
             async def extract_memory(self, payload):
-                users = [e for e in payload["events"] if e["role"] == "user"]
+                users = payload["user_events"]
                 return update(fact("취향", [users[-1]["id"]])) if users else update()
             async def resolve_memory_forget(self, payload):
                 return {"intent": "clarify", "all": False, "keys": [], "source_ids": []}
         self.settings = Settings(self.tmp.name, "unused", token="test-token", allow_test_mode=True)
-        self.app = create_app(self.settings, frontend=Frontend(), llm=LLM(), detector_factory=detector)
+        self.app = create_app(self.settings, frontend=Frontend(), llm=LLM(),
+                              detector_factory=detector, speech_gate=Gate())
         self.hello = {"type": "start", "protocol": 1, "sample_rate": 16000,
                       "channels": 1, "format": "pcm_s16le", "test_mode": True, "test_persona": "가상 도우미"}
 

@@ -77,7 +77,7 @@
   .ck { display:inline-flex; align-items:center; gap:7px; font-size:14px;
         color:var(--fg); margin:4px 0; cursor:pointer; }
   .ck input { accent-color:var(--rose); width:15px; height:15px; }
-  input.s_quirk, input.s_mem { margin-bottom:7px; }
+  input.s_quirk { margin-bottom:7px; }
   .bar { display:flex; gap:14px; font-size:12px; color:var(--dim); margin-bottom:20px;
          padding:10px 14px; background:#FFFFFFAA; border:1px solid #EFE3D6;
          border-radius:12px; flex-wrap:wrap; align-items:center; }
@@ -109,6 +109,39 @@
 .tone { border:1.5px solid var(--line); border-radius:12px; padding:13px 16px;
         margin-bottom:9px; cursor:pointer; background:#fff; }
 .tone.sel { border-color:var(--rose); background:#FFF8F9; }
+/* 설문 카드 — 원하는 만큼만 추가하고 문항 번호를 함께 보여준다 */
+.section { margin-top:20px; }
+.qnum { display:inline-block; white-space:nowrap; font-size:11.5px; color:#8B5A50;
+        background:var(--sand); padding:2px 8px; border-radius:999px; letter-spacing:.03em; }
+.qcard { border:1.5px solid var(--line); border-radius:12px; padding:12px 14px;
+         margin-top:9px; background:#FFFDFB; }
+.qcard input, .qcard textarea, .qcard select { margin-bottom:0; }
+.qfield { margin-bottom:8px; }
+.cards:empty { display:none; }
+/* 9단계 확인 — 문항 번호와 고치기 단추를 함께 둔다.
+   번호 칸과 단추 칸은 width:1% 로 내용만큼만 차지하게 한다. 그러지 않으면 가운데 두 칸이
+   자리를 다 가져가 1280px 에서도 「고치기」가 두 줄로 접힌다. */
+.rev { margin-top:16px; }
+.rev h3 { font-size:14px; color:#6B4F49; font-weight:500; margin:0 0 4px; }
+.rev td, .rev th { padding:7px 8px; vertical-align:top; }
+.rev td.qcol { width:1%; white-space:nowrap; }
+.rev th { width:26%; font-weight:500; word-break:keep-all; }
+.rev td.val { word-break:break-word; }
+.rev td.fix { width:1%; white-space:nowrap; text-align:right; }
+.rev td.fix button { padding:5px 13px; font-size:12.5px; white-space:nowrap; }
+/* 좁은 화면에서는 한 줄에 네 칸이 들어가지 않는다. 칸을 쌓아 글이 잘리지 않게 한다. */
+@media (max-width:560px) {
+  .rev table, .rev tr, .rev th, .rev td { display:block; width:auto; }
+  /* 번호·단추 칸은 위에서 클래스로 width:1% 를 받는다. 클래스 쪽 우선순위가 높아
+     td 선택자만으로는 풀리지 않으므로 같은 클래스로 다시 적는다. */
+  .rev td.qcol, .rev td.fix { width:auto; }
+  .rev tr { border-bottom:1px solid #EFE3D6; padding:8px 0; }
+  .rev th, .rev td { border:0; padding:2px 0; }
+  .rev td.fix { text-align:left; margin-top:6px; }
+}
+/* 가상 예시 고르기 */
+.testmenu { border:1.5px solid var(--line); border-radius:12px; padding:12px 14px;
+            margin-bottom:16px; background:#FFFDFB; }
 /* 관리자 표 */
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #EFE3D6; }

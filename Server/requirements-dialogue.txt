@@ -2,6 +2,11 @@ fastapi==0.128.8
 uvicorn[standard]==0.39.0
 httpx==0.28.1
 numpy==2.0.2
+# 운영 STT. 비교 실험에서 실제로 쓴 조합이며 torch 는 필요하지 않다.
+# PyAV·tokenizers·huggingface-hub 는 faster-whisper 의 의존성으로 함께 설치된다.
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+# 되돌리기용 SenseVoice(CPU)와 필수 Silero VAD 게이트가 함께 쓴다.
 sherpa-onnx==1.13.7
 webrtcvad-wheels==2.0.14
 python-multipart==0.0.32; python_version >= '3.10'

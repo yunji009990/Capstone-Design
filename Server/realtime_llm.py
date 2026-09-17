@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field, replace
 
 import httpx
@@ -9,10 +10,22 @@ import httpx
 from interruption_policy import INSTRUCTION, TurnDecision
 from dialogue_memory import EXTRACT_INSTRUCTION, FORGET_INSTRUCTION
 from dialogue_reactions import REACTION_INSTRUCTION
+from dialogue_system_lines import INSTRUCTION as SYSTEM_LINE_INSTRUCTION
+
+log = logging.getLogger(__name__)
 
 
 class ContextLimitError(RuntimeError):
     """인물 설정과 현재 발화만으로도 답변 공간을 남길 수 없는 경우."""
+
+
+class AnswerBudgetError(RuntimeError):
+    """생성 한도를 다 쓰고 끝났다(finish_reason=length).
+
+    추론 경로에서는 숨은 추론만으로 한도를 소진해 본답변이 한 글자도 나오지 않을
+    수 있다. 그 경우만 호출자가 복구를 판단할 수 있도록 형을 따로 둔다. 메시지와
+    상위 형(RuntimeError)은 그대로라 기존 처리 경로의 의미는 바뀌지 않는다.
+    """
 
 
 @dataclass
@@ -129,9 +142,44 @@ class LLMClient:
         return route
 
     async def stream(self, messages, route="normal"):
+        """답변 한 번. 추론 경로가 본답변 없이 한도를 소진한 경우에만 한 번 복구한다.
+
+        복구 조건은 셋을 모두 만족할 때뿐이다. (1) 추론 경로였고, (2) finish_reason
+        이 length 였고, (3) 본답변 텍스트를 아직 한 글자도 내보내지 않았다.
+        이때 **같은 메시지**를 일반 경로로 딱 한 번 다시 요청한다. 앞선 시도의 숨은
+        추론이나 초안은 재요청에도, 대화 기록에도 넣지 않는다.
+
+        이미 본답변이 나간 뒤의 한도 소진, 일반 경로의 한도 소진, HTTP 오류, 취소,
+        문맥 한도는 복구하지 않는다. 부분 답변을 완료로 위장하거나 이어쓰기를
+        시키지 않는다. 재요청은 한 번뿐이라 실패가 반복되지 않는다.
+        """
         endpoint = self.reasoning if route == "reasoning" else self.normal
         if endpoint is None:
             raise RuntimeError("reasoning endpoint is not configured")
+        delivered = False
+        attempt = self._answer(messages, endpoint)
+        try:
+            async for text in attempt:
+                delivered = delivered or bool(text.strip())
+                yield text
+            return
+        except AnswerBudgetError:
+            # 복구 대상이 아니면 기존 오류를 그대로 올린다.
+            if delivered or route != "reasoning" or self.reasoning is None:
+                raise
+        finally:
+            await attempt.aclose()
+        # 운영 기본 WARNING에서도 남는 복구 기록. 대화·메시지·토큰 원문은 넣지 않는다.
+        log.warning("answer.budget_fallback route=reasoning->normal reason=length_before_any_text")
+        retry = self._answer(messages, self.normal)
+        try:
+            async for text in retry:
+                yield text
+        finally:
+            await retry.aclose()
+
+    async def _answer(self, messages, endpoint):
+        """한 번의 요청. 재시도·경로 선택은 하지 않는다."""
         messages = await self.fit_messages(messages, endpoint)
         filtered = SpokenTextFilter()
         got_text = False
@@ -158,7 +206,7 @@ class LLMClient:
                 choice = choices[0]
                 reason = choice.get("finish_reason")
                 if reason == "length":
-                    raise RuntimeError("answer token budget exhausted")
+                    raise AnswerBudgetError("answer token budget exhausted")
                 if reason and reason != "stop":
                     raise RuntimeError(f"unexpected answer finish reason: {reason}")
                 # reasoning / reasoning_content is deliberately never forwarded.
@@ -242,6 +290,10 @@ class LLMClient:
     async def generate_reactions(self, profile):
         # 캐릭터 준비 때만 호출한다. 실제 사용자 대화/기억은 입력하지 않는다.
         return await self.memory_json(REACTION_INSTRUCTION, {"profile": profile}, 512)
+
+    async def generate_system_lines(self, profile):
+        # 캐릭터 준비 때만 호출한다. 실제 턴에서는 저장된 문장을 그대로 쓴다.
+        return await self.memory_json(SYSTEM_LINE_INSTRUCTION, {"profile": profile}, 512)
 
     async def decide_interruption(self, messages, pending):
         # Reuse the loaded normal model; choose the action and compute route in

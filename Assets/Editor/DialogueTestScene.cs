@@ -16,7 +16,9 @@ public static partial class DialogueTestScene
     {
         public bool passed;
         public bool ttsEnabled, typedInput;
-        public string answer, transcript, emotion, audioEvent, route, error;
+        public string answer, transcript, audioEvent, language, route, error;
+        public bool transcriptFinal;
+        public float voiceSeconds;
         public string voiceMode, referenceSource;
         public float referenceSeconds;
         public int deltas;
@@ -129,8 +131,10 @@ public static partial class DialogueTestScene
             if (panel == null || !voice.PlaybackFinished) throw new Exception("Answer did not finish.");
             result.answer = voice.lastAnswer;
             result.transcript = voice.lastHeard;
-            result.emotion = voice.VoiceEmotion;
             result.audioEvent = voice.VoiceAudioEvent;
+            result.language = voice.VoiceLanguage;
+            result.transcriptFinal = voice.TranscriptIsFinal;
+            result.voiceSeconds = voice.VoiceDuration;
             result.firstAudioSeconds = voice.FirstAudioSeconds;
             result.route = voice.ResponseRoute;
             result.firstTextSeconds = voice.FirstTextSeconds;
@@ -138,7 +142,7 @@ public static partial class DialogueTestScene
             result.outputPeak = voice.OutputPeak;
             if (result.deltas == 0 || string.IsNullOrEmpty(result.answer) ||
                 string.IsNullOrEmpty(result.transcript) || !panel.ConversationText.Contains(result.answer) ||
-                (!typedInput && voice.VoiceEmotion == "unknown") ||
+                (!typedInput && (!result.transcriptFinal || result.voiceSeconds <= 0 || result.audioEvent == "text")) ||
                 (voice.TtsEnabled && (result.audioSamples == 0 || result.outputPeak <= 0.001f)) ||
                 (!voice.TtsEnabled && (result.audioSamples != 0 || voice.IsSpeaking)) ||
                 (typedInput && (!result.answer.Contains("사진") || result.audioEvent != "text")))

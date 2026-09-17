@@ -44,6 +44,9 @@
 <script>
 const $ = s => document.querySelector(s);
 let pw = sessionStorage.getItem("adminpw") || "";
+// 참여자가 적은 글을 화면에서 실행하지 않는다. 따옴표까지 막아야 속성 안에서도 안전하다.
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -80,11 +83,11 @@ async function loadList() {
   if (!d.sessions.length) { $("#list").innerHTML = '<div class="hint">아직 세션이 없습니다.</div>'; return; }
   $("#list").innerHTML = `<table><tr><th>세션</th><th>만든 때</th><th>상태</th>
       <th>사진</th><th>음성</th><th>사별</th></tr>` +
-    d.sessions.map(s => `<tr class="click" data-id="${s.session_id}">
-      <td><b>${s.session_id}</b></td><td>${(s.created_at || "").replace("T", " ")}</td>
-      <td>${FLAG[s.status] || s.status}</td>
+    d.sessions.map(s => `<tr class="click" data-id="${esc(s.session_id)}">
+      <td><b>${esc(s.session_id)}</b></td><td>${esc((s.created_at || "").replace("T", " "))}</td>
+      <td>${esc(FLAG[s.status] || s.status)}</td>
       <td>${s.has_image ? "○" : "-"}</td><td>${s.has_voice ? "○" : "-"}</td>
-      <td>${s.bereavement_weeks == null ? "-" : s.bereavement_weeks + "주"}</td></tr>`).join("") +
+      <td>${s.bereavement_weeks == null ? "-" : esc(s.bereavement_weeks) + "주"}</td></tr>`).join("") +
     "</table>";
   document.querySelectorAll("tr.click").forEach(tr =>
     tr.onclick = () => showDetail(tr.dataset.id));
@@ -93,25 +96,96 @@ async function loadList() {
 const MODEL = { stub: "생성 안 함(키 없음)", queued: "대기 중", processing: "만드는 중",
                 ready: "완성", failed: "실패" };
 
+// 설문 v2 표시용 이름. 저장 자료의 필드 이름과 화면 문구를 분리해 둔다.
+const SECTION = { background: "4-10 지내던 지역·하셨던 일", shared_memory: "5-1 함께한 추억",
+  preference: "5-2 취향·습관", person: "5-3 함께 아는 사람",
+  place_activity: "5-4 장소·활동", about_user: "5-5 그분이 알던 나",
+  news: "6-4 새로 전할 소식" };
+const STATE = { answered: "", unknown: "모름", declined: "답하고 싶지 않음", none: "실제로 없음" };
+// 4-11·4-12 떠나신 경위. 'AI 전달 제외'로 두어도 저장된 원문은 여기서 보인다.
+const PASSING_MENTION = { on_request: "본인이 꺼낼 때만", exclude_ai: "AI 전달 제외" };
+const CERT = { exact: "정확히 기억함", approximate: "대략 기억함", unsure: "확실하지 않음" };
+const MENTION = { proactive: "먼저 언급 가능", on_request: "본인이 꺼낼 때만", exclude_ai: "AI 전달 제외" };
+const FORM = { informal: "반말", formal: "존댓말", mixed: "섞어 쓰심", unknown: "잘 모름" };
+const FIELD = { time: "시점", place: "장소", people: "함께 있던 사람", quote: "실제로 하신 말",
+  category: "분류", relation_to_person: "그분과의 관계", relation_to_user: "나와의 관계",
+  subject: "대상" };
+
+function cardText(card) {
+  const parts = [card.content];
+  for (const key of ["category", "subject", "time", "place", "people", "relation_to_person",
+                     "relation_to_user", "quote"])
+    if (card[key]) parts.push(`${FIELD[key]} ${card[key]}`);
+  if (card.certainty) parts.push(CERT[card.certainty] || card.certainty);
+  parts.push(MENTION[card.mention_policy] || card.mention_policy);
+  return parts.join(" · ");
+}
+
+// v1 행은 그대로 읽고 자동 변환하지 않는다. 두 형식을 한 화면에서 구분해 보여준다.
+function surveyRows(payload, row) {
+  if (payload.survey_schema_version !== 2) {
+    return row("설문 형식", "v1 (이전 화면)") +
+      row("관계", payload.relation) + row("성별", payload.sex) +
+      row("그분 호칭", payload.honorific) + row("나를 부르던 말", payload.calls_user) +
+      row("내 이름", payload.user_name) +
+      row("성격", (payload.personality_traits || []).join(", ")) +
+      row("말버릇", (payload.speech_quirks || []).join(" / ")) +
+      row("추억", (payload.shared_memories || []).join("\n")) +
+      row("그리운 순간", payload.missed_moment) +
+      row("못다 한 말", payload.unsaid_words) + row("듣고 싶은 말", payload.wished_to_hear) +
+      row("대화 톤", payload.tone_setting);
+  }
+  const a = payload.answers || {}, p = a.person || {}, sp = a.speech || {},
+        h = a.heart || {}, c = a.care || {}, snap = payload.compiled_snapshot || {};
+  let out = row("설문 형식", "v2 (현재 화면)") +
+    row("관계", p.relation) + row("성별", p.sex) +
+    row("그분 이름", p.person_name) + row("내가 부르던 말", p.user_calls_person) +
+    row("나를 부르던 말", p.person_calls_user) + row("내 이름", p.user_name) +
+    row("기억 속 시기", p.era) + row("성격", (p.traits || []).join(", ")) +
+    row("자주 하시던 말", (p.quirks || []).join(" / ")) +
+    row("말투", FORM[sp.form] || sp.form) + row("말투가 달라지는 상황", sp.mixed_note) +
+    row("사투리·말씨", sp.dialect) +
+    row("실제 대사", (sp.samples || []).map(r =>
+      `${r.situation ? r.situation + ": " : ""}${r.line} · ${CERT[r.certainty] || r.certainty}`).join("\n")) +
+    row("대화 톤", sp.tone_setting);
+  for (const [kind, label] of Object.entries(SECTION)) {
+    const item = (a.sections || {})[kind];
+    if (!item) continue;
+    out += row(label, item.state === "answered"
+      ? (item.cards || []).map(cardText).join("\n") : STATE[item.state] || item.state);
+  }
+  // `passing` 이 없는 기존 v2 행은 이 줄을 그리지 않는다. 자동으로 채우지 않는다.
+  const pass = a.passing;
+  if (pass) {
+    out += row("4-11 떠나신 경위", pass.state === "answered"
+      ? [pass.cause, pass.time ? "시점 " + pass.time : "",
+         PASSING_MENTION[pass.mention_policy] || pass.mention_policy]
+        .filter(Boolean).join(" · ")
+      : STATE[pass.state] || pass.state);
+  }
+  out += row("그리운 순간", h.missed_moment) + row("못다 한 말", h.unsaid_words) +
+    row("듣고 싶은 말", h.wished_to_hear) + row("먼저 꺼내지 않을 주제", c.avoid_topics) +
+    row("바라는 반응", c.preferences) +
+    row("변환기 버전", snap.compiler_version) +
+    row("설문 해시", snap.survey_revision) + row("확인 해시", snap.preview_revision) +
+    row("등록한 인물(persona)", snap.persona) +
+    row("등록한 사전지식(knowledge)", snap.knowledge) +
+    row("등록한 추가 규칙(rules)", snap.rules);
+  return out;
+}
+
 async function showDetail(sid) {
   let s;
   try { s = await api(`/admin/session/${encodeURIComponent(sid)}`, auth()); }
   catch (e) { return; }
   const P = s.payload || {};
-  const row = (k, v) => v ? `<tr><th style="width:150px">${k}</th><td>${v}</td></tr>` : "";
+  const row = (k, v) => v ? `<tr><th style="width:150px">${esc(k)}</th>
+      <td style="white-space:pre-wrap">${esc(v)}</td></tr>` : "";
   $("#detail").style.display = "";
   $("#detail").innerHTML = `
-    <h2>${sid}</h2>
+    <h2>${esc(sid)}</h2>
     <table>
-      ${row("관계", P.relation)}${row("성별", P.sex)}
-      ${row("그분 호칭", P.honorific)}${row("나를 부르던 말", P.calls_user)}
-      ${row("내 이름", P.user_name)}
-      ${row("성격", (P.personality_traits || []).join(", "))}
-      ${row("말버릇", (P.speech_quirks || []).join(" / "))}
-      ${row("추억", (P.shared_memories || []).join("<br>"))}
-      ${row("그리운 순간", P.missed_moment)}
-      ${row("못다 한 말", P.unsaid_words)}${row("듣고 싶은 말", P.wished_to_hear)}
-      ${row("대화 톤", P.tone_setting)}
+      ${surveyRows(P, row)}
       ${row("동의", `사진 ${s.consent_image ? "○" : "×"} · 음성 ${s.consent_voice ? "○" : "×"} · 이해 ${s.consent_understand ? "○" : "×"}`)}
       ${row("사별", s.bereavement_weeks == null ? "" : s.bereavement_weeks + "주 전")}
       ${row("3D 모델", (MODEL[s.model_status] || s.model_status) + (s.model_error ? ` — ${s.model_error}` : ""))}
