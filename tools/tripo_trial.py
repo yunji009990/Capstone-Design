@@ -109,6 +109,9 @@ def main() -> int:
                         help="T포즈 이미지 모델. 기본 gemini_2.5_flash_image_preview(5). gemini_3_pro_image_preview 등은 10")
     parser.add_argument("--tpose-only", action="store_true",
                         help="T포즈 이미지까지만 받고 멈춘다. 같은 --out 으로 다시 실행하면 이어서 생성한다")
+    parser.add_argument("--multiview", action="store_true",
+                        help="4뷰를 먼저 만들고(generate_multiview_image, 10) multiview_to_model 로 생성한다. "
+                             "한 장에서 뒤·옆을 지어내지 않아 좌우 비대칭이 준다")
     args = parser.parse_args()
     image_path = args.image.resolve(strict=True)
     out = args.out.resolve()
@@ -125,12 +128,17 @@ def main() -> int:
     identity = {"image_sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
                 "generation": config, "rig_version": "v1.0-20240301",
                 "rig_spec": "tripo", "animation": "preset:sit"}
+    if args.multiview:
+        identity["multiview"] = {"image_task": "generate_multiview_image",
+                                 "model_task": "multiview_to_model"}
     extra = tpose_credits(args.tpose_model) if args.tpose else 0
+    # 4뷰 생성 10 + multiview_to_model 40(=30+detailed 10). image_to_model 은 40.
+    base = 85 if args.multiview else 75
     if args.tpose:
         # 기존 폴더의 request 와 그대로 비교되도록 --tpose 일 때만 키를 더한다.
         identity["tpose"] = {"model_version": args.tpose_model, "prompt": TPOSE_PROMPT, "t_pose": True}
     if args.dry_run:
-        print(json.dumps({"request": identity, "estimated_credits": 75 + extra, "network_calls": 0}, indent=2))
+        print(json.dumps({"request": identity, "estimated_credits": base + extra, "network_calls": 0}, indent=2))
         return 0
 
     client = TripoClient(read_key())
@@ -189,6 +197,38 @@ def main() -> int:
             time.sleep(5)
         raise TimeoutError(f"{stage}: timed out; rerun with the same output to resume polling")
 
+    def save_views(output: dict) -> list:
+        """4뷰 이미지를 순서대로 내려받는다. 문서가 output 키를 적어두지 않아
+        http 로 시작하는 값을 나온 순서대로 모은다(generate_image 와 같은 방식)."""
+        urls = []
+
+        def walk(value):
+            if isinstance(value, str) and value.startswith("http"):
+                if value not in urls:
+                    urls.append(value)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    walk(item)
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item)
+
+        walk(output)
+        saved = []
+        for index, url in enumerate(urls[:4]):
+            label = ("front", "left", "back", "right")[index]
+            stem = f"multiview_{index}_{label}"
+            existing = [p for p in out.glob(stem + ".*") if p.suffix != ".partial"]
+            if existing:
+                dest = existing[0]
+            else:
+                part = out / (stem + ".partial")
+                client.download_file(url, part)
+                ext = image_extension(part.read_bytes()[:16]) or "png"
+                dest = part.replace(out / f"{stem}.{ext}")
+            saved.append({"file": dest.name, "bytes": dest.stat().st_size})
+        return saved
+
     def download(stage: str, data: dict, filename: str) -> Path:
         output = data.get("output") or {}
         url = output.get("pbr_model") or output.get("model")
@@ -214,8 +254,8 @@ def main() -> int:
         if "balance_before" not in manifest:
             balance = client._get(API_BASE + "/user/balance").get("data") or {}
             manifest["balance_before"] = balance
-            if float(balance.get("balance", 0)) < 75 + extra:
-                raise RuntimeError(f"Trial requires at least {75 + extra} credits")
+            if float(balance.get("balance", 0)) < base + extra:
+                raise RuntimeError(f"Trial requires at least {base + extra} credits")
             save()
         reference = out / ("reference." + image_type)
         if not reference.exists():
@@ -257,11 +297,29 @@ def main() -> int:
                 manifest["status"] = "tpose_ready"
                 emit("complete", status=manifest["status"])
                 return 0
-        if "generation" not in manifest["tasks"]:
+        multiview_id = None
+        if args.multiview:
+            if "multiview_image" not in manifest["tasks"]:
+                token = client._upload_image(source)
+                views_body = {"type": "generate_multiview_image",
+                              "file": {"type": source_type, "file_token": token}}
+            else:
+                views_body = manifest["tasks"]["multiview_image"]["request"]
+            views = task("multiview_image", views_body, 300)
+            saved = save_views(views.get("output") or {})
+            if saved:
+                manifest.setdefault("assets", {})["multiview_image"] = saved
+                save()
+                emit("multiview_image", asset=saved)
+            multiview_id = manifest["tasks"]["multiview_image"]["task_id"]
+        if "generation" in manifest["tasks"]:
+            generation_body = manifest["tasks"]["generation"]["request"]
+        elif args.multiview:
+            # files 와 original_task_id 는 상호배타다. 앞 작업 결과를 그대로 넘긴다.
+            generation_body = {"type": "multiview_to_model", "original_task_id": multiview_id, **config}
+        else:
             token = client._upload_image(source)
             generation_body = {"type": "image_to_model", "file": {"type": source_type, "file_token": token}, **config}
-        else:
-            generation_body = manifest["tasks"]["generation"]["request"]
         generated = task("generation", generation_body)
         download("generation", generated, "generated.glb")
         model_id = manifest["tasks"]["generation"]["task_id"]
