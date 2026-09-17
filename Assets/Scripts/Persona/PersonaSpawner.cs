@@ -251,6 +251,58 @@ public class PersonaSpawner : MonoBehaviour
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
 
+    // ── 서버 상태를 남긴다 ──────────────────────────────────────
+    //
+    // 세션 조회는 retryIntervalSec(기본 3초)마다 돈다. 실패를 매번 그대로 찍으면
+    // 콘솔이 잠긴다 — COZY 태그 오류가 수천 줄 쌓였던 것과 같은 일이 난다.
+    // 그래서 상태가 "바뀔 때만" 찍고, 같은 상태가 이어지면 세었다가 바뀌는 순간
+    // 몇 번이었는지 함께 알린다. 오래 머물면 1분에 한 번만 살아 있다는 표시를 남긴다.
+    string _note = "";
+    int _noteRepeats;
+
+    void Note(string message, bool warn = false)
+    {
+        if (message == _note)
+        {
+            _noteRepeats++;
+            if (_noteRepeats % 20 == 0)
+                Debug.Log($"[PersonaSpawner] 계속 같은 상태입니다({_noteRepeats + 1}번째): {_note}");
+            return;
+        }
+        if (_noteRepeats > 0)
+            Debug.Log($"[PersonaSpawner] (바로 위 상태가 {_noteRepeats + 1}번 이어졌습니다)");
+        _note = message;
+        _noteRepeats = 0;
+        if (warn) Debug.LogWarning("[PersonaSpawner] " + message);
+        else Debug.Log("[PersonaSpawner] " + message);
+    }
+
+    /// <summary>
+    /// 실패한 요청을 사람이 읽을 수 있는 한 줄로 바꾼다.
+    /// 토큰 값은 절대 남기지 않는다 — 있는지 없는지만 말한다.
+    /// </summary>
+    string Describe(UnityWebRequest req)
+    {
+        switch (req.result)
+        {
+            case UnityWebRequest.Result.ConnectionError:
+                return $"서버에 닿지 못했습니다 ({req.error}). 주소가 맞는지, 서버가 떠 있는지 볼 것";
+            case UnityWebRequest.Result.ProtocolError:
+                if (req.responseCode == 401 || req.responseCode == 403)
+                    return $"인증 거부 HTTP {req.responseCode} — 접속 토큰" +
+                           (string.IsNullOrEmpty(Tok) ? "이 비어 있습니다" : "이 맞지 않는 듯합니다");
+                return $"HTTP {req.responseCode} ({req.error})";
+            case UnityWebRequest.Result.DataProcessingError:
+                return $"응답을 처리하지 못했습니다 ({req.error})";
+            default:
+                return string.IsNullOrEmpty(req.error) ? "알 수 없는 오류" : req.error;
+        }
+    }
+
+    /// <summary>세션 아이디는 32자리라 로그에서는 앞 8자만 쓴다.</summary>
+    static string Short(string sid) =>
+        string.IsNullOrEmpty(sid) ? "(없음)" : sid.Length <= 8 ? sid : sid.Substring(0, 8) + "…";
+
     void Start()
     {
         if (voiceClient == null) voiceClient = FindObjectOfType<DialogueVoiceClient>();
@@ -531,6 +583,15 @@ public class PersonaSpawner : MonoBehaviour
         var wait = new WaitForSeconds(Mathf.Max(1f, retryIntervalSec));
         float waited = 0f;
 
+        // 서버를 따라가기 시작한다는 것과 그 전제를 한 번 남긴다. 아무 말 없이
+        // 기다리다 끝나면 무엇이 잘못됐는지 알 길이 없다.
+        Debug.Log($"[PersonaSpawner] 서버에서 인물을 기다립니다 — {Url} " +
+                  $"(토큰 {(string.IsNullOrEmpty(Tok) ? "없음" : "있음")}, " +
+                  $"{Mathf.Max(1f, retryIntervalSec):0.#}초마다 확인)");
+        if (string.IsNullOrEmpty(Tok))
+            Debug.LogWarning("[PersonaSpawner] 접속 토큰이 비어 있습니다. " +
+                             "서버가 인증을 요구하면 세션을 못 받습니다.");
+
         while (true)
         {
             string sid = sessionIdOverride.Trim();
@@ -585,11 +646,17 @@ public class PersonaSpawner : MonoBehaviour
             if (!string.IsNullOrEmpty(Tok)) req.SetRequestHeader("X-Token", Tok);
             req.timeout = 10;
             yield return req.SendWebRequest();
-            if (req.result != UnityWebRequest.Result.Success) yield break;
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                Note($"세션을 못 받았습니다 — {Describe(req)}  [{Url}/session/current]", warn: true);
+                yield break;
+            }
             SessionResponse s = null;
             try { s = JsonUtility.FromJson<SessionResponse>(req.downloadHandler.text); }
-            catch (Exception e) { Debug.LogWarning($"[PersonaSpawner] 세션 응답 파싱 실패: {e.Message}"); }
-            if (s != null) onOk(s);
+            catch (Exception e) { Note($"세션 응답을 읽지 못했습니다: {e.Message}", warn: true); }
+            if (s == null) yield break;
+            Note($"세션 {Short(s.session)} · 서버가 말하는 모델 상태: {(s.has_model ? "있음" : "아직 없음")}");
+            onOk(s);
         }
     }
 
@@ -610,11 +677,17 @@ public class PersonaSpawner : MonoBehaviour
             // 404 는 아직 안 만들어졌다는 뜻이라 정상이다. 다음 회차에 다시 묻는다.
             if (req.result != UnityWebRequest.Result.Success)
             {
-                if (req.responseCode != 404)
-                    Debug.LogWarning($"[PersonaSpawner] 모델 요청 실패 {req.responseCode}: {req.error}");
+                // 404 는 아직 안 올라왔다는 뜻이라 오류가 아니다. 다만 영영 조용하면
+                // 기다리는 건지 끊긴 건지 알 수 없으니 한 번은 남긴다.
+                if (req.responseCode == 404)
+                    Note($"세션 {Short(sid)} 의 모델이 서버에 아직 없습니다(404). " +
+                         "만들어지면 자동으로 받습니다");
+                else
+                    Note($"모델 요청 실패 — {Describe(req)}", warn: true);
                 Finish();
                 yield break;
             }
+            Note($"세션 {Short(sid)} 모델 받는 중 — {req.downloadHandler.data?.Length ?? 0:n0} 바이트");
             glb = req.downloadHandler.data;
         }
 

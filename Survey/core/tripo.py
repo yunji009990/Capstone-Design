@@ -151,12 +151,33 @@ class TripoClient:
         self,
         image_path: Path,
         *,
-        face_limit: int = 30_000,
+        face_limit: int = 50_000,
         texture: bool = True,
         pbr: bool = True,
-        model_version: str = "v2.5-20250123",
+        model_version: str = "v3.1-20260211",
+        texture_quality: str = "detailed",
+        geometry_quality: str = "standard",
+        texture_alignment: str = "original_image",
+        enable_image_autofix: bool = False,
+        model_seed: int = 20260909,
+        texture_seed: int = 20260909,
     ) -> str:
-        """이미지 업로드 → image_to_model 작업 생성. task_id 반환."""
+        """이미지 업로드 → image_to_model 작업 생성. task_id 반환.
+
+        기본값은 tools/tripo_trial.py 의 로컬 실험 설정과 같게 맞춰 둔다. 예전 기본값
+        (v2.5-20250123 · face_limit 30000 · 품질 옵션 없음)으로는 로컬에서 보던 결과가
+        서버에서 재현되지 않았다. 특히 세 가지가 빠져 있었다.
+
+          texture_alignment="original_image"  텍스처를 원본 사진에 맞춘다. 없으면 얼굴이
+                                              모델 UV 기준으로 뭉개진다.
+          texture_quality="detailed"          텍스처 해상도를 올린다.
+          enable_image_autofix=False          Tripo 가 입력 사진을 임의로 손보지 않게 한다.
+                                              켜져 있으면 잘라내기·보정이 들어가 T포즈
+                                              전처리 결과가 흐트러질 수 있다.
+
+        씨앗을 고정해 두는 것도 로컬과 같다. 같은 사진이면 같은 결과가 나와야 문제를
+        재현하고 비교할 수 있다.
+        """
         if self.is_stub:
             log.info("[stub] submit_image_to_3d 건너뜀 (API 키 없음)")
             return ""
@@ -176,7 +197,15 @@ class TripoClient:
             "face_limit": face_limit,
             "texture": texture,
             "pbr": pbr,
+            "texture_quality": texture_quality,
+            "geometry_quality": geometry_quality,
+            "texture_alignment": texture_alignment,
+            "enable_image_autofix": enable_image_autofix,
+            "model_seed": model_seed,
+            "texture_seed": texture_seed,
         }
+        log.info("Tripo image_to_model: %s face_limit=%s texture=%s align=%s autofix=%s",
+                 model_version, face_limit, texture_quality, texture_alignment, enable_image_autofix)
         resp = self._post_json(ENDPOINT_TASK, body)
         data = resp.get("data") or {}
         task_id = data.get("task_id") or ""
