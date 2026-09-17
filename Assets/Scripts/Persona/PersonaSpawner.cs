@@ -104,20 +104,6 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("어깨가 오르내리는 진폭(도).")]
     [Range(0f, 5f)] public float breathShoulderDeg = 0.7f;
 
-    [Header("입 벙긋")]
-    // Tripo 리깅에는 턱·입 뼈도 블렌드셰이프도 없다. PersonaMouth 가 로드 때 턱 벌림
-    // 블렌드셰이프를 만들어 대화 음성(DialogueVoiceClient.SpeechLevel)의 크기로 움직인다.
-    [Tooltip("말소리 크기에 맞춰 턱을 움직인다. 얼굴 뼈가 없어 턱·아랫입술이 오르내리는 정도다.")]
-    public bool mouth = true;
-
-    public PersonaMouth.Settings mouthSettings = new PersonaMouth.Settings();
-
-    [Tooltip("시험용. 켜면 음성 없이도 말하는 것처럼 벙긋거린다. 재생 중에 켜고 끌 수 있다.")]
-    public bool mouthTestTalk = false;
-
-    [Tooltip("시험용. 0 보다 크면 이 값으로 벌린 채 둔다. 입 위치·세기를 맞출 때 쓴다.")]
-    [Range(0f, 1f)] public float mouthTestOpen = 0f;
-
     [Header("텍스처")]
     // glTFast 는 기본값으로 밉맵을 만들지 않는다(ImportSettings.GenerateMipMaps).
     // 밉맵 없는 2K 얼굴 텍스처는 VR 에서 조금만 멀어져도 픽셀이 지글거려서,
@@ -188,7 +174,6 @@ public class PersonaSpawner : MonoBehaviour
     Quaternion _spineBase, _chestBase, _neckBase, _lClavBase, _rClavBase;
     // 인물이 보는 방향(루트 기준). 루트의 forward 가 얼굴 방향이라는 보장이 없어 뼈로 잰다.
     Vector3 _faceForwardLocal = Vector3.forward, _faceRightLocal = Vector3.right;
-    PersonaMouth _mouth;
 
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
@@ -235,11 +220,6 @@ public class PersonaSpawner : MonoBehaviour
     void LateUpdate()
     {
         if (_spawnedInstance == null) return;
-        if (_mouth != null)
-        {
-            _mouth.testTalk = mouthTestTalk;
-            _mouth.testOpen = mouthTestOpen;
-        }
         if (!breathe) return;
         // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
         bool driven = _poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying;
@@ -277,17 +257,6 @@ public class PersonaSpawner : MonoBehaviour
         _faceForwardLocal = body.InverseTransformDirection(forward);
         _faceRightLocal = body.InverseTransformDirection(Vector3.Cross(body.up, forward).normalized);
         if (verboseLog) Debug.Log($"[PersonaSpawner] 얼굴 방향(월드): {forward}");
-    }
-
-    void SetupMouth(GameObject root)
-    {
-        _mouth = root.AddComponent<PersonaMouth>();
-        _mouth.settings = mouthSettings;
-        _mouth.verboseLog = verboseLog;
-        _mouth.levelSource = () => voiceClient != null ? voiceClient.SpeechLevel : 0f;
-        _mouth.testTalk = mouthTestTalk;
-        _mouth.testOpen = mouthTestOpen;
-        _mouth.Build();
     }
 
     static void Breathe(Transform bone, Quaternion baseLocal, float angleDeg, Vector3 worldAxis)
@@ -475,7 +444,6 @@ public class PersonaSpawner : MonoBehaviour
         }
 
         FindFacing(_spawnedInstance);
-        if (mouth) SetupMouth(_spawnedInstance);
         if (applyPoseAnimation) ApplyPose(_spawnedInstance);
         if (sanitizeMaterials) SanitizeMaterials(_spawnedInstance);
 

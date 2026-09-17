@@ -12,11 +12,8 @@ public sealed class DialogueAudioPlayer : IDisposable
     int _read, _write, _count;
     long _consumed, _received;
     bool _started;
-    volatile float _level;
     public bool Paused { get; private set; }
     public bool Playing => _started && !Paused;
-    /// <summary>최근 재생 버퍼의 소리 크기(선형 RMS, 0~1). 입 벙긋 같은 연출이 읽는다.</summary>
-    public float Level => Playing ? _level : 0f;
     public long Consumed { get { lock (_gate) return _consumed; } }
     public long Received { get { lock (_gate) return _received; } }
     public float TailSeconds { get; }
@@ -75,9 +72,6 @@ public sealed class DialogueAudioPlayer : IDisposable
             Array.Clear(data, take, data.Length - take);
             _count -= take;
             _consumed += take;
-            double sum = 0;
-            for (int i = 0; i < take; i++) sum += data[i] * data[i];
-            _level = take > 0 ? (float)Math.Sqrt(sum / take) : 0f;
         }
     }
 
@@ -85,7 +79,6 @@ public sealed class DialogueAudioPlayer : IDisposable
     {
         _source.Stop();
         _started = Paused = false;
-        _level = 0f;
         lock (_gate)
         {
             _read = _write = _count = 0;
