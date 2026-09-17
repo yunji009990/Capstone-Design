@@ -68,6 +68,7 @@ public static class PersonaWalkInTest
         AnimationClip Loose(string keyword) =>
             clips.FirstOrDefault(c => c.path.IndexOf(keyword, System.StringComparison.OrdinalIgnoreCase) >= 0).clip;
 
+        var greet = Exact("Standing Greeting") ?? Loose("Greeting") ?? Loose("Wav");
         var walk = Exact("Walking") ?? Loose("Walk");
         var turn = Exact("Left Turn") ?? Exact("Right Turn") ?? Loose("Turn");
         var sitDown = Exact("Sitting") ?? Loose("Sit Down") ?? Loose("Stand To Sit");
@@ -82,6 +83,7 @@ public static class PersonaWalkInTest
             Undo.RegisterCreatedObjectUndo(go, "Create PersonaWalkInProbe");
         }
         Undo.RecordObject(probe, "Setup walk-in test");
+        probe.greetClip = greet;
         probe.walkClip = walk;
         probe.turnClip = turn;
         probe.sitDownClip = sitDown;
@@ -148,6 +150,7 @@ public static class PersonaWalkInTest
         Selection.activeObject = probe.gameObject;
 
         report.Insert(0, $"[PersonaWalkInTest] 준비 완료 — Humanoid 변환 {converted}개, 클립 {clips.Count}개 발견");
+        report.Add($"  인사   : {Name(greet)}");
         report.Add($"  걷기   : {Name(walk)}");
         report.Add($"  돌기   : {Name(turn)}");
         report.Add($"  앉기   : {Name(sitDown)}");

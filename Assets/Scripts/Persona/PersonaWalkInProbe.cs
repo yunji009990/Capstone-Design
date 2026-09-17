@@ -3,6 +3,8 @@
 // 기존 재생 경로(PersonaSpawner 의 legacy Animation)는 건드리지 않는다. Play 중에 legacy 를
 // 끄고 Humanoid 아바타 위에서 외부 클립을 돌린다. PersonaHumanoidProbe 와 같은 방식이다.
 //
+// 흐름: 인사(제자리) → 걷기(웨이포인트) → 돌기 → 앉음.
+//
 // 아는 한계(시험이므로 그대로 둔다):
 //  - 앉는 전환(Mixamo Sitting)은 붙여 봤지만 오히려 어색해서 기본으로 끄고 쓴다(useSitDown).
 //    돌기가 끝나면 앉은 자세로 바로 넘어간다.
@@ -19,9 +21,15 @@ using UnityEngine.Playables;
 
 public class PersonaWalkInProbe : MonoBehaviour
 {
-    public enum Phase { 대기, 걷기, 돌기, 앉는중, 앉음 }
+    public enum Phase { 대기, 인사, 걷기, 돌기, 앉는중, 앉음 }
 
     [Header("클립")]
+    [Tooltip("걷기 전에 한 번 인사한다. 비워두면 바로 걷기로 시작한다.")]
+    public AnimationClip greetClip;
+
+    [Tooltip("인사할 때 체험자(Camera.main)를 향한다. 끄면 걸어갈 방향을 향한다.")]
+    public bool greetFacesUser = true;
+
     [Tooltip("걷기. 제자리 클립이어도 된다 — 이동은 코드가 시킨다.")]
     public AnimationClip walkClip;
 
@@ -84,7 +92,7 @@ public class PersonaWalkInProbe : MonoBehaviour
     [Tooltip("인물이 스폰되면 자동으로 시작한다.")]
     public bool runOnSpawn = true;
 
-    [Tooltip("걷는 동안 시선 추적을 끈다. 걸을 때 발이 흔들려 시선 기준이 튀기 때문이다.")]
+    [Tooltip("걷는 동안 시선 추적을 끈다. 인사 단계에서는 켜진 채로 두고 걷기 시작할 때 끈다.")]
     public bool pauseGazeWhileWalking = true;
 
     [Tooltip("발 IK. 아바타 비율이 조금만 어긋나도 다리를 비튼다. 시험 중엔 끄고 본다.")]
@@ -217,19 +225,37 @@ public class PersonaWalkInProbe : MonoBehaviour
         {
             _breatheWasOn = _spawner.breathe;
             _spawner.breathe = false;
-            if (pauseGazeWhileWalking) { _gazeWasOn = _spawner.gaze ? 1f : 0f; _spawner.gaze = false; }
+            // 시선은 아직 끄지 않는다. 인사는 제자리에서 하니 발이 안 흔들려 기준이 안정적이고,
+            // 체험자를 보며 인사하는 편이 자연스럽다. 걷기 시작할 때 끈다.
+            _gazeWasOn = _spawner.gaze ? 1f : 0f;
         }
 
-        Play(walkClip, true);
-        phase = Phase.걷기;
-        Debug.Log($"[PersonaWalkInProbe] 걷기 시작 — 입구 {start} → 의자 {SeatPosition()} " +
-                  $"(거리 {Vector3.Distance(start, SeatPosition()):0.00}m, 속도 {walkSpeed:0.00}m/s)");
+        if (greetClip != null)
+        {
+            // 인사는 제자리에서 한다. 체험자를 보고 하는 편이 자연스러워 기본은 그쪽이다.
+            if (greetFacesUser && Camera.main != null)
+            {
+                Vector3 toUser = Flat(Camera.main.transform.position - _persona.position);
+                if (toUser.sqrMagnitude > 1e-6f) FaceWorld(toUser.normalized);
+            }
+            Play(greetClip, false);
+            phase = Phase.인사;
+            Debug.Log($"[PersonaWalkInProbe] 인사 — {greetClip.name} ({greetClip.length:0.00}s), 그다음 걷기");
+            return;
+        }
+        StartWalking(start);
     }
 
     void Step()
     {
         if (_persona == null) return;
         Advance();
+
+        if (phase == Phase.인사)
+        {
+            if (ClipDone) StartWalking(_persona.position);   // 인사 중에는 제자리에 선다
+            return;
+        }
 
         if (phase == Phase.걷기)
         {
@@ -318,6 +344,19 @@ public class PersonaWalkInProbe : MonoBehaviour
         _holdAt = -1f;
         _loop = false;
         _clipTime = 0f;
+    }
+
+    /// <summary>걷기로 들어간다. 첫 목표 쪽으로 몸을 돌리고 걷기 클립을 튼다.</summary>
+    void StartWalking(Vector3 from)
+    {
+        // 걸을 때는 발이 번갈아 흔들려 얼굴 방향 기준이 튄다. 여기서 끄고 앉으면 되돌린다.
+        if (pauseGazeWhileWalking && _spawner != null) _spawner.gaze = false;
+        Vector3 toGoal = Flat(GoalAt(waypointIndex) - from);
+        if (toGoal.sqrMagnitude > 1e-6f) FaceWorld(toGoal.normalized);
+        Play(walkClip, true);
+        phase = Phase.걷기;
+        Debug.Log($"[PersonaWalkInProbe] 걷기 시작 — {from} → 의자 {SeatPosition()} " +
+                  $"(거리 {Vector3.Distance(from, SeatPosition()):0.00}m, 속도 {walkSpeed:0.00}m/s)");
     }
 
     Vector3 SeatPosition() =>
