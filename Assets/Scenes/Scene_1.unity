@@ -2940,7 +2940,7 @@ MonoBehaviour:
   sessionIdOverride: 
   spawnPoint: {fileID: 1208657647}
   targetHeightMeters: 0
-  scaleMultiplier: 0.3
+  scaleMultiplier: 1.5
   useSpawnRotation: 1
   retryIntervalSec: 3
   maxWaitSec: 0

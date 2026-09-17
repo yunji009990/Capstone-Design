@@ -54373,7 +54373,7 @@ MonoBehaviour:
   sessionIdOverride: 
   spawnPoint: {fileID: 2002497041}
   targetHeightMeters: 0
-  scaleMultiplier: 0.3
+  scaleMultiplier: 1.5
   useSpawnRotation: 1
   applyPoseAnimation: 1
   freezePose: 1
