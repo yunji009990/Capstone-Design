@@ -1,4 +1,4 @@
-// PersonaWalkInTest.cs — 걸어 들어오기 시험을 메뉴 한 번으로 준비한다.
+// PersonaArrivalSetup.cs — 도착 연출(PersonaArrival)을 메뉴 한 번으로 준비한다.
 //
 // Mixamo FBX 는 기본이 Generic 으로 들어온다. Humanoid 가 아니면 인물에 붙지 않으므로
 // 여기서 Rig 설정을 Humanoid 로 바꾸고 다시 임포트한 뒤 클립을 꽂는다.
@@ -11,12 +11,12 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-public static class PersonaWalkInTest
+public static class PersonaArrivalSetup
 {
     const string ModelFolder = "Assets/Models";
     const string EntranceName = "Persona 입구(시험용)";
 
-    [MenuItem("Tools/Persona/걸어 들어오기 시험 준비", priority = 10)]
+    [MenuItem("Tools/Persona/도착 연출 준비", priority = 10)]
     public static void Prepare()
     {
         var report = new List<string>();
@@ -75,12 +75,22 @@ public static class PersonaWalkInTest
         var seated = Exact("Sitting Clap") ?? Loose("Clap") ?? Loose("Sitting Idle");
 
         // 3) 프로브를 세운다.
-        var probe = Object.FindObjectOfType<PersonaWalkInProbe>();
-        if (probe == null)
+        var spawnerForProbe = Object.FindObjectOfType<PersonaSpawner>();
+        if (spawnerForProbe == null)
         {
-            var go = new GameObject("PersonaWalkInProbe");
-            probe = go.AddComponent<PersonaWalkInProbe>();
-            Undo.RegisterCreatedObjectUndo(go, "Create PersonaWalkInProbe");
+            EditorUtility.DisplayDialog("PersonaSpawner 없음",
+                "열려 있는 씬에서 PersonaSpawner 를 찾지 못했다. 인물 스포너가 있는 씬을 열고 실행할 것.", "확인");
+            return;
+        }
+        // 연출은 스포너와 같은 오브젝트에 둔다. 스포너가 스폰 직후 Begin() 을 부른다.
+        var probe = spawnerForProbe.GetComponent<PersonaArrival>();
+        if (probe == null) probe = Undo.AddComponent<PersonaArrival>(spawnerForProbe.gameObject);
+        if (spawnerForProbe.arrival != probe)
+        {
+            Undo.RecordObject(spawnerForProbe, "Link arrival");
+            spawnerForProbe.arrival = probe;
+            EditorUtility.SetDirty(spawnerForProbe);
+            report.Add("  PersonaSpawner.arrival 에 연결했다");
         }
         Undo.RecordObject(probe, "Setup walk-in test");
         probe.greetClip = greet;
@@ -135,7 +145,7 @@ public static class PersonaWalkInTest
             report.Add("  경유지 2개를 입구~의자 사이에 임시로 놓았다 — 테이블을 피하도록 옮길 것");
         }
 
-        // 5) 같은 뼈를 두고 싸우는 다른 프로브는 꺼 둔다.
+        // 5) 같은 뼈를 두고 싸우는 진단용 프로브는 꺼 둔다.
         var humanoid = Object.FindObjectOfType<PersonaHumanoidProbe>();
         if (humanoid != null && humanoid.runOnSpawn)
         {

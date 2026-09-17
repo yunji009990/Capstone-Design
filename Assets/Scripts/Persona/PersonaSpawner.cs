@@ -116,6 +116,16 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("어깨가 오르내리는 진폭(도).")]
     [Range(0f, 5f)] public float breathShoulderDeg = 0.7f;
 
+    [Header("도착 연출")]
+    // 인물이 입구에서 걸어와 앉는 연출. 클립이 꽂혀 있지 않으면 건너뛰고 예전처럼
+    // preset:sit 을 제자리에서 돌린다 — 비워 두면 기본 동작이 그대로다.
+    [Tooltip("인사 → 걷기 → 앉음 연출. 비워두면 그 자리에 앉은 채로 나타난다.")]
+    public PersonaArrival arrival;
+
+    // 도착 연출이 Animator 로 뼈를 잡고 있는 동안 켜진다. 호흡·시선이 기준 자세를 매 프레임
+    // 다시 잡게 해서, 낡은 기준으로 상체를 되돌려 팔다리가 따로 노는 걸 막는다.
+    [HideInInspector] public bool posedExternally;
+
     [Header("시선")]
     // 얼굴 뼈도 블렌드셰이프도 없어서 표정으로는 아무것도 못 한다. 대신 "나를 보고 있다"는
     // 신호가 VR 에서 가장 강한 살아있음이 된다. 호흡과 같은 방식으로 뼈 위에 얹는다.
@@ -272,7 +282,7 @@ public class PersonaSpawner : MonoBehaviour
     {
         if (_spawnedInstance == null) return;
         // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
-        bool driven = _poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying;
+        bool driven = posedExternally || (_poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying);
         if (driven) CaptureBreathBase();
         Transform body = _spawnedInstance.transform;
 
@@ -638,7 +648,9 @@ public class PersonaSpawner : MonoBehaviour
         }
 
         FindFacing(_spawnedInstance);
-        if (applyPoseAnimation) ApplyPose(_spawnedInstance);
+        // 도착 연출을 쓰면 자세는 그쪽이 잡는다. 여기서 preset:sit 을 틀면 서로 덮어쓴다.
+        bool useArrival = arrival != null && arrival.CanRun;
+        if (applyPoseAnimation && !useArrival) ApplyPose(_spawnedInstance);
         if (sanitizeMaterials) SanitizeMaterials(_spawnedInstance);
 
         // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
@@ -650,7 +662,11 @@ public class PersonaSpawner : MonoBehaviour
         _loadedSession = sid;
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 스폰 완료: {sid} at {anchor.position}, " +
-                      $"scale={_spawnedInstance.transform.localScale}");
+                      $"scale={_spawnedInstance.transform.localScale}" +
+                      (useArrival ? ", 도착 연출로 넘긴다" : ""));
+
+        // 크기를 다 맞춘 뒤에 넘긴다 — 연출이 인물을 입구로 옮기고 경로를 재기 때문이다.
+        if (useArrival) arrival.Begin(_spawnedInstance.transform, this);
     }
 
     [Serializable]
