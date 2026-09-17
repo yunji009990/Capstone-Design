@@ -86,8 +86,11 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("왕복 구간 시작(초).")]
     public float quietStartSec = 0f;
 
-    [Tooltip("왕복 구간 끝(초). 클립보다 길면 클립 끝까지.")]
-    public float quietEndSec = 1.5f;
+    // preset:sit 의 길이는 인물마다 다르게 리타겟된다(실측 7.21초 / 5.77초). 짧은 쪽에서는
+    // 손 들기가 1.43초부터 시작해서, 1.5 로 두면 왕복 끝에 그 첫 동작이 걸려 흠칫거린다.
+    // 1.4 는 두 길이 모두에서 조용한 구간 안이다(뼈 각속도 합 30°/s 대).
+    [Tooltip("왕복 구간 끝(초). 클립보다 길면 클립 끝까지. 새 인물을 넣으면 실제 클립에서 다시 재 볼 것.")]
+    public float quietEndSec = 1.4f;
 
     [Tooltip("재생 속도 배수. 0.5 면 절반 속도, 1.5초 구간을 3초에 한 번 왕복.")]
     [Range(0.1f, 2f)] public float quietSpeed = 0.5f;
