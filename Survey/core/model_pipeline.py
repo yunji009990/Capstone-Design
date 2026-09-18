@@ -10,6 +10,20 @@ from . import model_queue, storage
 from .tripo import image_extension, image_url
 
 
+def fixture_glb():
+    """MODEL_FIXTURE_GLB 가 가리키는 GLB. 없거나 비면 None 이라 평소 경로로 간다.
+
+    Tripo 가 매 회차 다른 T포즈를 그려 결과 편차가 큰 동안, 시연과 배선 확인을
+    위해 준비된 모델 하나를 그대로 내보내는 임시 장치다. 사진과 무관한 같은
+    모델이 나가므로 운영 체험에 켜 두지 않는다.
+    """
+    raw = os.environ.get("MODEL_FIXTURE_GLB", "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_file() else None
+
+
 class SubmissionUnknown(Exception):
     pass
 
@@ -111,6 +125,23 @@ class ModelPipeline:
         artifact = steps.get("artifact")
         if artifact and (not dest.is_file() or hashlib.sha256(dest.read_bytes()).hexdigest() != artifact["sha256"]):
             raise PipelineFailure("저장된 모델 파일이 없거나 변경되었습니다")
+        if not artifact and fixture_glb() is not None:
+            # 임시 우회: Tripo 를 부르지 않고 미리 준비한 GLB 를 그대로 전달한다.
+            # MODEL_FIXTURE_GLB 를 비우면 평소 경로로 돌아간다. 사진과 무관한
+            # 같은 모델이 나가므로 시연·배선 확인용으로만 쓴다.
+            src = fixture_glb()
+            blob = src.read_bytes()
+            if blob[:4] != b"glTF":
+                raise PipelineFailure("MODEL_FIXTURE_GLB 가 GLB 파일이 아닙니다")
+            partial = dest.with_suffix(".glb.part")
+            partial.write_bytes(blob)
+            os.replace(partial, dest)
+            digest = hashlib.sha256(blob).hexdigest()
+            steps["fixture"] = {"file": src.name, "bytes": len(blob), "sha256": digest,
+                                "note": "Tripo 호출 없음 · 준비된 모델 사용"}
+            steps["artifact"] = {"sha256": digest, "bytes": len(blob)}
+            self.save()
+            artifact = steps["artifact"]
         if not artifact:
             source = self.tpose(sid, path) if steps["input"].get("tpose") else path
             model_id, result = self.task("model", lambda: self.client.submit_image_to_3d(source))
