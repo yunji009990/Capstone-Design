@@ -1,0 +1,72 @@
+<!doctype html><meta charset="utf-8"><title>face shot</title>
+<style>html,body{margin:0;height:100%;background:#8a8a8a;overflow:hidden}canvas{display:block}
+#log{position:fixed;left:8px;top:6px;font:12px monospace;color:#111;z-index:9}</style>
+<div id="log">loading…</div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const P = new URLSearchParams(location.search);
+const GLB = P.get('glb'), OUT = P.get('out') || 'shot';
+// lit  = 평소 모습. shaded = 조명 + 텍스처
+// unlit= 조명을 빼고 albedo 만. 텍스처가 얼마나 들고 있는지 본다
+// geom = 텍스처를 빼고 형상만. 메시가 얼마나 들고 있는지 본다
+const MODE = P.get('mode') || 'lit';
+const S = 1024;
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(1); renderer.setSize(S, S); renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x8a8a8a);
+// 얼굴 인식이 쓰는 건 형태와 명암이라 균일한 조명이 낫다. 스펙큘러는 죽인다.
+// geom 모드는 음영이 유일한 단서라 방향광을 키우고, 나머지는 평평하게 둔다.
+scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbbb, MODE === 'geom' ? 1.2 : 2.6));
+const k = new THREE.DirectionalLight(0xffffff, MODE === 'geom' ? 2.4 : 0.9);
+k.position.set(MODE === 'geom' ? 1.5 : 0, 1, 2); scene.add(k);
+const camera = new THREE.PerspectiveCamera(24, 1, 0.005, 100);
+const log = document.getElementById('log');
+
+new GLTFLoader().load(GLB, async (g) => {
+  scene.add(g.scene);
+  g.scene.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    if (MODE === 'unlit') {
+      // 조명을 완전히 빼고 albedo 를 그대로 화면에 낸다. 남는 건 텍스처뿐이다.
+      o.material = new THREE.MeshBasicMaterial({map: o.material.map, skinning: true});
+    } else if (MODE === 'geom') {
+      // 텍스처를 빼고 균일한 회색. 남는 건 메시 형상과 그 음영뿐이다.
+      o.material = new THREE.MeshStandardMaterial({color: 0xb0a49c, roughness: 0.9, metalness: 0});
+    } else {
+      o.material.roughness = 0.85; o.material.metalness = 0.0;
+      if (o.material.metalnessMap) o.material.metalnessMap = null;
+      if (o.material.roughnessMap) o.material.roughnessMap = null;
+    }
+  });
+  // 스킨 메시라 Box3 가 안 맞는다. 머리 뼈가 있으면 그걸 쓰고, 없으면 지오메트리 바운즈.
+  let head = null;
+  g.scene.traverse(o => { if (o.isBone && /head/i.test(o.name) && !head) head = o; });
+  g.scene.updateMatrixWorld(true);
+  let center = new THREE.Vector3(), span = 1;
+  if (head) { head.getWorldPosition(center); }
+  else {
+    const box = new THREE.Box3().setFromObject(g.scene, true);
+    span = box.max.y - box.min.y;
+    center.set((box.min.x+box.max.x)/2, box.max.y - span*0.105, (box.min.z+box.max.z)/2);
+  }
+  const dist = span * 0.62;
+  // 어느 쪽이 정면인지 모델마다 다르다. 네 방향을 찍어 두고 얼굴 검출이 고르게 한다.
+  const names = ['az0','az90','az180','az270'];
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2;
+    camera.position.set(center.x + Math.sin(a)*dist, center.y + span*0.01, center.z + Math.cos(a)*dist);
+    camera.lookAt(center); camera.updateProjectionMatrix();
+    // 키 라이트를 카메라 쪽으로 옮긴다. 방위마다 음영이 달라지면 비교가 안 된다.
+    k.position.copy(camera.position).add(new THREE.Vector3(0, span*0.3, 0));
+    renderer.render(scene, camera);
+    await fetch(`/save?name=${OUT}_${names[i]}`, {method:'POST', body: renderer.domElement.toDataURL('image/png')});
+  }
+  log.textContent = 'done ' + OUT; window.__done = true;
+}, undefined, (e) => { log.textContent = 'load error: ' + e; window.__done = 'error'; });
+</script>
