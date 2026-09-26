@@ -90,6 +90,7 @@ crashlytics-build.properties
 /tools/_work/
 tools/__pycache__/
 tools/tests/__pycache__/
+tools/**/__pycache__/
 
 # 설문 앱 — 실제 참가자 자료와 API 키는 저장소에 넣지 않는다
 /Survey/data/

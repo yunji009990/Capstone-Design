@@ -158,9 +158,14 @@ def measure(analyzer: Analyzer, items: list[tuple[str, Path]]) -> dict:
     chain = [(label, face) for label, _, face in faces if face is not None]
     if len(chain) > 2:
         print("\n단계별 낙폭")
+        # 기준과의 비교에서 이미 나온 쌍은 다시 넣지 않는다. 첫 단계 쌍이 두 번 기록되면
+        # 이 결과를 읽는 쪽(pipeline_view)에 같은 값이 두 번 뜬다.
+        seen = {(pair["from"], pair["to"]) for pair in result["pairs"]}
         for (la, fa), (lb, fb) in zip(chain, chain[1:]):
             score = cosine(fa, fb)
-            result["pairs"].append({"from": la, "to": lb, "cosine": score, "verdict": verdict(score)})
+            if (la, lb) not in seen:
+                result["pairs"].append({"from": la, "to": lb, "cosine": score,
+                                        "verdict": verdict(score)})
             print(f"  {la} → {lb:<18s} {score:+.3f}  {verdict(score)}")
     return result
 
@@ -183,11 +188,26 @@ def best_shot(analyzer: "Analyzer", tag: str) -> Path | None:
     return best
 
 
+# 폴더 두 종류를 같은 방식으로 다룬다. tripo_trial_* 은 실험 도구가 만든 것이고,
+# 32자리 세션 폴더는 서버에서 받아 온 것이라 파일 이름이 다르다.
+STAGE_NAMES = (("원본 사진", ("reference", "front")), ("T포즈", ("reference_tpose", "tpose")))
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def find_stage(directory: Path, stems: tuple[str, ...]) -> Path | None:
+    for stem in stems:
+        for ext in IMAGE_EXTS:
+            path = directory / (stem + ext)
+            if path.is_file():
+                return path
+    return None
+
+
 def trial_items(directory: Path, render: Path | None) -> list[tuple[str, Path]]:
     items = []
-    for label, name in (("원본 사진", "reference.png"), ("T포즈", "reference_tpose.png")):
-        path = directory / name
-        if path.is_file():
+    for label, stems in STAGE_NAMES:
+        path = find_stage(directory, stems)
+        if path is not None:
             items.append((label, path))
     if render is not None:
         if not render.is_file():
@@ -201,7 +221,14 @@ def trial_items(directory: Path, render: Path | None) -> list[tuple[str, Path]]:
 def save_into_trial(directory: Path, result: dict) -> None:
     path = directory / "trial.json"
     if not path.is_file():
-        print(f"\ntrial.json 이 없어 저장하지 않았습니다: {directory}")
+        # 서버에서 받아 온 세션 폴더에는 trial.json 이 없다. 옆에 따로 남긴다.
+        # pipeline_view 는 두 파일을 모두 읽는다.
+        report = directory / "face_report.json"
+        temp = report.with_suffix(".json.tmp")
+        temp.write_text(json.dumps({"face_identity": result}, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+        temp.replace(report)
+        print(f"\nface_report.json 에 기록했습니다: {report}")
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["face_identity"] = result          # tasks/assets 는 건드리지 않는다

@@ -38,11 +38,29 @@ public class ServerStatusWindow : EditorWindow
         public bool ready_to_talk;
     }
 
+    // 작업 상태별 개수. 서버는 SELECT state, COUNT(*) ... GROUP BY state 로 만들고,
+    // 상태 이름은 model_queue.save() 가 쓰는 여섯 개로 고정이다. 없는 상태는 0 으로 남는다.
+    [Serializable]
+    class JobCounts
+    {
+        public int queued, running, ready, failed, blocked, submission_unknown;
+    }
+
+    [Serializable]
+    class WorkerStatus
+    {
+        public bool online;         // 45초 안에 하트비트를 남긴 워커가 있는가
+        public bool configured;     // 그 워커가 Tripo 키를 들고 있는가
+        public int active_jobs;
+        public JobCounts jobs;
+    }
+
     [Serializable]
     class WebStatus
     {
         public bool engine;     // 화자 분리 엔진(extract_runner.py)이 제자리에 있는가
         public bool tripo;      // TRIPO_API_KEY 가 잡혔는가. 키 자체는 서버가 안 준다
+        public WorkerStatus model_worker;
     }
 
     bool _webUp;
@@ -219,7 +237,51 @@ public class ServerStatusWindow : EditorWindow
         Row("Tripo 키", _web.tripo ? "있음" : "없음 — 인물 모델이 stub 으로 끝납니다",
             _web.tripo ? Green : Amber);
 
+        DrawWorker();
         DrawTripoField();
+    }
+
+    /// <summary>
+    /// 모델 작업자가 살아 있는지와 작업이 실제로 움직이는지.
+    ///
+    /// 키가 있어도 작업이 안 도는 경우가 따로 있다 — 워커가 죽었거나, 유료 제출 결과를
+    /// 모르는 작업(submission_unknown)이 남아 사람의 판단을 기다리는 경우다. 그때는
+    /// 위의 「Tripo 키 있음」만 보고 정상이라고 오해하기 쉬워서 여기서 따로 말한다.
+    /// </summary>
+    void DrawWorker()
+    {
+        var w = _web.model_worker;
+        if (w == null)
+        {
+            Row("모델 작업자", "서버가 상태를 주지 않습니다 — 웹이 예전 버전입니다", Amber);
+            return;
+        }
+
+        if (!w.online)
+            Row("모델 작업자", "멈춰 있습니다 — 사진을 올려도 생성되지 않습니다", Red);
+        else if (!w.configured)
+            Row("모델 작업자", "돌지만 키가 없습니다", Amber);
+        else
+            Row("모델 작업자", w.active_jobs > 0 ? $"작업 중 ({w.active_jobs}건)" : "대기 중", Green);
+
+        var j = w.jobs;
+        if (j == null) return;
+
+        // 지금 움직이는 것. 사진을 올린 직후 여기가 0 이면 접수가 안 된 것이다.
+        int moving = j.queued + j.running;
+        Row("진행", moving > 0 ? $"대기 {j.queued} · 생성 중 {j.running}" : "없음",
+            moving > 0 ? Amber : Grey);
+        Row("완료", $"{j.ready}개", Grey);
+
+        if (j.failed > 0)
+            Row("실패", $"{j.failed}개 — 서버의 Server/tripo.log 를 보세요", Red);
+        if (j.blocked > 0)
+            Row("막힘", $"{j.blocked}개 — Tripo 키를 넣고 재시도해야 합니다", Amber);
+
+        // 돈은 나갔는데 결과를 모르는 작업. 자동 재시도하지 않도록 막아 둔 상태라
+        // 사람이 Tripo 작업 이력과 대조해야 한다.
+        if (j.submission_unknown > 0)
+            Row("제출 불명", $"{j.submission_unknown}개 — 중복 과금 위험. 확인 후 처리하세요", Red);
     }
 
     /// <summary>

@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>인물 생성 파이프라인</title>
+<style>
+  :root {
+    --bg: #14171c; --card: #1c2027; --line: #2b313b; --text: #dde3ec;
+    --dim: #8b95a4; --good: #59b36b; --warn: #d8a13a; --bad: #cc5b52; --accent: #6ba3e8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 "Malgun Gothic", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 10; background: #11141a;
+           border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  h1 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  .queue { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px;
+          font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; margin-left: 5px; }
+  .chip.on  { border-color: var(--good); color: var(--good); }
+  .chip.run { border-color: var(--warn); color: var(--warn); }
+  .chip.err { border-color: var(--bad);  color: var(--bad);  }
+  main { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .case { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .head { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+          border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .kind { font-size: 11px; border: 1px solid var(--line); border-radius: 4px;
+          padding: 1px 7px; color: var(--dim); }
+  .id { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .when { color: var(--dim); font-size: 12px; margin-left: auto; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+         gap: 12px; padding: 12px 14px; }
+  .panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .cap { font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: baseline; }
+  .cap b { color: var(--text); font-weight: 600; }
+  .box { position: relative; aspect-ratio: 1; background: #0e1116;
+         border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .box img { width: 100%; height: 100%; object-fit: contain; display: block;
+             transition: transform .18s, object-position .18s; }
+  .box.zoom img { transform: scale(2.6); object-position: center 22%; }
+  .box canvas { width: 100% !important; height: 100% !important; display: block; }
+  .empty { display: grid; place-items: center; height: 100%; color: #4d5663; font-size: 12px; }
+  .load { position: absolute; inset: 0; display: grid; place-items: center;
+          background: #0e1116; color: var(--dim); font-size: 12px; cursor: pointer; }
+  .load:hover { color: var(--accent); }
+  .scores { padding: 0 14px 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .s { font-size: 12px; border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; }
+  .s b { font-family: ui-monospace, Consolas, monospace; }
+  .tools { display: flex; gap: 8px; align-items: center; }
+  button { background: #232832; color: var(--text); border: 1px solid var(--line);
+           border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .note { color: var(--dim); font-size: 12px; padding: 0 16px 16px; }
+</style>
+
+<header>
+  <h1>인물 생성 파이프라인 — 사진 → T포즈 → 3D 모델</h1>
+  <div class="queue" id="queue"><span class="chip">운영 큐 확인 중…</span></div>
+</header>
+
+<main id="cases"></main>
+<p class="note" id="note"></p>
+
+<script type="importmap">
+{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+};
+
+// ── 운영 큐 ────────────────────────────────────────────────────────
+// 서버가 꺼져 있어도 아래 카드들은 그대로 보여야 하므로 실패를 삼키고 표시만 바꾼다.
+async function drawQueue() {
+  const box = document.getElementById('queue');
+  let data;
+  try { data = await (await fetch('/api/status')).json(); }
+  catch { data = { error: '중계 서버에 연결하지 못했습니다' }; }
+  box.textContent = '';
+  if (data.error) {
+    box.append(el('span', 'chip err', '운영 서버 · 응답 없음'));
+    return;
+  }
+  const w = data.model_worker || {};
+  const j = w.jobs || {};
+  const chip = (label, value, cls) => {
+    const node = el('span', 'chip' + (cls ? ' ' + cls : ''), label);
+    node.append(el('b', null, String(value)));
+    box.append(node);
+  };
+  box.append(el('span', 'chip' + (w.online ? ' on' : ' err'),
+    w.online ? (w.active_jobs ? '작업 중' : '작업자 대기') : '작업자 멈춤'));
+  chip('Tripo 키', data.tripo ? '있음' : '없음', data.tripo ? 'on' : 'err');
+  const moving = (j.queued || 0) + (j.running || 0);
+  chip('대기', j.queued || 0, moving ? 'run' : '');
+  chip('생성 중', j.running || 0, j.running ? 'run' : '');
+  chip('완료', j.ready || 0, '');
+  if (j.failed) chip('실패', j.failed, 'err');
+  if (j.submission_unknown) chip('제출 불명', j.submission_unknown, 'err');
+  box.append(el('span', 'chip', new Date().toLocaleTimeString('ko-KR')));
+}
+
+// ── 3D 미리보기 ────────────────────────────────────────────────────
+// GLB 가 한 건에 7~9MB 다. 카드마다 자동으로 받으면 화면 열자마자 수십 MB 를 끈다.
+// 눌렀을 때만 받는다.
+function mountModel(box, url) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(box.clientWidth, box.clientHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  box.textContent = '';
+  box.append(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1116);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 2.4));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1);
+  key.position.set(1, 2, 3);
+  scene.add(key);
+
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.005, 100);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enablePan = false;
+
+  new GLTFLoader().load(url, (gltf) => {
+    scene.add(gltf.scene);
+    gltf.scene.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      // Tripo 결과는 금속·거칠기 값이 피부에 안 맞아 번들거린다. 유니티의
+      // PersonaSpawner.SanitizeMaterials() 와 같은 보정을 여기서도 한다.
+      o.material.metalness = 0;
+      o.material.roughness = 0.85;
+      o.material.metalnessMap = null;
+      o.material.roughnessMap = null;
+    });
+    // 스킨 메시는 Box3 가 바인드 포즈를 제대로 못 잡는다. 머리 뼈가 있으면 그걸 쓴다.
+    let head = null;
+    gltf.scene.traverse(o => { if (o.isBone && /head/i.test(o.name) && !head) head = o; });
+    gltf.scene.updateMatrixWorld(true);
+    const box3 = new THREE.Box3().setFromObject(gltf.scene, true);
+    const span = Math.max(box3.max.y - box3.min.y, 0.001);
+    const target = new THREE.Vector3();
+    if (head) head.getWorldPosition(target);
+    else target.set((box3.min.x + box3.max.x) / 2, box3.max.y - span * 0.09,
+                    (box3.min.z + box3.max.z) / 2);
+    controls.target.copy(target);
+    camera.position.set(target.x, target.y, target.z + span * 0.75);
+    controls.update();
+    box.dataset.ready = '1';
+  }, undefined, () => {
+    box.textContent = '';
+    box.append(el('div', 'empty', 'GLB 를 읽지 못했습니다'));
+  });
+
+  renderer.setAnimationLoop(() => renderer.render(scene, camera));
+  new ResizeObserver(() => {
+    if (!box.clientWidth) return;
+    renderer.setSize(box.clientWidth, box.clientHeight);
+    camera.aspect = 1;
+    camera.updateProjectionMatrix();
+  }).observe(box);
+}
+
+function imagePanel(label, path) {
+  const panel = el('div', 'panel');
+  const cap = el('div', 'cap');
+  cap.append(el('b', null, label));
+  panel.append(cap);
+  const box = el('div', 'box');
+  if (!path) {
+    box.append(el('div', 'empty', '없음'));
+  } else {
+    const img = el('img');
+    img.src = '/' + path;
+    img.loading = 'lazy';
+    img.onload = () => cap.append(el('span', null, `${img.naturalWidth}×${img.naturalHeight}`));
+    box.append(img);
+    // 얼굴이 뭉개졌는지는 확대해야 보인다. 눌러서 얼굴 높이로 당긴다.
+    box.title = '누르면 얼굴 확대';
+    box.onclick = () => box.classList.toggle('zoom');
+  }
+  panel.append(box);
+  return panel;
+}
+
+function modelPanel(stage) {
+  const panel = el('div', 'panel');
+  const cap = el('div', 'cap');
+  cap.append(el('b', null, stage.label));
+  if (stage.mb != null) cap.append(el('span', null, `${stage.mb} MB`));
+  panel.append(cap);
+  const box = el('div', 'box');
+  const button = el('div', 'load', '▶ 3D 보기');
+  button.onclick = () => mountModel(box, '/' + stage.path);
+  box.append(button);
+  panel.append(box);
+  return panel;
+}
+
+function scoreChips(scores) {
+  const wrap = el('div', 'scores');
+  for (const pair of scores) {
+    if (pair.cosine == null) continue;
+    const chip = el('div', 's');
+    chip.append(document.createTextNode(`${pair.from} → ${pair.to} `));
+    const value = el('b', null, pair.cosine.toFixed(3));
+    value.style.color = pair.cosine >= 0.6 ? 'var(--good)'
+                      : pair.cosine >= 0.4 ? 'var(--warn)' : 'var(--bad)';
+    chip.append(value);
+    wrap.append(chip);
+  }
+  return wrap.children.length ? wrap : null;
+}
+
+let signature = '';
+
+async function drawCases() {
+  const { cases } = await (await fetch('/api/cases')).json();
+  // 목록이 그대로면 다시 그리지 않는다. 열어 둔 3D 뷰가 초기화되면 안 된다.
+  const next = JSON.stringify(cases.map(c => [c.id, c.updated]));
+  if (next === signature) return;
+  signature = next;
+
+  const root = document.getElementById('cases');
+  root.textContent = '';
+  for (const item of cases) {
+    const card = el('div', 'case');
+    const head = el('div', 'head');
+    head.append(el('span', 'kind', item.kind));
+    head.append(el('span', 'id', item.id));
+    head.append(el('span', 'when', new Date(item.updated * 1000).toLocaleString('ko-KR')));
+    card.append(head);
+
+    const row = el('div', 'row');
+    row.append(imagePanel('1. 올린 사진', item.source));
+    row.append(imagePanel('2. T포즈', item.tpose));
+    for (const stage of item.stages) row.append(modelPanel(stage));
+    card.append(row);
+
+    const chips = scoreChips(item.scores);
+    if (chips) card.append(chips);
+    root.append(card);
+  }
+  document.getElementById('note').textContent = cases.length
+    ? 'tools/_work 에 폴더를 새로 넣으면 10초 안에 목록에 나타납니다. 사진을 누르면 얼굴이 확대됩니다.'
+    : 'tools/_work 에 세션 폴더나 tripo_trial_* 폴더가 없습니다.';
+}
+
+function tick() { drawQueue(); drawCases(); }
+tick();
+setInterval(drawQueue, 5000);
+setInterval(drawCases, 10000);
+</script>
+</html>
