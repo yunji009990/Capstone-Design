@@ -115,6 +115,14 @@ def main() -> int:
     parser.add_argument("--multiview", action="store_true",
                         help="4뷰를 먼저 만들고(generate_multiview_image, 10) multiview_to_model 로 생성한다. "
                              "한 장에서 뒤·옆을 지어내지 않아 좌우 비대칭이 준다")
+    # Tripo 웹은 face_limit 을 보내지 않아 98,722 버텍스가 나왔는데, 우리 기본값 50,000 은
+    # 28,290 에서 멈췄다(2026-09-26 실측). 문서에 「설정하지 않으면 적응적으로 정해진다」고
+    # 되어 있어 아예 빼는 길을 둔다. 메시가 성기면 콧방울·눈꺼풀 같은 작은 굴곡이 사라지고,
+    # 그건 텍스처를 다시 구워도 살아나지 않는다.
+    parser.add_argument("--face-limit", default="50000",
+                        help="삼각형 상한. auto 면 필드를 보내지 않아 Tripo 가 정한다")
+    parser.add_argument("--geometry-quality", choices=("standard", "detailed"), default="standard",
+                        help="detailed 는 20 크레딧을 더 쓰고 형태를 더 살린다")
     args = parser.parse_args()
     image_path = args.image.resolve(strict=True)
     out = args.out.resolve()
@@ -124,10 +132,15 @@ def main() -> int:
     if image_type not in ("jpg", "png"):
         parser.error("Use a JPG or PNG reference")
 
-    config = {"model_version": "v3.1-20260211", "face_limit": 50000,
+    config = {"model_version": "v3.1-20260211",
               "texture": True, "pbr": True, "texture_quality": "detailed",
-              "geometry_quality": "standard", "texture_alignment": "original_image",
+              "geometry_quality": args.geometry_quality, "texture_alignment": "original_image",
               "enable_image_autofix": False, "model_seed": 20260909, "texture_seed": 20260909}
+    if args.face_limit.strip().lower() != "auto":
+        try:
+            config["face_limit"] = int(args.face_limit)
+        except ValueError:
+            parser.error("--face-limit 은 정수이거나 auto 여야 합니다")
     identity = {"image_sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
                 "generation": config, "rig_version": "v1.0-20240301",
                 "rig_spec": "tripo", "animation": "preset:sit"}

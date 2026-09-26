@@ -124,5 +124,11 @@ Server/dialogue.pid
 Server/*.env
 Server/*.pid
 
+# 비밀값은 어느 폴더에 놓든 올라가지 않게 한다. Web/.gitignore 가 Web/.env 를 막고
+# 있었지만 저장소 루트는 비어 있어서, 키를 루트에 두면 그대로 추적 대상이 됐다.
+.env
+.env.*
+!.env.example
+
 # COZY 데모 씬·에셋 (108MB, 76MB 짜리 씬 하나 포함). 참고용이라 안 올린다 — 필요하면 에셋 스토어에서 다시 임포트
 /Packages/com.distantlands.cozy.core/Content/Demo/

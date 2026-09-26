@@ -161,7 +161,14 @@ def poll(client: TripoClient, record: dict, journal: Path, manifest: dict, timeo
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--trial", type=Path, required=True, help="생성이 끝난 실험 폴더")
+    parser.add_argument("--trial", type=Path,
+                        help="생성이 끝난 실험 폴더. trial.json 에서 generation task ID 를 읽는다")
+    # 서버가 만든 세션에는 trial.json 이 없다. 그 지오메트리를 재활용하려고 로컬에서
+    # 다시 생성하면 80 크레딧이 또 나가므로, task ID 를 직접 받는 길을 둔다.
+    # ID 는 운영 DB 의 model_jobs.steps_json 안 model.task_id 에 있다.
+    parser.add_argument("--model-task-id", help="--trial 대신 Tripo 의 생성 task ID 를 직접 지정")
+    parser.add_argument("--out", type=Path,
+                        help="--model-task-id 를 쓸 때 결과를 남길 폴더 (tools/_work 안)")
     parser.add_argument("--source", choices=("tpose", "original"), default="tpose",
                         help="참조로 쓸 폴더 안 이미지. 기본은 T포즈")
     parser.add_argument("--image", type=Path, action="append",
@@ -180,17 +187,30 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="요청만 출력. 키도 네트워크도 쓰지 않는다")
     args = parser.parse_args()
 
-    directory = args.trial.resolve()
+    if bool(args.trial) == bool(args.model_task_id):
+        parser.error("--trial 과 --model-task-id 중 하나만 지정하세요")
+
+    if args.trial:
+        directory = args.trial.resolve()
+        trial_path = directory / "trial.json"
+        if not trial_path.is_file():
+            parser.error(f"trial.json 이 없습니다: {directory}")
+        trial = json.loads(trial_path.read_text(encoding="utf-8"))
+        generation = (trial.get("tasks") or {}).get("generation") or {}
+        model_task_id = generation.get("task_id")
+        if not model_task_id:
+            parser.error("이 폴더에는 완료된 generation 작업이 없습니다. 먼저 tripo_trial.py 로 생성하세요")
+    else:
+        if not args.out:
+            parser.error("--model-task-id 를 쓸 때는 결과를 남길 --out 폴더가 필요합니다")
+        if not args.image:
+            parser.error("--model-task-id 를 쓸 때는 참조 이미지를 --image 로 지정해야 합니다")
+        model_task_id = args.model_task_id.strip()
+        directory = args.out.resolve()
+        directory.mkdir(parents=True, exist_ok=True)
+
     if not directory.is_relative_to(ROOT / "tools" / "_work"):
-        parser.error("--trial 은 tools/_work 안이어야 합니다 (git 에 올라가지 않는 실험 산출물)")
-    trial_path = directory / "trial.json"
-    if not trial_path.is_file():
-        parser.error(f"trial.json 이 없습니다: {directory}")
-    trial = json.loads(trial_path.read_text(encoding="utf-8"))
-    generation = (trial.get("tasks") or {}).get("generation") or {}
-    model_task_id = generation.get("task_id")
-    if not model_task_id:
-        parser.error("이 폴더에는 완료된 generation 작업이 없습니다. 먼저 tripo_trial.py 로 생성하세요")
+        parser.error("결과 폴더는 tools/_work 안이어야 합니다 (git 에 올라가지 않는 실험 산출물)")
 
     # 문서상 text 와 참조 이미지는 상호배타다. 둘 다 오면 무엇을 보냈는지 불분명해진다.
     if args.text and args.image:
@@ -244,8 +264,19 @@ def main() -> int:
     if record is None:
         record = manifest["task"] = {"request": body, "state": "submitting"}
         save_json(journal, manifest)
-        # 제출이 중간에 끊기면 결과를 알 수 없다. 재시작해도 다시 보내지 않는다.
-        record["task_id"] = client._submit(fill_tokens(client, body, images))
+        try:
+            # 제출이 중간에 끊기면 결과를 알 수 없다. 재시작해도 다시 보내지 않는다.
+            record["task_id"] = client._submit(fill_tokens(client, body, images))
+        except RuntimeError as exc:
+            # 4xx 는 Tripo 가 요청 자체를 받아들이지 않은 것이라 작업이 생기지 않았다.
+            # 그때까지 적어 둔 기록을 지워야 요청을 고쳐 같은 --variant 로 다시 시도할 수
+            # 있다. 안 지우면 "제출 결과를 알 수 없습니다" 에 걸려 영영 막힌다.
+            # 5xx·연결 끊김은 작업이 생겼을 수도 있으므로 그대로 둔다.
+            if any(f"[{code}]" in str(exc) for code in (400, 401, 403, 404, 422)):
+                manifest.pop("task", None)
+                save_json(journal, manifest)
+                raise SystemExit(f"Tripo 가 요청을 거절했습니다 · 작업은 생성되지 않았습니다\n{exc}")
+            raise
         record["state"] = "submitted"
         save_json(journal, manifest)
         emit("texture", status="submitted", task_id=record["task_id"])
