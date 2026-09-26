@@ -57,20 +57,49 @@ while IFS= read -r f; do
 done < /tmp/platform_files.txt
 echo "   백업한 파일 $(find "$BACKUP" -type f | wc -l)개"
 
+# 이 ROOT 에 속한 워커 프로세스를 찾는다.
+#
+# 절대 경로로만 찾으면 놓친다. 손으로 띄운 워커는 `cd ~/webapp && python
+# Survey/model_worker.py` 처럼 상대 경로로 올라와 있어서, pgrep -f 에
+# "$ROOT/Survey/model_worker.py" 를 주면 걸리지 않는다. 실제로 운영 워커가 그 모양으로
+# 8일째 돌고 있었고, 그대로 배포했다면 이 함수가 아무도 못 세운 채 새 워커를 하나 더
+# 띄워 둘이 같은 큐를 집었을 것이다. 유료 작업이라 그래선 안 된다.
+#
+# 그렇다고 이름만 보고 잡으면 다른 clone 에서 돌리는 개발용 워커까지 죽인다. 그래서
+# 후보를 느슨하게 모은 뒤 (1) 파이썬 프로세스이고 (2) 실행 위치나 인자가 이 ROOT 안인
+# 것만 남긴다. --status 는 즉시 끝나는 조회라 건드리지 않는다.
+worker_pids() {
+  local pid cmd cwd exe
+  for pid in $(pgrep -f 'model_worker\.py' || true); do
+    [ -r "/proc/$pid/cmdline" ] || continue
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+    case "$cmd" in *--status*) continue ;; esac
+    exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null) || continue
+    case "${exe##*/}" in python*) ;; *) continue ;; esac   # bash -c 래퍼는 제외
+    cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null) || continue
+    case "$cmd" in
+      *"$ROOT/Survey/model_worker.py"*) echo "$pid"; continue ;;
+    esac
+    case "$cwd" in
+      "$ROOT"|"$ROOT/Survey") echo "$pid" ;;
+    esac
+  done
+}
+
 # 돌고 있는 워커를 먼저 세운다. pidfile 에 없는(수동으로 띄운) 프로세스도 찾아서 세운다.
 if echo "$SERVICES" | grep -qw tripo; then
   echo "-- 워커 정지"
   bash "$ROOT/Server/platform.sh" tripo stop || true
-  for pid in $(pgrep -f "$ROOT/Survey/model_worker.py" || true); do
+  for pid in $(worker_pids); do
     echo "   pidfile 밖의 워커 PID $pid 에 TERM"
     kill -TERM "$pid" 2>/dev/null || true
   done
   for _ in $(seq 1 60); do
-    pgrep -f "$ROOT/Survey/model_worker.py" > /dev/null || break
+    [ -z "$(worker_pids)" ] && break
     sleep 1
   done
-  if pgrep -f "$ROOT/Survey/model_worker.py" > /dev/null; then
-    echo "워커가 60초 안에 안 멈췄습니다. 배포를 중단합니다." >&2
+  if [ -n "$(worker_pids)" ]; then
+    echo "워커가 60초 안에 안 멈췄습니다. 배포를 중단합니다: PID $(worker_pids | tr '\n' ' ')" >&2
     exit 1
   fi
 fi

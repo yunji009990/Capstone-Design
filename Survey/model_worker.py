@@ -109,7 +109,22 @@ def main():
                 model_queue.save(job, owner, state=state, error=error)
             except RuntimeError:
                 pass  # Deleted person or a newer worker now owns this job.
-            log.warning("job=%s state=%s error_type=%s", sid, state, type(exc).__name__)
+            # DB 의 error 는 유족 화면에 나가므로 일반 문구로 두고, 실제 사유는 로그에만
+            # 남긴다. 예전에는 예외 종류만 적어서, PipelineFailure 가 아닌 것으로 끝난
+            # 작업(예: RuntimeError)의 원인을 나중에 알 방법이 없었다.
+            #
+            # SubmissionUnknown 은 `raise ... from exc` 로 만들어지므로 정작 무엇이
+            # 끊겼는지는 __cause__ 에 있다. 겉 예외만 적으면 단계 이름밖에 안 남는다.
+            cause = exc.__cause__ if isinstance(exc, SubmissionUnknown) and exc.__cause__ else exc
+            detail = str(cause) or type(cause).__name__
+            if len(detail) > 500:
+                # Tripo 는 실패 응답 본문을 통째로 실어 보낼 때가 있다. 로그가 한 건에
+                # 잠기지 않게 자른다. 요청 헤더는 담기지 않으므로 API 키는 새지 않는다.
+                detail = detail[:500] + "…(잘림)"
+            # 예상한 실패는 한 줄로 충분하고, 예상 못 한 예외는 어디서 터졌는지가 필요하다.
+            unexpected = not isinstance(exc, (PipelineFailure, SubmissionUnknown))
+            log.warning("job=%s state=%s error_type=%s detail=%s",
+                        sid, state, type(exc).__name__, detail, exc_info=unexpected)
         finally:
             finished.set()
             thread.join(timeout=2)
