@@ -16,7 +16,9 @@ def load_settings():
     path = Path(os.environ.get("MODEL_WORKER_ENV") or
                 Path(__file__).resolve().parents[1] / "Web" / ".env")
     allowed = {"TRIPO_API_KEY", "TRIPO_POSE", "TRIPO_TPOSE", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR",
-               "MODEL_FIXTURE_GLB"}
+               "MODEL_FIXTURE_GLB",
+               "TRIPO_FACE_TRANSPLANT", "TRIPO_FACE_LIMIT",
+               "TRIPO_GEOMETRY_QUALITY"}
     values = {}
     if path.is_file():
         for line in path.read_text(encoding="utf-8-sig").splitlines():

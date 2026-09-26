@@ -1,2 +1,11 @@
 # Tripo requests and GLB delivery. No GPU, web UI, or dialogue dependencies.
 httpx==0.28.1
+
+# 얼굴 이식(core/face_paste.py)용. CPU 전용이고 합쳐서 약 500MB 다.
+# 없으면 그 단계만 건너뛰고 원래 T포즈로 생성한다 — 워커는 그대로 동작한다.
+# 첫 실행에서 insightface 가 buffalo_l 모델 묶음(약 280MB)을 ~/.insightface 로 받는다.
+numpy==2.5.3
+onnxruntime==1.30.0
+opencv-python-headless==5.0.0.93
+scikit-image==0.26.0
+insightface==2.0

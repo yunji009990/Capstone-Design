@@ -51,6 +51,32 @@
            border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
   button:hover { border-color: var(--accent); color: var(--accent); }
   .note { color: var(--dim); font-size: 12px; padding: 0 16px 16px; }
+
+  /* 서버에서 지금 돌고 있는 작업 */
+  h2 { font-size: 13px; margin: 2px 0 0; color: var(--dim); font-weight: 600; }
+  .job { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+         display: grid; grid-template-columns: 96px 96px 1fr; gap: 12px; padding: 10px 12px;
+         align-items: center; }
+  .job.busy { border-color: var(--warn); }
+  .thumb { width: 96px; height: 96px; border-radius: 7px; background: #0e1116;
+           border: 1px solid var(--line); object-fit: cover; }
+  .thumb.none { display: grid; place-items: center; color: #4d5663; font-size: 11px; }
+  .jobinfo { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .jobtop { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .jobtop .id { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .badge { font-size: 11px; border-radius: 4px; padding: 1px 7px; border: 1px solid var(--line); }
+  .badge.ok { color: var(--good); border-color: var(--good); }
+  .badge.run { color: var(--warn); border-color: var(--warn); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+  .steps { display: flex; gap: 5px; flex-wrap: wrap; }
+  .st { font-size: 11px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--line);
+        color: #59606c; }
+  .st.done { color: var(--good); border-color: #2f5b3a; background: #17241b; }
+  .st.doing { color: var(--warn); border-color: #5d4a1f; background: #241f12;
+              animation: pulse 1.2s ease-in-out infinite; }
+  .st.fail { color: var(--bad); border-color: #5b2f2c; background: #241717; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .err { color: var(--bad); font-size: 12px; }
 </style>
 
 <header>
@@ -58,7 +84,12 @@
   <div class="queue" id="queue"><span class="chip">운영 큐 확인 중…</span></div>
 </header>
 
-<main id="cases"></main>
+<main>
+  <h2 id="livetitle">서버 작업 — 사진을 올리면 여기서 단계가 켜집니다</h2>
+  <div id="live" style="display:flex;flex-direction:column;gap:10px"></div>
+  <h2 style="margin-top:6px">내려받은 산출물</h2>
+  <div id="cases" style="display:flex;flex-direction:column;gap:14px"></div>
+</main>
 <p class="note" id="note"></p>
 
 <script type="importmap">
@@ -254,9 +285,95 @@ async function drawCases() {
     : 'tools/_work 에 세션 폴더나 tripo_trial_* 폴더가 없습니다.';
 }
 
-function tick() { drawQueue(); drawCases(); }
+// ── 서버에서 돌고 있는 작업 ─────────────────────────────────────────
+// 파이프라인 순서 그대로. model_pipeline.py 가 steps 에 적는 이름과 맞춘다.
+const STAGES = [['tpose', 'T포즈'], ['model', '3D 생성'], ['prerigcheck', '리깅 검사'],
+                ['rig', '리깅'], ['animation', '앉기'], ['delivery', '전달']];
+const DONE = new Set(['succeeded', 'done']);
+const DOING = new Set(['submitting', 'submitted', 'running']);
+
+function thumb(sid, files, stem) {
+  const name = files.find(f => f.startsWith(stem + '.'));
+  if (!name) {
+    const box = el('div', 'thumb none', stem === 'front' ? '사진 대기' : 'T포즈 대기');
+    return box;
+  }
+  const img = el('img', 'thumb');
+  img.src = `/api/remote?sid=${sid}&name=${name}`;
+  img.loading = 'lazy';
+  img.title = name;
+  // 아직 서버에 없으면 404 가 온다. 다음 회차에 다시 그린다.
+  img.onerror = () => img.replaceWith(el('div', 'thumb none', '받는 중'));
+  return img;
+}
+
+let jobSig = '';
+
+async function drawJobs() {
+  let data;
+  try { data = await (await fetch('/api/jobs')).json(); }
+  catch { data = { error: '중계 서버에 연결하지 못했습니다' }; }
+  const root = document.getElementById('live');
+  const title = document.getElementById('livetitle');
+
+  if (data.error) {
+    // ssh 키가 없거나 서버가 안 보이는 상태. 아래 로컬 카드는 그대로 동작한다.
+    if (jobSig !== 'err') {
+      jobSig = 'err';
+      root.textContent = '';
+      root.append(el('div', 'note', '서버 작업을 읽지 못했습니다 — ssh 키 인증을 확인하세요'));
+    }
+    return;
+  }
+
+  const jobs = data.jobs || [];
+  // 내용이 그대로면 다시 그리지 않는다. 썸네일이 매번 깜빡이면 못 본다.
+  const next = JSON.stringify(jobs.map(j => [j.sid, j.state, j.steps, j.files, j.model_bytes]));
+  if (next === jobSig) return;
+  jobSig = next;
+
+  const busy = jobs.filter(j => j.state === 'running' || j.state === 'queued').length;
+  title.textContent = busy
+    ? `서버 작업 — 지금 ${busy}건 처리 중`
+    : '서버 작업 — 사진을 올리면 여기서 단계가 켜집니다';
+
+  root.textContent = '';
+  for (const job of jobs) {
+    const card = el('div', 'job' + (job.state === 'running' ? ' busy' : ''));
+    card.append(thumb(job.sid, job.files, 'front'));
+    card.append(thumb(job.sid, job.files, 'tpose'));
+
+    const info = el('div', 'jobinfo');
+    const top = el('div', 'jobtop');
+    top.append(el('span', 'id', job.sid.slice(0, 8)));
+    const cls = job.state === 'ready' ? 'ok'
+              : (job.state === 'running' || job.state === 'queued') ? 'run' : 'bad';
+    top.append(el('span', 'badge ' + cls, job.state));
+    if (job.fixture) top.append(el('span', 'badge bad', 'fixture — 사진과 무관한 모델'));
+    if (job.model_bytes) top.append(el('span', 'badge', (job.model_bytes / 1048576).toFixed(1) + ' MB'));
+    top.append(el('span', 'badge', new Date(job.updated * 1000).toLocaleTimeString('ko-KR')));
+    info.append(top);
+
+    const steps = el('div', 'steps');
+    for (const [key, label] of STAGES) {
+      const state = job.steps[key];
+      const mark = el('span', 'st' + (DONE.has(state) ? ' done'
+                                   : DOING.has(state) ? ' doing'
+                                   : state ? ' fail' : ''), label);
+      if (state) mark.title = `${key}: ${state}`;
+      steps.append(mark);
+    }
+    info.append(steps);
+    if (job.error) info.append(el('div', 'err', job.error));
+    card.append(info);
+    root.append(card);
+  }
+}
+
+function tick() { drawQueue(); drawJobs(); drawCases(); }
 tick();
 setInterval(drawQueue, 5000);
+setInterval(drawJobs, 5000);
 setInterval(drawCases, 10000);
 </script>
 </html>

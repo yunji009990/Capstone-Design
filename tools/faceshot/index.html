@@ -22,9 +22,31 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x8a8a8a);
 // 얼굴 인식이 쓰는 건 형태와 명암이라 균일한 조명이 낫다. 스펙큘러는 죽인다.
 // geom 모드는 음영이 유일한 단서라 방향광을 키우고, 나머지는 평평하게 둔다.
-scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbbb, MODE === 'geom' ? 1.2 : 2.6));
-const k = new THREE.DirectionalLight(0xffffff, MODE === 'geom' ? 2.4 : 0.9);
-k.position.set(MODE === 'geom' ? 1.5 : 0, 1, 2); scene.add(k);
+// cafe 모드는 Scene_2 의 주광을 그대로 흉내 낸다 — Directional intensity 2,
+// color RGB(1.288, 0.614, 0.444). 노을 연출이라 빨강이 세고 파랑이 눌려 있다.
+// 씬을 고치기 전에 조명이 얼굴을 얼마나 깎는지 여기서 재 볼 수 있다.
+// cafefill 은 카페 조명을 그대로 두고 인물 정면에만 중립 필 라이트를 더한 것.
+// 노을 분위기를 버리지 않고 얼굴만 되살릴 수 있는지 재기 위한 모드다.
+// 카페 조명이 얼굴을 깎는 원인이 색인지 대비인지 가르려고 변형을 따로 둔다.
+//   cafe        Scene_2 그대로 — 주황 주광 2.0 + 약한 환경광 0.45
+//   cafefill    거기에 정면 백색광을 더함        → 밝기 문제인가
+//   cafeneutral 주광 색만 백색으로               → 색 문제인가
+//   cafeamb     환경광만 중립 수준으로 올림      → 대비 문제인가
+const CAFE = MODE.startsWith('cafe');
+const WARM = new THREE.Color(1.288, 0.614, 0.444);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbbb,
+  MODE === 'cafeamb' ? 2.6 : CAFE ? 0.45 : MODE === 'geom' ? 1.2 : 2.6));
+const k = new THREE.DirectionalLight(
+  MODE === 'cafeneutral' ? 0xffffff : CAFE ? WARM : 0xffffff,
+  CAFE ? 2.0 : MODE === 'geom' ? 2.4 : 0.9);
+k.position.set(MODE === 'geom' ? 1.5 : CAFE ? 1.2 : 0, 1, CAFE ? 1.4 : 2); scene.add(k);
+let fill = null;
+if (MODE === 'cafefill') {
+  // 카메라 쪽에서 얼굴을 비추는 약한 백색광. 유니티에서는 인물 레이어만 비추는
+  // 라이트 하나를 앉는 자리 앞에 두는 것에 해당한다.
+  fill = new THREE.DirectionalLight(0xffffff, 1.5);
+  scene.add(fill);
+}
 const camera = new THREE.PerspectiveCamera(24, 1, 0.005, 100);
 const log = document.getElementById('log');
 
@@ -64,6 +86,8 @@ new GLTFLoader().load(GLB, async (g) => {
     camera.lookAt(center); camera.updateProjectionMatrix();
     // 키 라이트를 카메라 쪽으로 옮긴다. 방위마다 음영이 달라지면 비교가 안 된다.
     k.position.copy(camera.position).add(new THREE.Vector3(0, span*0.3, 0));
+    // 필 라이트는 카메라 자리에서 얼굴을 곧장 비춘다. 방위가 바뀌어도 같은 조건.
+    if (fill) fill.position.copy(camera.position).add(new THREE.Vector3(0, span*0.12, 0));
     renderer.render(scene, camera);
     await fetch(`/save?name=${OUT}_${names[i]}`, {method:'POST', body: renderer.domElement.toDataURL('image/png')});
   }

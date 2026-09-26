@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from . import model_queue, storage
+from . import face_paste, model_queue, storage
 from .tripo import image_extension, image_url
 
 
@@ -22,6 +22,11 @@ def fixture_glb():
         return None
     path = Path(raw)
     return path if path.is_file() else None
+
+
+def flag(name, default):
+    """.env 의 켜고 끄기. 값이 비어 있으면 꺼진 것으로 본다."""
+    return os.environ.get(name, default).strip().lower() not in {"0", "false", "no", "off", ""}
 
 
 class SubmissionUnknown(Exception):
@@ -106,6 +111,36 @@ class ModelPipeline:
         self.save()
         return dest
 
+    def transplant(self, sid, tpose_path, photo_path):
+        """T포즈 얼굴 자리에 원본 사진의 얼굴을 얹은 이미지를 돌려준다.
+
+        Tripo 가 보는 얼굴 픽셀을 늘리려는 단계다. 유료 호출이 아니고 결과는 파일 하나라,
+        실패하면 원래 T포즈로 계속 간다 — 사람 하나가 모델을 아예 못 받는 것보다 낫다.
+        효과가 세 사진 중 하나에서만 확인됐다는 점은 face_paste 의 주석에 적어 두었다."""
+        steps = self.job["steps"]
+        record = steps.get("transplant")
+        dest = storage.session_dir(sid) / "tpose_face.png"
+        if record and record.get("state") == "done" and dest.is_file():
+            if hashlib.sha256(dest.read_bytes()).hexdigest() == record["sha256"]:
+                return dest
+        if record and record.get("state") == "skipped":
+            return tpose_path
+        try:
+            info = face_paste.transplant(tpose_path, photo_path, dest)
+        except face_paste.TransplantUnavailable as exc:
+            steps["transplant"] = {"state": "skipped", "reason": "라이브러리 없음: " + str(exc)}
+            self.save()
+            return tpose_path
+        except Exception as exc:
+            # 얼굴을 못 찾는 사진은 있을 수 있다. 여기서 작업을 죽이지 않는다.
+            steps["transplant"] = {"state": "skipped", "reason": str(exc)[:200]}
+            self.save()
+            return tpose_path
+        steps["transplant"] = {"state": "done",
+                               "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(), **info}
+        self.save()
+        return dest
+
     def run(self):
         sid = self.job["session_id"]
         path = storage.find_image(sid)
@@ -116,8 +151,8 @@ class ModelPipeline:
         if "input" not in steps:
             steps["input"] = {"sha256": fingerprint,
                               "pose": os.environ.get("TRIPO_POSE", "preset:sit").strip(),
-                              "tpose": os.environ.get("TRIPO_TPOSE", "1").strip().lower()
-                              not in {"0", "false", "no", "off", ""}}
+                              "tpose": flag("TRIPO_TPOSE", "1"),
+                              "transplant": flag("TRIPO_FACE_TRANSPLANT", "1")}
             self.save()
         elif fingerprint != steps["input"]["sha256"]:
             raise PipelineFailure("입력 이미지가 변경되었습니다. 새 생성 작업이 필요합니다")
@@ -144,7 +179,18 @@ class ModelPipeline:
             artifact = steps["artifact"]
         if not artifact:
             source = self.tpose(sid, path) if steps["input"].get("tpose") else path
-            model_id, result = self.task("model", lambda: self.client.submit_image_to_3d(source))
+            if steps["input"].get("transplant"):
+                source = self.transplant(sid, source, path)
+            # 생성 설정을 .env 로 돌릴 수 있게 둔다. 기본값은 지금 운영값 그대로다.
+            # face_limit=auto 로 두면 Tripo 가 적응적으로 정하는데, 실측에서 195만
+            # 삼각형·79MB 가 나왔다. Quest 에 그대로 못 올리므로 감축 도구를 서버에
+            # 넣기 전에는 켜지 않는다.
+            limit = os.environ.get("TRIPO_FACE_LIMIT", "50000").strip().lower()
+            extra = {} if limit == "auto" else {"face_limit": int(limit)}
+            extra["geometry_quality"] = os.environ.get(
+                "TRIPO_GEOMETRY_QUALITY", "standard").strip()
+            model_id, result = self.task(
+                "model", lambda: self.client.submit_image_to_3d(source, **extra))
             pose = steps["input"]["pose"]
             if pose:
                 _, check = self.task("prerigcheck", lambda: self.client._submit({

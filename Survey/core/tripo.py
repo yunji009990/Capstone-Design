@@ -151,7 +151,7 @@ class TripoClient:
         self,
         image_path: Path,
         *,
-        face_limit: int = 50_000,
+        face_limit: int | None = 50_000,
         texture: bool = True,
         pbr: bool = True,
         model_version: str = "v3.1-20260211",
@@ -194,7 +194,6 @@ class TripoClient:
             "type": "image_to_model",
             "file": {"type": ext, "file_token": image_token},
             "model_version": model_version,
-            "face_limit": face_limit,
             "texture": texture,
             "pbr": pbr,
             "texture_quality": texture_quality,
@@ -204,6 +203,11 @@ class TripoClient:
             "model_seed": model_seed,
             "texture_seed": texture_seed,
         }
+        # None 이면 필드를 아예 빼서 Tripo 가 적응적으로 정하게 둔다. 문서에
+        # 「설정하지 않으면 적응적으로 정해진다」고 되어 있고, 실측에서 195만 삼각형이
+        # 나왔다. Quest 예산을 크게 넘으므로 감축 없이 켜지 않는다.
+        if face_limit is not None:
+            body["face_limit"] = face_limit
         log.info("Tripo image_to_model: %s face_limit=%s texture=%s align=%s autofix=%s",
                  model_version, face_limit, texture_quality, texture_alignment, enable_image_autofix)
         resp = self._post_json(ENDPOINT_TASK, body)

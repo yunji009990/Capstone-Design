@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import database, model_queue, storage
+from core import face_paste
 from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
 
 
@@ -26,8 +27,11 @@ class FakeTripo:
     def submit_tpose_image(self, path):
         return self._submit({"type": "tpose"})
 
-    def submit_image_to_3d(self, path):
+    def submit_image_to_3d(self, path, **options):
+        # 실제 클라이언트는 face_limit·geometry_quality 를 받는다. 파이프라인이
+        # .env 로 그 값을 넘기므로 여기서도 받아 두고 무엇이 왔는지 기록한다.
         self.model_input = (path.name, path.read_bytes())
+        self.model_options = options
         return self._submit({"type": "model"})
 
     def rig_model(self, task, **kwargs):
@@ -125,6 +129,41 @@ class ModelWorkerTests(unittest.TestCase):
             ModelPipeline(model_queue.claim("worker-3"), "worker-3", plain, lambda *_: None).run()
         self.assertEqual(plain.submissions, ["model", "animate_prerigcheck", "rig", "animation"])
         self.assertEqual(plain.model_input, ("front.png", b"test-image"))
+
+    def test_face_transplant_failure_never_blocks_the_job(self):
+        """얼굴 이식은 확률을 올리는 시도일 뿐이라, 실패해도 모델은 나와야 한다.
+
+        사진 3장 중 1장에서만 뚜렷하게 좋아졌고(A +0.153 / B -0.042 / C +0.023,
+        노이즈 0.045), 얼굴을 못 찾는 사진도 있을 수 있다. 그때 사람 하나가 모델을
+        아예 못 받는 것이 더 나쁘다."""
+        def unavailable(*args, **kwargs):
+            raise face_paste.TransplantUnavailable("insightface 없음")
+
+        job = self.claim()
+        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "1"}),              patch.object(face_paste, "transplant", unavailable):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(job["steps"]["transplant"]["state"], "skipped")
+        self.assertEqual(model_queue.get_job("person-a")["state"], "ready")
+        # 건너뛰었으면 원래 T포즈 이미지가 생성으로 들어가야 한다.
+        self.assertEqual(self.client.model_input, ("tpose.png", TPOSE_PNG))
+
+    def test_generation_options_come_from_the_environment(self):
+        """face_limit=auto 는 필드를 빼서 Tripo 가 정하게 한다. 실측 195만면·79MB 라
+        감축 도구를 서버에 넣기 전에는 켜면 안 되고, 그래서 기본값은 숫자다."""
+        job = self.claim()
+        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "0"}):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(self.client.model_options,
+                         {"face_limit": 50000, "geometry_quality": "standard"})
+
+        database.insert_session("person-b", {}, True, True, True, 1, True, True)
+        (storage.session_dir("person-b") / "front.png").write_bytes(b"test-image")
+        model_queue.enqueue("person-b")
+        tuned = FakeTripo()
+        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "0", "TRIPO_FACE_LIMIT": "auto",
+                                     "TRIPO_GEOMETRY_QUALITY": "detailed"}):
+            ModelPipeline(model_queue.claim("worker-2"), "worker-2", tuned, lambda *_: None).run()
+        self.assertEqual(tuned.model_options, {"geometry_quality": "detailed"})
 
     def test_submission_response_loss_is_never_automatically_resubmitted(self):
         job = self.claim()
