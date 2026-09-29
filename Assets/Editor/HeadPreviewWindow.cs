@@ -254,10 +254,12 @@ public class HeadPreviewWindow : EditorWindow
             }
             // 스케일을 먼저 건 뒤에 다시 재야 자리가 맞는다.
             Bounds scaled = Measure(root);
-            Vector3 anchor = anchorBottom
+            // 이름을 pivot 으로 둔다. 위 스폰포인트 블록에 anchor 가 이미 있어서
+            // 같은 이름을 쓰면 컴파일이 막힌다(CS0136).
+            Vector3 pivot = anchorBottom
                 ? new Vector3(scaled.center.x, scaled.min.y, scaled.center.z)
                 : scaled.center;
-            root.transform.position += origin - anchor;
+            root.transform.position += origin - pivot;
 
             if (sanitize) Sanitize(root);
             if (previewLight) AddPreviewLight(root, origin);
@@ -267,8 +269,11 @@ public class HeadPreviewWindow : EditorWindow
             Selection.activeGameObject = root;
             SceneView.lastActiveSceneView?.FrameSelected();
             // 어떤 파일을 올렸는지 이름과 시각까지 적는다. 폴더 이름만으로는 구분이 안 된다.
+            Bounds placed = Measure(root);
             _message += $"올렸습니다 — {glbPath}\n{Describe(glbPath)}\n"
-                      + $"원본 높이 {height:F3} → {headHeightMeters:F2}m, 위치 {origin}";
+                      + (keepScale ? $"원본 크기 유지 · 높이 {placed.size.y:F2}m"
+                                   : $"원본 높이 {height:F3} → {headHeightMeters:F2}m")
+                      + $" · {(anchorBottom ? "발" : "중심")} {origin}";
         }
         finally
         {
