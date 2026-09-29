@@ -132,3 +132,10 @@ Server/*.pid
 
 # COZY 데모 씬·에셋 (108MB, 76MB 짜리 씬 하나 포함). 참고용이라 안 올린다 — 필요하면 에셋 스토어에서 다시 임포트
 /Packages/com.distantlands.cozy.core/Content/Demo/
+
+# Blender 자동 백업(.blend1)과 렌더러 텍스처 캐시(.tx). 둘 다 원본에서 다시 만들어지는
+# 파생 파일인데 합쳐서 16MB 라 저장소만 무거워진다. 유니티가 만든 .meta 도 같이 막는다.
+*.blend1
+*.blend1.meta
+*.tx
+*.tx.meta
