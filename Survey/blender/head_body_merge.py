@@ -29,6 +29,9 @@ image_to_model 로 직행한다. 얼굴 픽셀이 70x100 에서 420x550 으로 �
     --from NeckTwist01 목을 찾기 시작할 본 (여기부터 --bone 까지 훑어 가장 가는 곳을 쓴다)
     --scale 1.0        목 굵기로 구한 배율에 곱할 값. 머리가 크거나 작으면 조정
     --lift 0.0         맞춘 뒤 머리를 위아래로 미세 조정 (몸통 키 대비)
+    --head-share 0.13  목 굵기 대신 머리 높이로 배율을 정한다. 몸통 키 대비 비율이며
+                       사람은 보통 0.10~0.13 이다. 머리 없이 만든 몸통에서는 옷깃
+                       구멍이 목보다 좁아 굵기로 맞추면 머리가 작아진다 — 그럴 때 쓴다
 """
 import sys
 
@@ -41,6 +44,7 @@ BONE = "Head"
 FROM = "NeckTwist01"
 EXTRA = 1.0
 LIFT = 0.0
+SHARE = 0.0         # 0 이 아니면 머리 높이를 몸통 키의 이 비율로 맞춘다 (목 굵기 대신)
 STEPS = 12           # 목에서 가장 가는 높이를 찾을 때 몇 군데를 재는지
 
 
@@ -59,13 +63,19 @@ def ring(objects, z, span):
 
 
 def cut_above(obj, z_world):
-    """월드 높이 z 위쪽을 잘라 낸다. 평면에서 실제로 쪼개므로 단면이 평평하다."""
-    local_z = z_world - obj.matrix_world.translation.z
+    """월드 높이 z 위쪽을 잘라 낸다. 평면에서 실제로 쪼개므로 단면이 평평하다.
+
+    평면을 오브젝트 로컬 좌표로 제대로 옮겨야 한다. 평행이동만 빼면 안 된다 —
+    glTF 임포트는 Y-up 을 Z-up 으로 바꾸느라 오브젝트에 회전을 걸어 두는 일이 있고,
+    그러면 자르는 면이 엉뚱한 곳에 놓여 몸통이 통째로 사라진다(실제로 그랬다)."""
+    inverse = obj.matrix_world.inverted()
+    plane_co = inverse @ Vector((0.0, 0.0, z_world))
+    plane_no = (inverse.to_3x3().transposed() @ Vector((0.0, 0.0, 1.0))).normalized()
     mesh = bmesh.new()
     mesh.from_mesh(obj.data)
     bmesh.ops.bisect_plane(
         mesh, geom=list(mesh.verts) + list(mesh.edges) + list(mesh.faces), dist=1e-6,
-        plane_co=Vector((0, 0, local_z)), plane_no=Vector((0, 0, 1)),
+        plane_co=plane_co, plane_no=plane_no,
         clear_inner=False, clear_outer=True)
     mesh.to_mesh(obj.data)
     mesh.free()
@@ -73,7 +83,7 @@ def cut_above(obj, z_world):
 
 
 def main():
-    global BONE, FROM, EXTRA, LIFT
+    global BONE, FROM, EXTRA, LIFT, SHARE
     argv = sys.argv[sys.argv.index("--") + 1:]
     body_path, head_path, dst = argv[0], argv[1], argv[2]
     options = argv[3:]
@@ -91,12 +101,21 @@ def main():
     FROM = take("--from", str, FROM)
     EXTRA = take("--scale", float, EXTRA)
     LIFT = take("--lift", float, LIFT)
+    SHARE = take("--head-share", float, SHARE)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
     bpy.ops.import_scene.gltf(filepath=body_path)
     armature = next((o for o in bpy.context.scene.objects if o.type == "ARMATURE"), None)
-    body_meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+    # 스킨이 걸린 메시만 몸통으로 본다. 작업 중 남은 잔재(이 프로젝트의 몸통에는
+    # 반지름 1 짜리 Icosphere 가 하나 섞여 있었다)를 같이 재면 키가 틀어지고,
+    # 키가 틀어지면 머리 크기가 통째로 어긋난다.
+    body_meshes = [o for o in bpy.context.scene.objects
+                   if o.type == "MESH" and len(o.vertex_groups) > 0]
+    ignored = [o.name for o in bpy.context.scene.objects
+               if o.type == "MESH" and not o.vertex_groups]
+    if ignored:
+        print("[merge] 스킨 없는 메시 무시:", ", ".join(ignored))
     if armature is None or not body_meshes:
         raise SystemExit("몸통에 아마추어나 메시가 없습니다")
     bones = armature.data.bones
@@ -147,8 +166,19 @@ def main():
         raise SystemExit("머리에 목 단면 기록(neck_r)이 없습니다. head_trim.py 로 먼저 자르세요")
     head_neck = Vector((marked["neck_x"], marked["neck_y"], marked["neck_z"]))
     head_radius = float(marked["neck_r"])
-    factor = (body_radius / head_radius) * EXTRA
-    print(f"[merge] 머리 목: z={head_neck.z:.4f} 반지름 {head_radius:.4f} · 배율 {factor:.4f}")
+    if SHARE > 0:
+        # 머리 높이(목 위로 보이는 부분)를 몸통 키의 정해진 비율에 맞춘다.
+        head_top = max(max(v.co.z for v in o.data.vertices) for o in head_meshes)
+        visible = head_top - head_neck.z
+        if visible <= 0:
+            raise SystemExit("머리 목 위쪽 높이를 구하지 못했습니다")
+        factor = (body_h * SHARE / visible) * EXTRA
+        print(f"[merge] 머리 목: z={head_neck.z:.4f} · 목 위 높이 {visible:.4f} "
+              f"· 목표 비율 {SHARE:.3f} · 배율 {factor:.4f}")
+    else:
+        factor = (body_radius / head_radius) * EXTRA
+        print(f"[merge] 머리 목: z={head_neck.z:.4f} 반지름 {head_radius:.4f} "
+              f"· 배율 {factor:.4f}")
 
     for obj in head_meshes:
         obj.scale = (factor, factor, factor)

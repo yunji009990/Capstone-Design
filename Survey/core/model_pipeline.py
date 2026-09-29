@@ -241,7 +241,17 @@ class ModelPipeline:
         if body is None:
             raise PipelineFailure("HEAD_BODY_GLB 가 설정되지 않았습니다")
         partial = dest.with_suffix(".glb.part")
-        run_blender("head_body_merge.py", body, head_path, partial)
+        # 본 이름과 머리 비율은 몸통 자산마다 다르다. Tripo 리깅은 Head/NeckTwist01,
+        # 사람이 만든 리그는 head.x/neck.x 처럼 규격이 제각각이라 설정으로 뺀다.
+        options = ["--bone", os.environ.get("HEAD_BODY_BONE", "Head").strip() or "Head",
+                   "--from", os.environ.get("HEAD_BODY_FROM", "NeckTwist01").strip()
+                   or "NeckTwist01"]
+        share = os.environ.get("HEAD_BODY_SHARE", "").strip()
+        if share:
+            # 머리 없이 만든 몸통은 옷깃 구멍이 목보다 좁아 굵기로 맞추면 머리가 작아진다.
+            # 그럴 때는 머리 높이를 몸통 키 대비 비율로 지정한다(사람은 0.10~0.13).
+            options += ["--head-share", share]
+        run_blender("head_body_merge.py", body, head_path, partial, *options)
         if not partial.is_file() or partial.read_bytes()[:4] != b"glTF":
             raise PipelineFailure("합치기 결과가 GLB 가 아닙니다")
         if partial.stat().st_size > 100 * 1024 * 1024:

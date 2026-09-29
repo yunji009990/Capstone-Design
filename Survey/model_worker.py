@@ -22,7 +22,8 @@ def load_settings():
                # 머리 경로(TRIPO_PIPELINE=head)용. 몸통 자산과 Blender 가 있어야 돌아가고,
                # 없으면 전신 경로로 내려가며 그 사유가 작업 기록에 남는다.
                "TRIPO_PIPELINE", "HEAD_BODY_GLB", "BLENDER_BIN",
-               "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT"}
+               "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT",
+               "HEAD_BODY_BONE", "HEAD_BODY_FROM", "HEAD_BODY_SHARE"}
     values = {}
     if path.is_file():
         for line in path.read_text(encoding="utf-8-sig").splitlines():

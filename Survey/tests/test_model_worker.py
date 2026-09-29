@@ -207,8 +207,15 @@ class ModelWorkerTests(unittest.TestCase):
         calls = []
 
         def fake_blender(script, *args, **kwargs):
+            # 두 스크립트 모두 「입력들… 출력 [옵션들]」 순서다. 옵션 앞의 마지막
+            # 위치 인자가 출력이다 — 첫 .glb 를 잡으면 입력에 덮어쓰게 된다.
             calls.append(script)
-            Path(args[-1]).write_bytes(b"glTF-merged")
+            positional = []
+            for value in args:
+                if str(value).startswith("--"):
+                    break
+                positional.append(value)
+            Path(positional[-1]).write_bytes(b"glTF-merged")
             return ""
 
         def fake_cutout(photo, dest, **kwargs):
