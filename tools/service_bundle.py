@@ -21,6 +21,8 @@ def files_for(area):
         paths += [ROOT / "Web/static" / name for name in ("index.html", "admin.html", "after.html",
                                                           "style.css", "presets_v2.json")]
         paths += sorted((ROOT / "Survey/core").glob("*.py"))
+        # Blender 배치 스크립트. 워커가 subprocess 로 부른다 — 임포트하지 않는다.
+        paths += sorted((ROOT / "Survey/blender").glob("*.py"))
         paths += sorted((ROOT / "Server/registration").glob("*.py"))
         paths += [ROOT / "Server" / name for name in (
             "session_server.py", "service.sh", "platform.sh", "web_start.sh", "web_stop.sh",

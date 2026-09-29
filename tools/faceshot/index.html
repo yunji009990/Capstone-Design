@@ -67,17 +67,29 @@ new GLTFLoader().load(GLB, async (g) => {
     }
   });
   // 스킨 메시라 Box3 가 안 맞는다. 머리 뼈가 있으면 그걸 쓰고, 없으면 지오메트리 바운즈.
+  // fit=all 은 바운즈 전체를 화면에 담는다. 기본값은 얼굴을 크게 잡는 전신 가정
+  // (맨 위에서 10.5% 지점이 얼굴)인데, 머리만 있는 모델이나 몸통만 볼 때는 그게
+  // 성립하지 않아 정수리만 찍힌다. head 는 예전 이름이라 같이 받는다.
+  const FIT = (P.get('fit') || 'body') === 'head' ? 'all' : (P.get('fit') || 'body');
   let head = null;
   g.scene.traverse(o => { if (o.isBone && /head/i.test(o.name) && !head) head = o; });
   g.scene.updateMatrixWorld(true);
-  let center = new THREE.Vector3(), span = 1;
-  if (head) { head.getWorldPosition(center); }
-  else {
+  let center = new THREE.Vector3(), span = 1, dist;
+  if (FIT === 'all') {
+    const box = new THREE.Box3().setFromObject(g.scene, true);
+    span = Math.max(box.max.y - box.min.y, box.max.x - box.min.x);
+    box.getCenter(center);
+    // FOV 24°, 여백 조금. (span/2)/tan(12°) ≈ span*2.35
+    dist = span * 2.5;
+  } else if (head) {
+    head.getWorldPosition(center);
+    dist = span * 0.62;
+  } else {
     const box = new THREE.Box3().setFromObject(g.scene, true);
     span = box.max.y - box.min.y;
     center.set((box.min.x+box.max.x)/2, box.max.y - span*0.105, (box.min.z+box.max.z)/2);
+    dist = span * 0.62;
   }
-  const dist = span * 0.62;
   // 어느 쪽이 정면인지 모델마다 다르다. 네 방향을 찍어 두고 얼굴 검출이 고르게 한다.
   const names = ['az0','az90','az180','az270'];
   for (let i = 0; i < 4; i++) {

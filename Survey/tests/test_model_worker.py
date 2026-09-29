@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import database, model_queue, storage
 from core import face_paste
+from core.head_cutout import CutoutFailed
 from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
 
 
@@ -186,6 +187,58 @@ class ModelWorkerTests(unittest.TestCase):
             ModelPipeline(job, "worker-1", self.client, lambda *_: delivered.append(True)).run()
         self.assertEqual(delivered, [])
         self.assertNotEqual(database.get_session("person-a")["model_status"], "ready")
+
+    def test_head_pipeline_falls_back_loudly_when_the_body_asset_is_missing(self):
+        """머리 경로를 원했는데 몸통이 없으면 전신 경로로 내려간다. 조용히 내려가면
+        나중에 왜 얼굴이 그대로인지 알 수 없으므로 사유를 기록에 남겨야 한다."""
+        job = self.claim()
+        with patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": ""}):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(job["steps"]["input"]["pipeline"], "full")
+        self.assertIn("HEAD_BODY_GLB", job["steps"]["input"]["pipeline_note"])
+        self.assertIn("tpose", self.client.submissions)
+
+    def test_head_pipeline_skips_tripo_rigging_and_uses_the_fixed_body(self):
+        """머리 경로에서는 몸통이 이미 리깅되어 있으므로 prerigcheck/rig/retarget 을
+        부르지 않는다. 운영 실패 8건 중 6건이 그 단계였고 크레딧도 95에서 60으로 준다."""
+        body = Path(self.temp.name) / "body.glb"
+        body.write_bytes(b"glTF-body")
+        job = self.claim()
+        calls = []
+
+        def fake_blender(script, *args, **kwargs):
+            calls.append(script)
+            Path(args[-1]).write_bytes(b"glTF-merged")
+            return ""
+
+        def fake_cutout(photo, dest, **kwargs):
+            dest.write_bytes(TPOSE_PNG)
+            return {"file": dest.name}
+
+        with (patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": str(body),
+                                     "BLENDER_BIN": sys.executable}),
+              patch("core.model_pipeline.run_blender", fake_blender),
+              patch("core.head_cutout.cutout", fake_cutout)):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+
+        self.assertEqual(job["steps"]["input"]["pipeline"], "head")
+        self.assertEqual(self.client.submissions, ["model"])
+        self.assertEqual(calls, ["head_trim.py", "head_body_merge.py"])
+        self.assertNotIn("tpose", job["steps"])
+
+    def test_head_pipeline_stops_when_no_face_is_found(self):
+        """컷아웃은 머리 경로의 전제다. 얼굴 이식과 달리 건너뛰고 계속할 수 없으므로
+        작업을 세우고 사유를 남긴다 — 어깨가 남으면 몸통과 겹친 흉상이 나간다."""
+        body = Path(self.temp.name) / "body.glb"
+        body.write_bytes(b"glTF-body")
+        job = self.claim()
+
+        with (patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": str(body),
+                                     "BLENDER_BIN": sys.executable}),
+              patch("core.head_cutout.cutout", side_effect=CutoutFailed("얼굴 없음"))):
+            with self.assertRaises(PipelineFailure):
+                ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(self.client.submissions, [])
 
     def test_deleted_person_loses_job_lease_and_cannot_be_queued(self):
         job = self.claim()

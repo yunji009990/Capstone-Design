@@ -9,3 +9,10 @@ onnxruntime==1.30.0
 opencv-python-headless==5.0.0.93
 scikit-image==0.26.0
 insightface==2.0
+
+# 머리 오려내기(core/head_cutout.py)용. 배경·머리카락·몸피부·얼굴피부·옷을 갈라
+# 옷과 어깨만 지운다. 어깨가 남으면 흉상이 만들어져 고정 몸통과 겹친다.
+# 분할 모델(selfie_multiclass_256x256.tflite, 약 16MB)은 따로 받아 HEAD_CUTOUT_MODEL
+# 로 가리켜야 한다 — 저장소에 넣지 않는다.
+#   curl -sSL -o <경로>/selfie_multiclass_256x256.tflite #     https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite
+mediapipe==1.0.1

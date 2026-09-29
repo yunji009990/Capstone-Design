@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
-from . import face_paste, model_queue, storage
+from . import face_paste, head_cutout, model_queue, storage
 from .tripo import image_extension, image_url
+
+BLENDER_DIR = Path(__file__).resolve().parents[1] / "blender"
 
 
 def fixture_glb():
@@ -27,6 +31,53 @@ def fixture_glb():
 def flag(name, default):
     """.env 의 켜고 끄기. 값이 비어 있으면 꺼진 것으로 본다."""
     return os.environ.get(name, default).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def body_glb():
+    """머리를 얹을 고정 몸통. HEAD_BODY_GLB 가 가리키는 리깅된 GLB.
+
+    사람마다 전신을 새로 만들지 않고 이 하나를 돌려 쓴다. 없으면 머리 경로를 쓸 수 없다."""
+    raw = os.environ.get("HEAD_BODY_GLB", "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_file() else None
+
+
+def pipeline_mode():
+    """'head' 면 머리만 만들어 고정 몸통에 얹고, 'full' 이면 예전처럼 전신을 만든다.
+
+    머리 경로는 몸통 자산과 Blender 가 있어야 돌아간다. 둘 중 하나라도 없으면 전신
+    경로로 내려간다 — 조용히 내려가면 안 되므로 호출부가 사유를 기록에 남긴다.
+    """
+    wanted = os.environ.get("TRIPO_PIPELINE", "head").strip().lower() or "head"
+    if wanted != "head":
+        return "full", ""
+    if body_glb() is None:
+        return "full", "HEAD_BODY_GLB 가 없어 전신 경로를 씁니다"
+    if shutil.which(blender_bin()) is None and not Path(blender_bin()).is_file():
+        return "full", "Blender 실행 파일이 없어 전신 경로를 씁니다"
+    return "head", ""
+
+
+def blender_bin():
+    return os.environ.get("BLENDER_BIN", "blender").strip() or "blender"
+
+
+def run_blender(script, *args, timeout=900):
+    """Blender 를 배치로 돌린다. 결과 파일은 호출부가 확인한다."""
+    command = [blender_bin(), "--background", "--python", str(BLENDER_DIR / script), "--",
+               *[str(a) for a in args]]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise PipelineFailure("Blender 를 찾지 못했습니다: " + str(exc)) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PipelineFailure(f"{script}: 시간 초과") from exc
+    if done.returncode != 0:
+        tail = (done.stdout or "")[-400:] + (done.stderr or "")[-400:]
+        raise PipelineFailure(f"{script}: 실패 · {tail.strip()[:400]}")
+    return done.stdout
 
 
 class SubmissionUnknown(Exception):
@@ -141,6 +192,63 @@ class ModelPipeline:
         self.save()
         return dest
 
+    def cutout(self, sid, photo):
+        """사진에서 머리카락·얼굴·목만 오려 낸 PNG 를 돌려준다.
+
+        어깨와 상의가 남으면 흉상이 만들어져 고정 몸통과 겹친다. 머리 경로에서는 이
+        단계가 선택이 아니라 전제라, 실패하면 작업을 세운다 — 얼굴 이식과 달리 건너뛰고
+        계속할 방법이 없다."""
+        steps = self.job["steps"]
+        dest = storage.session_dir(sid) / "head_input.png"
+        record = steps.get("cutout")
+        if record and record.get("state") == "done" and dest.is_file():
+            if hashlib.sha256(dest.read_bytes()).hexdigest() == record["sha256"]:
+                return dest
+        try:
+            info = head_cutout.cutout(photo, dest, fit=os.environ.get(
+                "HEAD_CUTOUT_FIT", "portrait").strip() or "portrait")
+        except head_cutout.CutoutUnavailable as exc:
+            raise PipelineFailure("머리 오려내기 준비물이 없습니다: " + str(exc)[:200]) from exc
+        except head_cutout.CutoutFailed as exc:
+            raise PipelineFailure("사진에서 얼굴을 찾지 못했습니다: " + str(exc)[:200]) from exc
+        steps["cutout"] = {"state": "done",
+                           "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(), **info}
+        self.save()
+        return dest
+
+    def trim(self, sid, head_path):
+        """생성된 머리에서 Tripo 가 지어낸 옷을 잘라 내고 목 단면을 기록한다.
+
+        사진에서 옷을 지워도 생성 모델이 다시 만들어 낸다 — 닫힌 형상을 내놓아야 하므로
+        목 아래를 무언가로 끝내기 때문이다. 만든 뒤 자르는 편이 확실하다."""
+        steps = self.job["steps"]
+        dest = storage.session_dir(sid) / "head_trim.glb"
+        record = steps.get("trim")
+        if record and record.get("state") == "done" and dest.is_file():
+            if hashlib.sha256(dest.read_bytes()).hexdigest() == record["sha256"]:
+                return dest
+        run_blender("head_trim.py", head_path, dest)
+        if not dest.is_file() or dest.read_bytes()[:4] != b"glTF":
+            raise PipelineFailure("머리 다듬기 결과가 GLB 가 아닙니다")
+        steps["trim"] = {"state": "done", "bytes": dest.stat().st_size,
+                         "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()}
+        self.save()
+        return dest
+
+    def merge(self, sid, head_path, dest):
+        """다듬은 머리를 고정 몸통에 얹어 최종 GLB 를 만든다."""
+        body = body_glb()
+        if body is None:
+            raise PipelineFailure("HEAD_BODY_GLB 가 설정되지 않았습니다")
+        partial = dest.with_suffix(".glb.part")
+        run_blender("head_body_merge.py", body, head_path, partial)
+        if not partial.is_file() or partial.read_bytes()[:4] != b"glTF":
+            raise PipelineFailure("합치기 결과가 GLB 가 아닙니다")
+        if partial.stat().st_size > 100 * 1024 * 1024:
+            raise PipelineFailure("모델 파일 크기 제한 초과")
+        os.replace(partial, dest)
+        return dest
+
     def run(self):
         sid = self.job["session_id"]
         path = storage.find_image(sid)
@@ -149,10 +257,16 @@ class ModelPipeline:
         fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
         steps = self.job["steps"]
         if "input" not in steps:
+            mode, note = pipeline_mode()
             steps["input"] = {"sha256": fingerprint,
+                              "pipeline": mode,
                               "pose": os.environ.get("TRIPO_POSE", "preset:sit").strip(),
                               "tpose": flag("TRIPO_TPOSE", "1"),
                               "transplant": flag("TRIPO_FACE_TRANSPLANT", "1")}
+            # 머리 경로를 원했는데 못 쓴 이유는 반드시 남긴다. 조용히 옛 경로로
+            # 내려가면 왜 얼굴이 그대로인지 나중에 알 방법이 없다(고정 GLB 때 겪었다).
+            if note:
+                steps["input"]["pipeline_note"] = note
             self.save()
         elif fingerprint != steps["input"]["sha256"]:
             raise PipelineFailure("입력 이미지가 변경되었습니다. 새 생성 작업이 필요합니다")
@@ -178,9 +292,16 @@ class ModelPipeline:
             self.save()
             artifact = steps["artifact"]
         if not artifact:
-            source = self.tpose(sid, path) if steps["input"].get("tpose") else path
-            if steps["input"].get("transplant"):
-                source = self.transplant(sid, source, path)
+            mode = steps["input"].get("pipeline", "full")
+            if mode == "head":
+                # 머리만 만들어 미리 리깅된 몸통에 얹는다. T포즈를 거치지 않으므로
+                # 원본 사진이 image_to_model 로 직행하고, Tripo 가 보는 얼굴이
+                # 70x100px 에서 420x550px 로 올라간다.
+                source = self.cutout(sid, path)
+            else:
+                source = self.tpose(sid, path) if steps["input"].get("tpose") else path
+                if steps["input"].get("transplant"):
+                    source = self.transplant(sid, source, path)
             # 생성 설정을 .env 로 돌릴 수 있게 둔다. 기본값은 지금 운영값 그대로다.
             # face_limit=auto 로 두면 Tripo 가 적응적으로 정하는데, 실측에서 195만
             # 삼각형·79MB 가 나왔다. Quest 에 그대로 못 올리므로 감축 도구를 서버에
@@ -191,29 +312,47 @@ class ModelPipeline:
                 "TRIPO_GEOMETRY_QUALITY", "standard").strip()
             model_id, result = self.task(
                 "model", lambda: self.client.submit_image_to_3d(source, **extra))
-            pose = steps["input"]["pose"]
-            if pose:
-                _, check = self.task("prerigcheck", lambda: self.client._submit({
-                    "type": "animate_prerigcheck", "original_model_task_id": model_id}))
-                out = check.get("output") or {}
-                if not out.get("riggable"):
-                    raise PipelineFailure("리깅할 수 없는 모델입니다. 입력 자세를 확인해 주세요")
-                rig_id, _ = self.task("rig", lambda: self.client.rig_model(
-                    model_id, rig_type=out.get("rig_type") or "biped"))
-                _, result = self.task("animation", lambda: self.client.retarget_animation(rig_id, pose))
+            if mode != "head":
+                # 전신 경로에서만 Tripo 리깅을 부른다. 머리 경로는 몸통이 이미
+                # 리깅되어 있어 prerigcheck/rig/retarget 이 통째로 빠진다 —
+                # 운영 실패 8건 중 6건이 여기서 났고, 크레딧도 95에서 60으로 준다.
+                pose = steps["input"]["pose"]
+                if pose:
+                    _, check = self.task("prerigcheck", lambda: self.client._submit({
+                        "type": "animate_prerigcheck", "original_model_task_id": model_id}))
+                    out = check.get("output") or {}
+                    if not out.get("riggable"):
+                        raise PipelineFailure("리깅할 수 없는 모델입니다. 입력 자세를 확인해 주세요")
+                    rig_id, _ = self.task("rig", lambda: self.client.rig_model(
+                        model_id, rig_type=out.get("rig_type") or "biped"))
+                    _, result = self.task(
+                        "animation", lambda: self.client.retarget_animation(rig_id, pose))
             output = result.get("output") or {}
             url = output.get("pbr_model") or output.get("model")
             if not isinstance(url, str) or not url:
                 raise PipelineFailure("완성된 모델 다운로드 주소가 없습니다")
-            partial = dest.with_suffix(".glb.part")
-            self.client.download_glb(url, partial)
-            self.check()
-            with partial.open("rb") as stream:
-                if stream.read(4) != b"glTF":
-                    raise PipelineFailure("다운로드한 파일이 GLB가 아닙니다")
-            if partial.stat().st_size > 100 * 1024 * 1024:
-                raise PipelineFailure("모델 파일 크기 제한 초과")
-            os.replace(partial, dest)
+            if mode == "head":
+                # 받은 것은 머리뿐이다. 옷을 잘라 내고 고정 몸통에 얹어야 model.glb 가 된다.
+                raw = storage.session_dir(sid) / "head_raw.glb"
+                if not raw.is_file():
+                    partial = raw.with_suffix(".glb.part")
+                    self.client.download_glb(url, partial)
+                    self.check()
+                    with partial.open("rb") as stream:
+                        if stream.read(4) != b"glTF":
+                            raise PipelineFailure("다운로드한 파일이 GLB가 아닙니다")
+                    os.replace(partial, raw)
+                self.merge(sid, self.trim(sid, raw), dest)
+            else:
+                partial = dest.with_suffix(".glb.part")
+                self.client.download_glb(url, partial)
+                self.check()
+                with partial.open("rb") as stream:
+                    if stream.read(4) != b"glTF":
+                        raise PipelineFailure("다운로드한 파일이 GLB가 아닙니다")
+                if partial.stat().st_size > 100 * 1024 * 1024:
+                    raise PipelineFailure("모델 파일 크기 제한 초과")
+                os.replace(partial, dest)
             steps["artifact"] = {"sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
                                  "bytes": dest.stat().st_size}
             self.save()

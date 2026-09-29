@@ -18,7 +18,11 @@ def load_settings():
     allowed = {"TRIPO_API_KEY", "TRIPO_POSE", "TRIPO_TPOSE", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR",
                "MODEL_FIXTURE_GLB",
                "TRIPO_FACE_TRANSPLANT", "TRIPO_FACE_LIMIT",
-               "TRIPO_GEOMETRY_QUALITY"}
+               "TRIPO_GEOMETRY_QUALITY",
+               # 머리 경로(TRIPO_PIPELINE=head)용. 몸통 자산과 Blender 가 있어야 돌아가고,
+               # 없으면 전신 경로로 내려가며 그 사유가 작업 기록에 남는다.
+               "TRIPO_PIPELINE", "HEAD_BODY_GLB", "BLENDER_BIN",
+               "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT"}
     values = {}
     if path.is_file():
         for line in path.read_text(encoding="utf-8-sig").splitlines():
