@@ -29,22 +29,30 @@ image_to_model 로 직행한다. 얼굴 픽셀이 70x100 에서 420x550 으로 �
     --from NeckTwist01 목을 찾기 시작할 본 (여기부터 --bone 까지 훑어 가장 가는 곳을 쓴다)
     --scale 1.0        목 굵기로 구한 배율에 곱할 값. 머리가 크거나 작으면 조정
     --lift 0.0         맞춘 뒤 머리를 위아래로 미세 조정 (몸통 키 대비)
+    --yaw -90          머리를 위 축 기준으로 돌린다. Tripo 머리와 몸통이 보는 방향이
+                       다르면 옆을 보고 붙는다
+    --out-scale 0.7    완성본 전체에 배율을 건다. 유니티에서 매번 손으로 줄이지 않도록
+                       씬에서 쓰는 크기 그대로 내보낼 때
     --head-share 0.13  목 굵기 대신 머리 높이로 배율을 정한다. 몸통 키 대비 비율이며
                        사람은 보통 0.10~0.13 이다. 머리 없이 만든 몸통에서는 옷깃
                        구멍이 목보다 좁아 굵기로 맞추면 머리가 작아진다 — 그럴 때 쓴다
 """
 import sys
 
+import math
+
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 BONE = "Head"
 FROM = "NeckTwist01"
 EXTRA = 1.0
 LIFT = 0.0
 SHARE = 0.0         # 0 이 아니면 머리 높이를 몸통 키의 이 비율로 맞춘다 (목 굵기 대신)
+YAW = 0.0           # 머리를 위 축 기준으로 몇 도 돌릴지. 머리와 몸통이 보는 방향이 다를 때
+OUT_SCALE = 1.0     # 완성본 전체에 걸 배율. 씬에서 쓰는 크기에 맞춰 내보낼 때
 STEPS = 12           # 목에서 가장 가는 높이를 찾을 때 몇 군데를 재는지
 
 
@@ -83,7 +91,7 @@ def cut_above(obj, z_world):
 
 
 def main():
-    global BONE, FROM, EXTRA, LIFT, SHARE
+    global BONE, FROM, EXTRA, LIFT, SHARE, YAW, OUT_SCALE
     argv = sys.argv[sys.argv.index("--") + 1:]
     body_path, head_path, dst = argv[0], argv[1], argv[2]
     options = argv[3:]
@@ -102,6 +110,8 @@ def main():
     EXTRA = take("--scale", float, EXTRA)
     LIFT = take("--lift", float, LIFT)
     SHARE = take("--head-share", float, SHARE)
+    YAW = take("--yaw", float, YAW)
+    OUT_SCALE = take("--out-scale", float, OUT_SCALE)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
@@ -180,16 +190,18 @@ def main():
         print(f"[merge] 머리 목: z={head_neck.z:.4f} 반지름 {head_radius:.4f} "
               f"· 배율 {factor:.4f}")
 
+    # 크기 → 회전 → 이동을 한 행렬로 건다. 나눠서 걸면 회전이 목 위치를 옮겨 버려
+    # 이동량을 다시 구해야 한다. 회전한 목 위치를 그대로 써서 옮기면 어긋나지 않는다.
+    turn = Matrix.Rotation(math.radians(YAW), 4, "Z")
+    scale = Matrix.Scale(factor, 4)
+    offset = body_centre - (turn @ (head_neck * factor)) + Vector((0, 0, body_h * LIFT))
+    place = Matrix.Translation(offset) @ turn @ scale
     for obj in head_meshes:
-        obj.scale = (factor, factor, factor)
+        obj.matrix_world = place @ obj.matrix_world
     bpy.context.view_layer.update()
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-
-    offset = body_centre - head_neck * factor + Vector((0, 0, body_h * LIFT))
-    for obj in head_meshes:
-        obj.location = offset
-    bpy.context.view_layer.update()
-    bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if YAW:
+        print(f"[merge] 머리를 위 축 기준 {YAW:+.0f}° 돌렸다")
 
     top = max(max((o.matrix_world @ v.co).z for v in o.data.vertices) for o in head_meshes)
     share = 100 * (top - body_centre.z) / body_h
@@ -207,6 +219,19 @@ def main():
         obj.parent = armature
         obj.matrix_parent_inverse = armature.matrix_world.inverted()
         print(f"[merge] '{obj.name}' 정점 {len(obj.data.vertices)} 를 '{BONE}' 에 묶음")
+
+    if abs(OUT_SCALE - 1.0) > 1e-6:
+        # 최상위에 빈 오브젝트를 하나 두고 거기에만 배율을 건다. 스킨이 걸린 메시와
+        # 아마추어에 직접 걸어 적용하면 바인드가 틀어질 수 있다. glTF 로 나가면
+        # 루트 노드의 스케일로 실려서 유니티가 그대로 읽는다.
+        holder = bpy.data.objects.new("scale_root", None)
+        bpy.context.scene.collection.objects.link(holder)
+        for obj in list(bpy.context.scene.objects):
+            if obj is not holder and obj.parent is None:
+                obj.parent = holder
+        holder.scale = (OUT_SCALE, OUT_SCALE, OUT_SCALE)
+        bpy.context.view_layer.update()
+        print(f"[merge] 완성본 전체에 배율 {OUT_SCALE} 를 걸었다")
 
     bpy.ops.export_scene.gltf(filepath=dst, export_format="GLB", export_yup=True,
                               export_animations=True, export_skins=True)

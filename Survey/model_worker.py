@@ -23,7 +23,8 @@ def load_settings():
                # 없으면 전신 경로로 내려가며 그 사유가 작업 기록에 남는다.
                "TRIPO_PIPELINE", "HEAD_BODY_GLB", "BLENDER_BIN",
                "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT",
-               "HEAD_BODY_BONE", "HEAD_BODY_FROM", "HEAD_BODY_SHARE"}
+               "HEAD_BODY_BONE", "HEAD_BODY_FROM", "HEAD_BODY_SHARE",
+               "HEAD_BODY_YAW", "HEAD_BODY_OUT_SCALE"}
     values = {}
     if path.is_file():
         for line in path.read_text(encoding="utf-8-sig").splitlines():

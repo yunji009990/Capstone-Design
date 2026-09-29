@@ -251,6 +251,14 @@ class ModelPipeline:
             # 머리 없이 만든 몸통은 옷깃 구멍이 목보다 좁아 굵기로 맞추면 머리가 작아진다.
             # 그럴 때는 머리 높이를 몸통 키 대비 비율로 지정한다(사람은 0.10~0.13).
             options += ["--head-share", share]
+        yaw = os.environ.get("HEAD_BODY_YAW", "").strip()
+        if yaw:
+            # 머리와 몸통이 보는 방향이 다르면 옆을 보고 붙는다. 자산 쌍마다 다르다.
+            options += ["--yaw", yaw]
+        out_scale = os.environ.get("HEAD_BODY_OUT_SCALE", "").strip()
+        if out_scale:
+            # 씬에서 쓰는 크기 그대로 내보낸다. 유니티에서 매번 손으로 줄이지 않도록.
+            options += ["--out-scale", out_scale]
         run_blender("head_body_merge.py", body, head_path, partial, *options)
         if not partial.is_file() or partial.read_bytes()[:4] != b"glTF":
             raise PipelineFailure("합치기 결과가 GLB 가 아닙니다")
