@@ -32,14 +32,18 @@ public class HeadPreviewWindow : EditorWindow
     [SerializeField] bool followSpawnPoint = true;
     [SerializeField] bool sanitize = true;
     [SerializeField] bool previewLight;
+    // 합친 전신 캐릭터도 이 창으로 본다. 머리만 볼 때와 두 가지가 다르다 —
+    // 크기를 건드리면 안 되고(이미 실제 키다), 중심이 아니라 발이 바닥에 와야 한다.
+    [SerializeField] bool keepScale;
+    [SerializeField] bool anchorBottom;
 
     bool _busy;
     string _message = "";
     string[] _found;
     string[] _labels;
 
-    [MenuItem("Tools/다시봄/머리 미리보기")]
-    static void Open() => GetWindow<HeadPreviewWindow>("머리 미리보기").minSize = new Vector2(420, 330);
+    [MenuItem("Tools/다시봄/모델 미리보기")]
+    static void Open() => GetWindow<HeadPreviewWindow>("모델 미리보기").minSize = new Vector2(430, 400);
 
     void OnEnable() => Refresh();
 
@@ -52,8 +56,12 @@ public class HeadPreviewWindow : EditorWindow
         var work = new DirectoryInfo(Path.Combine(ProjectRoot(), "tools", "_work"));
         var hits = new System.Collections.Generic.List<FileInfo>();
         if (work.Exists)
+        {
+            // 머리(head*.glb)뿐 아니라 합친 결과(merged*.glb)와 몸통도 잡는다.
+            hits.AddRange(work.GetFiles("*.glb"));
             foreach (var dir in work.GetDirectories())
-                hits.AddRange(dir.GetFiles("head*.glb"));
+                hits.AddRange(dir.GetFiles("*.glb"));
+        }
         hits.Sort((a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
         _found = new string[hits.Count];
         _labels = new string[hits.Count];
@@ -61,7 +69,8 @@ public class HeadPreviewWindow : EditorWindow
         {
             _found[i] = Relative(hits[i].FullName);
             _labels[i] = $"{hits[i].Directory.Name}/{Path.GetFileNameWithoutExtension(hits[i].Name)}"
-                       + $"  ({hits[i].LastWriteTime:MM-dd HH:mm})";
+                       + $"  ({hits[i].LastWriteTime:MM-dd HH:mm}, "
+                       + $"{hits[i].Length / (1024 * 1024)}MB)";
         }
         // 창에 저장된 경로가 더 이상 없으면 가장 새것으로 옮긴다.
         string full = Path.IsPathRooted(glbPath) ? glbPath
@@ -80,7 +89,8 @@ public class HeadPreviewWindow : EditorWindow
 
     void OnGUI()
     {
-        EditorGUILayout.LabelField("머리만 생성한 GLB 를 씬에 띄운다", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("생성한 GLB 를 씬에 띄운다 (머리 · 몸통 · 합친 것)",
+                                   EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
             "씬 파일에는 저장되지 않는다(DontSaveInEditor). 플레이를 눌러도 사라진다.",
             MessageType.None);
@@ -110,9 +120,19 @@ public class HeadPreviewWindow : EditorWindow
         // 언제 만들어진 파일인지 늘 보이게 둔다. "예전 게 올라왔다" 를 눈으로 잡는 유일한 방법이다.
         EditorGUILayout.LabelField(" ", Describe(glbPath), EditorStyles.miniLabel);
 
-        headHeightMeters = EditorGUILayout.Slider("높이 (m)", headHeightMeters, 0.1f, 1.5f);
-        EditorGUILayout.LabelField(" ", "머리카락까지 포함한 전체 높이. 사람 머리는 0.23m 남짓이고 "
-                                        + "긴 머리가 있으면 0.4~0.5m", EditorStyles.miniLabel);
+        keepScale = EditorGUILayout.Toggle("원본 크기 유지", keepScale);
+        using (new EditorGUI.DisabledScope(keepScale))
+            headHeightMeters = EditorGUILayout.Slider("높이 (m)", headHeightMeters, 0.1f, 2.2f);
+        EditorGUILayout.LabelField(" ", keepScale
+            ? "GLB 의 크기를 그대로 쓴다. 합친 전신 모델은 이미 실제 키라 이쪽이 맞다"
+            : "머리카락까지 포함한 전체 높이. 사람 머리는 0.23m 남짓, 긴 머리면 0.4~0.5m",
+            EditorStyles.miniLabel);
+
+        anchorBottom = EditorGUILayout.Toggle("발을 바닥에", anchorBottom);
+        EditorGUILayout.LabelField(" ", anchorBottom
+            ? "모델의 맨 아래가 아래 좌표에 온다. 전신 캐릭터는 이쪽"
+            : "모델의 중심이 아래 좌표에 온다. 머리만 볼 때는 이쪽",
+            EditorStyles.miniLabel);
 
         followSpawnPoint = EditorGUILayout.Toggle("스폰포인트 기준", followSpawnPoint);
         placement = EditorGUILayout.Vector3Field(
@@ -126,6 +146,26 @@ public class HeadPreviewWindow : EditorWindow
         EditorGUILayout.LabelField(" ", "모델에만 닿는 중립 백색광을 함께 올린다. 씬 조명이 "
                                         + "어두워 모델 자체를 판단할 수 없을 때 켠다",
                                    EditorStyles.miniLabel);
+
+        // 머리만 볼 때와 합친 전신을 볼 때는 설정 세 개가 통째로 달라진다. 매번 손으로
+        // 맞추면 틀리기 쉬워 한 번에 바꾼다.
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField("프리셋", GUILayout.Width(EditorGUIUtility.labelWidth - 4));
+            if (GUILayout.Button("전신 (합친 모델)"))
+            {
+                keepScale = true;
+                anchorBottom = true;
+                placement = Vector3.zero;
+            }
+            if (GUILayout.Button("머리만"))
+            {
+                keepScale = false;
+                anchorBottom = false;
+                headHeightMeters = 0.45f;
+                placement = new Vector3(0f, 1.15f, 0f);
+            }
+        }
 
         EditorGUILayout.Space();
         using (new EditorGUI.DisabledScope(_busy))
@@ -196,7 +236,7 @@ public class HeadPreviewWindow : EditorWindow
             // 중심이 지정한 자리에 오게 옮긴다.
             Bounds bounds = Measure(root);
             float height = Mathf.Max(bounds.size.y, 1e-4f);
-            root.transform.localScale = Vector3.one * (headHeightMeters / height);
+            if (!keepScale) root.transform.localScale = Vector3.one * (headHeightMeters / height);
 
             Vector3 origin = placement;
             _message = "";
@@ -212,9 +252,12 @@ public class HeadPreviewWindow : EditorWindow
                 }
                 else _message = "스폰포인트를 못 찾아 월드 좌표로 놓았습니다. ";
             }
-            // 스케일을 먼저 건 뒤에 다시 재야 중심이 맞는다.
+            // 스케일을 먼저 건 뒤에 다시 재야 자리가 맞는다.
             Bounds scaled = Measure(root);
-            root.transform.position += origin - scaled.center;
+            Vector3 anchor = anchorBottom
+                ? new Vector3(scaled.center.x, scaled.min.y, scaled.center.z)
+                : scaled.center;
+            root.transform.position += origin - anchor;
 
             if (sanitize) Sanitize(root);
             if (previewLight) AddPreviewLight(root, origin);
