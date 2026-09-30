@@ -225,10 +225,9 @@ public class PersonaHumanoidProbe : MonoBehaviour
         }
         foreach (var renderer in renderers)
         {
-            var bones = renderer.bones;
-            if (bones == null) continue;
+            if (renderer.bones == null) continue;
             // 뼈 이름을 직접 보지 않고 규격 판별에 맡긴다. 몸통을 바꾸면 이름이 달라진다.
-            if (Matches(renderer.transform.root)) return renderer.transform.root;
+            if (PersonaHumanoid.Matches(renderer.transform.root)) return renderer.transform.root;
         }
         return null;
     }
