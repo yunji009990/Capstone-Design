@@ -174,7 +174,10 @@ class ModelPipeline:
         body = body_glb()
         if body is None:
             raise PipelineFailure("HEAD_BODY_GLB 가 설정되지 않았습니다")
-        partial = dest.with_suffix(".glb.part")
+        # 임시 파일 이름도 .glb 로 끝나야 한다. Blender 의 glTF 내보내기는 경로가
+        # .glb 로 끝나지 않으면 확장자를 붙여 버려서, model.glb.part 로 주면
+        # model.glb.part.glb 를 만들어 놓고 우리는 없는 파일을 찾게 된다(실제로 겪었다).
+        partial = dest.with_name(dest.stem + ".part.glb")
         # 본 이름과 머리 비율은 몸통 자산마다 다르다. Tripo 리깅은 Head/NeckTwist01,
         # 사람이 만든 리그는 head.x/neck.x 처럼 규격이 제각각이라 설정으로 뺀다.
         options = ["--bone", os.environ.get("HEAD_BODY_BONE", "Head").strip() or "Head",

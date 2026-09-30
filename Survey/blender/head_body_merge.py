@@ -122,10 +122,12 @@ def main():
     # 키가 틀어지면 머리 크기가 통째로 어긋난다.
     body_meshes = [o for o in bpy.context.scene.objects
                    if o.type == "MESH" and len(o.vertex_groups) > 0]
+    # 스킨이 걸리지 않은 메시는 키를 잴 때만 뺀다. 지우지는 않는다 — 뼈에 매달린
+    # 소품(안경 같은 것)은 정점 그룹이 없어도 몸통의 일부다.
     ignored = [o.name for o in bpy.context.scene.objects
                if o.type == "MESH" and not o.vertex_groups]
     if ignored:
-        print("[merge] 스킨 없는 메시 무시:", ", ".join(ignored))
+        print("[merge] 키 계산에서 제외(스킨 없음):", ", ".join(ignored))
     if armature is None or not body_meshes:
         raise SystemExit("몸통에 아마추어나 메시가 없습니다")
     bones = armature.data.bones
@@ -232,6 +234,12 @@ def main():
         holder.scale = (OUT_SCALE, OUT_SCALE, OUT_SCALE)
         bpy.context.view_layer.update()
         print(f"[merge] 완성본 전체에 배율 {OUT_SCALE} 를 걸었다")
+
+    # 내보내기 직전에 무엇이 실려 나가는지 적는다. 잔재 메시가 섞여 유니티까지
+    # 간 적이 있어, 결과물에 무엇이 들어 있는지는 눈에 보여야 한다.
+    for obj in bpy.context.scene.objects:
+        if obj.type == "MESH":
+            print(f"[merge] 내보낼 메시: {obj.name} · 정점 {len(obj.data.vertices)}")
 
     bpy.ops.export_scene.gltf(filepath=dst, export_format="GLB", export_yup=True,
                               export_animations=True, export_skins=True)

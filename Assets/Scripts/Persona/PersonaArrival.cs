@@ -227,8 +227,11 @@ public class PersonaArrival : MonoBehaviour
             return;
         }
 
+        // 골반 뼈 이름을 여기 박아 두면 몸통을 바꾸는 순간 높이 보정이 조용히 죽는다.
+        // 대응표에서 가져온다.
+        string hipName = PersonaHumanoid.BoneOf("Hips");
         foreach (var t in _skeleton.GetComponentsInChildren<Transform>(true))
-            if (t.name == "Hip") { _hip = t; break; }
+            if (t.name == hipName) { _hip = t; break; }
 
         _animator = _skeleton.GetComponent<Animator>();
         if (_animator == null) _animator = _skeleton.gameObject.AddComponent<Animator>();

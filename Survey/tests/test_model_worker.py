@@ -51,7 +51,11 @@ def fake_blender(calls):
     """Blender 를 부르는 대신 출력 파일만 만들어 둔다.
 
     두 스크립트 모두 「입력들… 출력 [옵션들]」 순서다. 옵션 앞의 마지막 위치 인자가
-    출력이다 — 첫 .glb 를 잡으면 입력에 덮어쓰게 된다."""
+    출력이다 — 첫 .glb 를 잡으면 입력에 덮어쓰게 된다.
+
+    진짜 Blender 의 glTF 내보내기는 경로가 .glb 로 끝나지 않으면 확장자를 붙인다.
+    그대로 흉내 내지 않으면 임시 파일 이름을 잘못 지어도 검사가 통과해 버린다 —
+    실제로 model.glb.part 로 주는 바람에 운영에서 합치기가 통째로 실패했다."""
     def run(script, *args, **kwargs):
         calls.append(script)
         positional = []
@@ -59,7 +63,10 @@ def fake_blender(calls):
             if str(value).startswith("--"):
                 break
             positional.append(value)
-        Path(positional[-1]).write_bytes(b"glTF-merged")
+        target = Path(positional[-1])
+        if target.suffix.lower() != ".glb":
+            target = target.with_name(target.name + ".glb")
+        target.write_bytes(b"glTF-merged")
         return ""
     return run
 
