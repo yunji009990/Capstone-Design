@@ -1,9 +1,10 @@
 # 웹·Tripo와 대화 AI 서비스 분리
 
-기준일: 2026-09-15. 서비스 분리는 2026-09-12에 **구현·서버 적용·검증을 완료**했다.
+기준일: 2026-09-29. 서비스 분리는 2026-09-12에 **구현·서버 적용·검증을 완료**했다.
 같은 서버에서 웹·인물 등록·Tripo 제작과 대화 AI를 각자 개발·배포·재시작할 수 있도록 분리했다.
 이후 대화 TTS를 재연결하고 생성 스트리밍·대기 리액션을 추가했으며, 등록 웹은 설문 재작성·자동 ID를 적용했다.
 전체 제품 흐름의 후속 설계는 [설문·인물·3D 통합 설계안](설문_인물_3D_통합_설계안.md)을 참고한다.
+현재 상태·검증 범위는 [현재 구현 현황](현재_구현_현황.md), 새 제작 경로는 [머리 생성 파이프라인](Tripo_머리_생성_파이프라인.md)에 있다.
 
 ## 1. 현재 구성
 
@@ -19,9 +20,8 @@ flowchart LR
     end
     Worker --> Tripo[Tripo 외부 API]
     subgraph AI[대화 AI 영역 · ~/capstone-server]
-        Dialogue[대화 API :8002 + STT] --> LLM[Gemma :8001]
-        Dialogue --> TTS[Qwen3-TTS API :8003]
-        TTS --> Engine[vLLM-Omni 엔진 :8004]
+        Dialogue[대화 API :8002 + Whisper STT] --> LLM[Gemma :8001]
+        Dialogue --> TTS[VoxCPM2 TTS :8003]
     end
     Dialogue -->|읽기 전용 인물 API| Registration
     Unity -->|모델 조회| Registration
@@ -32,15 +32,16 @@ flowchart LR
 |---|---|---|---|
 | 웹 8500 | `~/webapp/Web` | `~/venv/web` | 실행 중 |
 | 등록 8000 | `~/webapp/Server/registration` | `~/venv/registration` | 실행 중 |
-| Tripo 작업자 | `~/webapp/Survey/model_worker.py` | `~/venv/tripo` | 실행 중, API 인증 확인 |
+| Tripo 작업자 | `~/webapp/Survey/model_worker.py` | `~/venv/tripo` | 실행 중, 키 설정·head 경로 준비 확인 |
 | 대화 8002 | `~/capstone-server` | `~/venv/dialogue` | 실행 중, 인물 조회 방식 `http` |
 | LLM 8001 | 기존 Gemma/vLLM 프로세스 | `~/venv/vllm` | 기존 프로세스 유지 |
 | TTS API 8003 | `~/capstone-server/tts_server.py` | `~/venv/qwentts` | 실행 중, loopback·PCM 스트리밍 |
-| TTS 엔진 8004 | `~/capstone-server/tts_streaming.yaml` 설정 | `~/venv/qwentts-stream` | TTS API가 관리, 두 단계 생성·디코딩 |
+| 이전 Qwen 엔진 8004 | `~/capstone-server/tts_streaming.yaml` 설정 | `~/venv/qwentts-stream` | 현재 미사용, 복구용 환경 보존 |
 
-상태는 2026-09-15 검증 시점 기준이다. TTS의 설치·예열·복구는 [실시간 스트리밍](TTS_실시간_스트리밍.md)을 따른다.
+상태는 2026-09-29 읽기 전용 확인 기준이다. 현재 VoxCPM2 운영·복구는 [TTS 인계](TTS_작업인계_20260918.md)를 따른다.
 
-3D 생성·리깅 연산은 Tripo가 수행한다. 서버 작업자는 API 요청·진행 관리·파일 다운로드·결과 전달을 담당한다.
+현재 head 경로에서 Tripo는 머리를 생성하고, 서버 작업자는 CPU 얼굴 추출·분할과 Blender 정리·고정 몸체 결합도 수행한다.
+기존 full 경로에서만 Tripo 리깅·동작을 요청한다. 새 head 경로의 웹 등록부터 완성까지 실측은 아직 없다.
 등록 API와 작업자는 대화용 STT/GPU 패키지를 설치하지 않은 환경에서도 실행된다.
 
 ## 2. 각각 작업할 코드
@@ -100,9 +101,9 @@ GLB는 기존 등록 API에서 Unity가 직접 받으며, 대화 AI에 전달하
 
 2026-09-15부터 신규 `POST /session/start`는 UUID4 세션 ID를 서버에서 발급한다.
 비어 있지 않은 `session` 입력은 400으로 거부하고, 호출자는 응답 ID를 이후 조회·모델 전달에 사용한다.
-웹의 `/publish`·`/publish_direct`는 `/persona`가 반환한 `survey_revision`과 같은 설문을 요구한다.
+현재 웹은 `/publish_direct`만 사용하며 `/persona`가 반환한 `survey_revision`과 `preview_revision`에 맞는 설문을 요구한다.
 이 해시는 설문 일치 검사이며 위 인물 조회 `revision`과 구분한다. 기존 ID의 조회·현재 인물 선택은 유지한다.
-설문 변경·작성 실패·부분 실패의 처리는 [웹 등록 흐름 개선](웹_등록_흐름_개선.md)에 있다.
+현재 설문·미리보기 계약은 [설문 v2](웹_설문_v2_사용법.md), 초기 변경 기록은 [웹 등록 흐름 개선](웹_등록_흐름_개선.md)에 있다.
 
 ## 5. Tripo 작업의 저장과 복구
 
@@ -119,8 +120,10 @@ GLB는 기존 등록 API에서 Unity가 직접 받으며, 대화 AI에 전달하
 `/status`의 `model_worker`에 `online`, `configured`, `active_jobs`, 상태별 `jobs` 수가 포함된다.
 작업자 로그는 `~/webapp/Server/tripo.log`다. API 키·서명된 다운로드 URL을 작업 기록이나 오류 로그에 복사하지 않는다.
 
-현재 작업자는 기존 웹의 이미지 생성·리깅·`TRIPO_POSE` 처리를 분리한 것이다. 기본 동작은 `preset:sit`이다.
-T포즈 자동 전처리는 2026-09-14 작업자에 들어갔다(`TRIPO_TPOSE=1`, Tripo `generate_image`; 운영 배포는 아직). 웹에서의 9개 동작 팩 구성은 통합 설계안의 후속 기능이다. 기존 Unity 로컬 T포즈·9개 동작 결과는 보존했다.
+현재 작업자는 `TRIPO_PIPELINE=head`로 머리를 생성하고 고정 몸체에 결합한다. 몸체 GLB·Blender가
+없으면 full로 내려가며 이유를 기록한다. 분할 모델·얼굴 검출 실패는 head 작업 실패다.
+`TRIPO_TPOSE`·`TRIPO_FACE_TRANSPLANT`·`TRIPO_POSE=preset:sit`은 full 경로에서만 적용한다.
+웹의 9개 동작 팩 선택·자동 구성은 미구현이다. 기존 로컬 T포즈·9개 동작 실험은 보존했다.
 관리자의 재시도는 기존 task ID를 보존한다. 공급자가 이미 실패 처리한 작업의 재생성이나 제출 결과 불명 작업의 해소는 별도 확인이 필요하다.
 
 ## 6. 비밀번호와 키의 관리 위치
@@ -130,7 +133,7 @@ T포즈 자동 전처리는 2026-09-14 작업자에 들어갔다(`TRIPO_TPOSE=1`
 | 관리자 비밀번호·Tripo 키 | `~/webapp/Web/.env` — 웹·제작 영역 |
 | 등록 API 접속 토큰·인물 조회 전용 토큰 | `~/webapp/Server/session.env`의 `SESSION_TOKEN`, `PERSONA_READ_TOKEN` |
 | 대화 연결·인물 조회·LLM·TTS 설정 | `~/capstone-server/dialogue.env` — 대화 AI 영역 |
-| TTS 내부 설정 | `~/capstone-server/tts.env` — Qwen3-TTS API·스트리밍 엔진 설정 |
+| TTS 내부 설정 | `~/capstone-server/tts.env` — 운영 VoxCPM2 설정, Qwen은 복구용 |
 | 호환 명령의 목적지 | `~/capstone-server/service-paths.env` — 비밀 값 없는 경로 설정 |
 
 `PERSONA_READ_TOKEN`과 `DIALOGUE_PERSONA_TOKEN`은 새 인물 조회 전용 인증이다.
@@ -149,7 +152,11 @@ python tools/service_bundle.py dialogue
 명시된 코드 파일과 해시 manifest만 담는다. 실제 `.env`, 인물 자료, 모델 가중치, 작업 DB는 제외한다.
 기존 서버 갱신용이며, 가상환경 설치와 설정은 각각 별도로 관리한다. 적용 전에 대상 파일 해시를 대조하고 해당 영역 파일을 백업한다.
 
-2026-09-15 최신 등록 개선은 전체 회귀 검사 135개·실제 Edge 흐름·서버 적용을 확인했다.
+2026-09-29 머리 경로 병합 후 전체 모의 검사 **565개 통과**와 Unity 새 컴파일 오류 없음을 확인했다.
+신규 head 작업의 실제 생성·등록 완료·VR 체험은 이번 검증에 포함되지 않는다.
+검사 환경·결과 파일은 [현재 구현 현황](현재_구현_현황.md)에 있다.
+
+2026-09-15 초기 등록 개선은 당시 전체 회귀 검사 135개·실제 Edge 흐름·서버 적용을 확인했다.
 [등록 흐름 개선](웹_등록_흐름_개선.md)에 검사 범위와 백업을 기록했다. 웹·등록만 재시작했고
 대화 AI·TTS·Tripo 작업자 프로세스와 현재 인물 자료는 유지했다.
 대화·Unity의 실제 전체 검사는 [별도 검증 기록](전체_검증_20260915.md)에 있다.

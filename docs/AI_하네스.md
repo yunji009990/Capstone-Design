@@ -1,6 +1,6 @@
 # 공통 AI 하네스
 
-기준일: 2026-09-15. 공통 규칙은 [AGENTS.md](../AGENTS.md), 현재 개발 순서는
+기준일: 2026-09-29. 공통 규칙은 [AGENTS.md](../AGENTS.md), 현재 개발 순서는
 [대화 AI 개발 가이드](대화_AI_개발가이드.md)에 있다. 기본 담당은 대화 AI이고 T포즈·3D 제작은 팀원 작업이다.
 
 ## 1. 구성
@@ -54,6 +54,13 @@ python tools/check.py --area all --python .venv-dialogue/Scripts/python.exe
 Python 선택 순서는 `--python` → `CAPSTONE_CHECK_PYTHON` → 저장소의 `.venv-dialogue` → 실행기 자체의 Python이다.
 Windows의 `Scripts/python.exe`, Linux의 `bin/python`을 찾는다. 자동 패키지 설치는 하지 않는다.
 다른 폴더에서는 스크립트의 절대 경로를 호출하면 된다. 검사 작업 디렉터리는 항상 이 저장소로 고정한다.
+
+9월 29일 이 PC의 기본 Anaconda Python에는 `httpx`·`fastapi`가 없었다. 저장소에 있던 검사 환경으로
+아래 명령을 실행해 전체 565개를 통과했다. 이 경로는 Git 제외 자료이므로 새 clone에 있다고 가정하지 않는다.
+
+```powershell
+python tools/check.py --area all --python tools/_work/check_env_20260913/Scripts/python.exe
+```
 
 ```powershell
 python C:/Users/user/Documents/GitHub/Capstone-Design/tools/check.py --area dialogue
@@ -129,6 +136,18 @@ Claude Code는 프로젝트 루트에서 시작한다. `.claude/settings.json`�
 운영 대화 로직과 프로토콜은 이 수정의 대상이 아니다. 최종 실행 결과는 해당 실행의 `report.json`을 기준으로 확인한다.
 
 ## 7. 검증 기록
+
+### 2026-09-29 hj 머리 파이프라인 병합
+
+`135fd4da`에서 **565개(하네스 195 · 서버 302 · 작업자 11 · 웹 57) 통과, 건너뜀 0개**다.
+결과: `tools/_work/checks/20260929T075937Z-all-9780c25b/report.json`.
+기본 Python의 의존성 누락으로 실패한 첫 기록은 `tools/_work/checks/20260929T075840Z-all-21984e50/report.json`에 보존했다.
+제품 코드를 고쳐 검사를 통과시킨 것은 아니다.
+
+실제 Capstone-Design Unity에서 컴파일·도메인 재적재, Scene_2의 몸체와 새 모델 미리보기 메뉴 반영을 확인했다.
+새 컴파일 오류는 없고 기존 MCP 연결 종료 예외 2건은 남았다.
+모의 검사와 서버 준비 상태 확인은 새 head 생성의 전체 성공·시각 품질·VR 검증을 대신하지 않는다.
+상세 범위는 [현재 구현 현황](현재_구현_현황.md)을 따른다.
 
 ### 2026-09-18 고인 전제·사망 경위 — 최종 검사와 운영 반영
 
