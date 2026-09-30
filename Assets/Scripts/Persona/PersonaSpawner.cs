@@ -122,6 +122,9 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("인사 → 걷기 → 앉음 연출. 비워두면 그 자리에 앉은 채로 나타난다.")]
     public PersonaArrival arrival;
 
+    [Tooltip("모델은 미리 준비하고 체험 시작 버튼을 누를 때까지 표시와 입장을 기다린다.")]
+    public bool waitForExperienceStart;
+
     // 도착 연출이 Animator 로 뼈를 잡고 있는 동안 켜진다. 호흡·시선이 기준 자세를 매 프레임
     // 다시 잡게 해서, 낡은 기준으로 상체를 되돌려 팔다리가 따로 노는 걸 막는다.
     [HideInInspector] public bool posedExternally;
@@ -140,6 +143,9 @@ public class PersonaSpawner : MonoBehaviour
 
     [Tooltip("바라볼 대상. 비워두면 Camera.main(HMD)을 쓴다.")]
     public Transform gazeTarget;
+
+    [Tooltip("앉았을 때 고개를 위로 올리는 보정 각도. 0은 원래 자세이며 목과 머리가 나눠 적용한다.")]
+    [Range(0f, 30f)] public float seatedHeadLiftDeg;
 
     [Tooltip("좌우 한계(도). 넘어가면 그 각도에서 멈추고 더 돌지 않는다.")]
     [Range(0f, 90f)] public float gazeMaxYaw = 55f;
@@ -233,6 +239,8 @@ public class PersonaSpawner : MonoBehaviour
     public GameObject Spawned => _spawnedInstance;
     string _loadedSession = "";      // 이미 띄운 세션. 인물이 바뀔 때만 다시 받는다.
     bool _isLoading;
+    bool _modelReady, _presentationRequested, _presentationStarted;
+    public bool PresentationStarted => _presentationStarted;
 
     // 앉아서 숨쉬기. 클립을 왕복시키는 Animation 과, 호흡을 얹을 뼈들.
     Animation _poseAnim;
@@ -247,6 +255,7 @@ public class PersonaSpawner : MonoBehaviour
     Vector3 _aim, _gazeBreakDir;
     Camera _gazeCamera;
     float _gazeBreakAt, _gazeBreakUntil;
+    float _seatedHeadLift;
 
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
@@ -310,6 +319,64 @@ public class PersonaSpawner : MonoBehaviour
         else StartCoroutine(WatchSession());
     }
 
+    /// <summary>로드 중이면 요청을 보관하고, 준비된 뒤 입구에서 한 번만 시작한다.</summary>
+    public void BeginPresentation()
+    {
+        _presentationRequested = true;
+        TryShowPersona();
+    }
+
+    /// <summary>진행 중인 연출과 아직 로드 중인 시작 요청을 모두 취소한다.</summary>
+    public void EndPresentation()
+    {
+        _presentationRequested = false;
+        StopPresentation();
+    }
+
+    void StopPresentation()
+    {
+        if (arrival != null) arrival.Stop();
+        if (_poseAnim != null) _poseAnim.Stop();
+        _poseAnim = null;
+        _presentationStarted = false;
+        _seatedHeadLift = 0f;
+        if (_spawnedInstance != null) _spawnedInstance.SetActive(false);
+    }
+
+    void TryShowPersona()
+    {
+        if (!isActiveAndEnabled || !_modelReady || _spawnedInstance == null || _presentationStarted) return;
+        if (waitForExperienceStart && !_presentationRequested) return;
+        // 세션 전환 직후에는 새 인물의 로드를 기다린다. 앞사람을 다시 등장시키지 않는다.
+        if (waitForExperienceStart && string.IsNullOrWhiteSpace(localGlbPath) &&
+            string.IsNullOrWhiteSpace(sessionIdOverride) && voiceClient != null && voiceClient.HasSession &&
+            _loadedSession != voiceClient.sessionId) return;
+
+        Transform anchor = spawnPoint != null ? spawnPoint : transform;
+        _spawnedInstance.transform.SetPositionAndRotation(
+            anchor.position, useSpawnRotation ? anchor.rotation : Quaternion.identity);
+        _spawnedInstance.SetActive(true);
+        _presentationStarted = true;
+        bool started = arrival != null && arrival.CanRun &&
+            arrival.TryBegin(_spawnedInstance.transform, this, _spawnedInstance.transform);
+        if (!started && applyPoseAnimation) ApplyPose(_spawnedInstance);
+        FindFacing(_spawnedInstance);
+        if (breathe || gaze) FindBreathBones(_spawnedInstance);
+    }
+
+    void ClearSpawnedModel()
+    {
+        StopPresentation();
+        if (_spawnedInstance != null) Destroy(_spawnedInstance);
+        _spawnedInstance = null;
+        _modelReady = false;
+        _loadedSession = "";
+    }
+
+    void OnEnable() => TryShowPersona();
+    void OnDisable() => EndPresentation();
+    void OnDestroy() => ClearSpawnedModel();
+
     /// <summary>서버 없이 로컬 GLB 를 띄운다. 파일이 없으면 서버 흐름으로 돌아간다.</summary>
     IEnumerator LoadLocal()
     {
@@ -332,6 +399,7 @@ public class PersonaSpawner : MonoBehaviour
 
     void Update()
     {
+        if (!_presentationStarted) return;
         // 조용한 구간 왕복. Animation 컴포넌트가 재생하게 두고 방향만 뒤집는다.
         if (!quietLoop || _poseAnim == null || !_poseAnim.enabled || _poseAnim.clip == null) return;
         var state = _poseAnim[_poseAnim.clip.name];
@@ -344,7 +412,7 @@ public class PersonaSpawner : MonoBehaviour
 
     void LateUpdate()
     {
-        if (_spawnedInstance == null) return;
+        if (!_presentationStarted || _spawnedInstance == null || !_spawnedInstance.activeInHierarchy) return;
         // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
         bool driven = posedExternally || (_poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying);
         if (driven) CaptureBreathBase();
@@ -364,12 +432,36 @@ public class PersonaSpawner : MonoBehaviour
 
         // 시선은 호흡 다음이다. 호흡이 목에 써 놓은 결과 위에 얹는다.
         if (gaze) AimGaze(body);
+        LiftSeatedHead(body);
+    }
+
+    // 앉은 애니메이션·시선이 정해진 뒤 보정한다. Animator가 매 프레임 원래 자세를
+    // 다시 쓰므로 각도가 누적되지 않는다. 걷기·인사에는 적용하지 않는다.
+    void LiftSeatedHead(Transform body)
+    {
+        bool sitting = arrival != null && posedExternally &&
+            (arrival.IsSeated || arrival.phase == PersonaArrival.Phase.앉는중);
+        float target = sitting ? Mathf.Clamp(seatedHeadLiftDeg, 0f, 30f) : 0f;
+        _seatedHeadLift = Mathf.Lerp(_seatedHeadLift, target,
+            1f - Mathf.Exp(-Time.deltaTime / .25f));
+        if (_head == null || _seatedHeadLift < .001f) return;
+
+        Vector3 forward = gaze && _aim.sqrMagnitude > 1e-6f ? _aim : MeasureFaceForward(body, body.up);
+        if (!gaze && gazeFlipForward) forward = -forward;
+        Vector3 right = Vector3.Cross(body.up, forward).normalized;
+        float neckShare = _neck != null ? Mathf.Clamp01(gazeNeckShare) : 0f;
+        if (_neck != null)
+            _neck.rotation = Quaternion.AngleAxis(-_seatedHeadLift * neckShare, right) * _neck.rotation;
+        _head.rotation = Quaternion.AngleAxis(-_seatedHeadLift * (1f - neckShare), right) * _head.rotation;
     }
 
     /// <summary>인물이 보는 방향을 발목→발가락 뼈로 잰다. 루트 회전이나 뼈의 로컬 축과 무관하다.</summary>
     void FindFacing(GameObject root)
     {
-        Transform lFoot = null, lToe = null, rFoot = null, rToe = null;
+        Transform lFoot = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.LeftFoot);
+        Transform lToe = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.LeftToes);
+        Transform rFoot = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.RightFoot);
+        Transform rToe = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.RightToes);
         foreach (var t in root.GetComponentsInChildren<Transform>(true))
         {
             string n = t.name.ToLowerInvariant();
@@ -547,7 +639,12 @@ public class PersonaSpawner : MonoBehaviour
 
     void FindBreathBones(GameObject root)
     {
-        _spine = _chest = _neck = _lClav = _rClav = _head = null;
+        _spine = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.Chest);
+        _chest = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.UpperChest);
+        _neck = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.Neck);
+        _lClav = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.LeftShoulder);
+        _rClav = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.RightShoulder);
+        _head = PersonaHumanoid.FindBone(root.transform, HumanBodyBones.Head);
         foreach (var t in root.GetComponentsInChildren<Transform>(true))
         {
             string n = t.name.ToLowerInvariant();
@@ -615,9 +712,7 @@ public class PersonaSpawner : MonoBehaviour
             // 안 그러면 목소리는 새 사람인데 서 있는 모습은 앞사람이 된다.
             if (!string.IsNullOrEmpty(sid) && sid != _loadedSession && !hasModel && _spawnedInstance)
             {
-                Destroy(_spawnedInstance);
-                _spawnedInstance = null;
-                _loadedSession = "";
+                ClearSpawnedModel();
                 if (verboseLog) Debug.Log($"[PersonaSpawner] 인물이 {sid} 로 바뀌었고 모델이 없어 치웠습니다.");
             }
 
@@ -731,16 +826,23 @@ public class PersonaSpawner : MonoBehaviour
             return;
         }
 
-        if (_spawnedInstance) Destroy(_spawnedInstance);   // 인물이 바뀌면 이전 것을 치운다
+        if (this == null) { gltf.Dispose(); return; }
+        ClearSpawnedModel();   // 인물이 바뀌면 이전 연출과 모델을 치운다
 
         Transform anchor = spawnPoint != null ? spawnPoint : transform;
         _spawnedInstance = new GameObject($"Persona_{sid}");
+        _spawnedInstance.SetActive(false);   // 비동기 생성 도중에도 T포즈가 잠깐 보이지 않게 한다
         _spawnedInstance.transform.SetPositionAndRotation(
             anchor.position, useSpawnRotation ? anchor.rotation : Quaternion.identity);
 
-        if (!await gltf.InstantiateMainSceneAsync(_spawnedInstance.transform))
+        var instance = _spawnedInstance;
+        bool instantiated = await gltf.InstantiateMainSceneAsync(instance.transform);
+        if (this == null || instance == null) { gltf.Dispose(); return; }
+        if (!instantiated)
         {
             Debug.LogError("[PersonaSpawner] 장면 생성 실패");
+            ClearSpawnedModel();
+            gltf.Dispose();
             return;
         }
 
@@ -765,10 +867,11 @@ public class PersonaSpawner : MonoBehaviour
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 스폰 완료: {sid} at {anchor.position}, " +
                       $"scale={_spawnedInstance.transform.localScale}" +
-                      (useArrival ? ", 도착 연출로 넘긴다" : ""));
+                      (waitForExperienceStart && !_presentationRequested ? ", 체험 시작 대기" : ""));
 
-        // 크기를 다 맞춘 뒤에 넘긴다 — 연출이 인물을 입구로 옮기고 경로를 재기 때문이다.
-        if (useArrival) arrival.Begin(_spawnedInstance.transform, this);
+        // 크기를 먼저 맞춘다. 입장 요청이 로드보다 빨랐어도 여기서 이어 시작한다.
+        _modelReady = true;
+        TryShowPersona();
     }
 
     [Serializable]
@@ -785,7 +888,7 @@ public class PersonaSpawner : MonoBehaviour
     /// </summary>
     void ApplyPose(GameObject root)
     {
-        var anim = root.GetComponentInChildren<Animation>();
+        var anim = root.GetComponentInChildren<Animation>(true);
         if (anim == null || anim.clip == null)
         {
             if (verboseLog) Debug.Log("[PersonaSpawner] 자세 애니메이션 없음 — 원본 포즈 사용");
@@ -935,7 +1038,7 @@ public class PersonaSpawner : MonoBehaviour
 
     static void NormalizeHeight(GameObject root, float targetHeight)
     {
-        var renderers = root.GetComponentsInChildren<Renderer>();
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0) return;
 
         Bounds bounds = renderers[0].bounds;

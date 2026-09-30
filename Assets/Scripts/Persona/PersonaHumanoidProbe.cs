@@ -1,17 +1,6 @@
-// PersonaHumanoidProbe.cs — 프로토타입. 기존 재생 경로(PersonaSpawner 의 legacy Animation)는 건드리지 않는다.
-//
-// 묻는 것: Tripo 리깅 인물에 Unity Humanoid 아바타를 런타임으로 만들 수 있는가, 그리고
-// 그 위에서 Mixamo 같은 외부 Humanoid 클립이 제대로 도는가.
-//
-// 이게 되면 Tripo 프리셋에 없는 동작(예: 컵 들어 마시기)을 크레딧 없이 가져올 수 있다.
-// 프리셋 조회 결과 drink/sip/eat 계열은 존재하지 않는다(2026-09-17, 14개 이름 전부 거절).
-//
-// 대응표는 인물마다 만들 필요가 없다. Tripo v1.0-20240301 biped 리깅은 항상 같은 41개 뼈에
-// 같은 이름을 쓴다 — 생성한 모델 8개에서 누락 0으로 확인했다.
-//
-// 좌표계 주의: 이 리그는 바인드 포즈에서 위=+Y 로 정상이지만 앞이 +X 다(팔은 Z축으로 벌어진다).
-// Unity Humanoid 는 인물이 +Z 를 본다고 전제하므로, 아바타를 만들기 전에 90° 돌려야 한다.
-// 돌린 만큼 부모를 반대로 돌려서 화면상 방향은 그대로 둔다.
+// 고정 Human 몸체와 이전 Tripo 몸체의 뼈를 Unity Humanoid에 연결한다.
+// 메시·웨이트·본 이름을 바꾸지 않는다. 사진마다 달라지는 머리도 같은 몸체 리그를 따른다.
+// GLB에는 Unity Avatar가 없으므로 런타임에 기준 자세와 정면 방향을 맞춰 만든다.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -35,45 +24,160 @@ public static class PersonaHumanoid
         ("RightFoot", "R_Foot"), ("RightToes", "R_ToeBase"),
     };
 
+    // Assets/Models/human/Human.fbx 및 이 몸체에서 내보낸 GLB의 변형용 본.
+    // twist 본은 부모를 따라가며, 손가락은 제스처 클립의 손 모양까지 전달한다.
+    public static readonly (string human, string tripo)[] FixedBodyMap =
+    {
+        ("Hips", "root.x"), ("Spine", "spine_01.x"), ("Chest", "spine_02.x"),
+        ("UpperChest", "spine_03.x"), ("Neck", "neck.x"), ("Head", "head.x"),
+        ("LeftShoulder", "shoulder.l"), ("LeftUpperArm", "arm_stretch.l"),
+        ("LeftLowerArm", "forearm_stretch.l"), ("LeftHand", "hand.l"),
+        ("RightShoulder", "shoulder.r"), ("RightUpperArm", "arm_stretch.r"),
+        ("RightLowerArm", "forearm_stretch.r"), ("RightHand", "hand.r"),
+        ("LeftUpperLeg", "thigh_stretch.l"), ("LeftLowerLeg", "leg_stretch.l"),
+        ("LeftFoot", "foot.l"), ("LeftToes", "toes_01.l"),
+        ("RightUpperLeg", "thigh_stretch.r"), ("RightLowerLeg", "leg_stretch.r"),
+        ("RightFoot", "foot.r"), ("RightToes", "toes_01.r"),
+        ("LeftThumbProximal", "c_thumb1.l"), ("LeftThumbIntermediate", "c_thumb2.l"), ("LeftThumbDistal", "c_thumb3.l"),
+        ("LeftIndexProximal", "c_index1.l"), ("LeftIndexIntermediate", "c_index2.l"), ("LeftIndexDistal", "c_index3.l"),
+        ("LeftMiddleProximal", "c_middle1.l"), ("LeftMiddleIntermediate", "c_middle2.l"), ("LeftMiddleDistal", "c_middle3.l"),
+        ("LeftRingProximal", "c_ring1.l"), ("LeftRingIntermediate", "c_ring2.l"), ("LeftRingDistal", "c_ring3.l"),
+        ("LeftLittleProximal", "c_pinky1.l"), ("LeftLittleIntermediate", "c_pinky2.l"), ("LeftLittleDistal", "c_pinky3.l"),
+        ("RightThumbProximal", "c_thumb1.r"), ("RightThumbIntermediate", "c_thumb2.r"), ("RightThumbDistal", "c_thumb3.r"),
+        ("RightIndexProximal", "c_index1.r"), ("RightIndexIntermediate", "c_index2.r"), ("RightIndexDistal", "c_index3.r"),
+        ("RightMiddleProximal", "c_middle1.r"), ("RightMiddleIntermediate", "c_middle2.r"), ("RightMiddleDistal", "c_middle3.r"),
+        ("RightRingProximal", "c_ring1.r"), ("RightRingIntermediate", "c_ring2.r"), ("RightRingDistal", "c_ring3.r"),
+        ("RightLittleProximal", "c_pinky1.r"), ("RightLittleIntermediate", "c_pinky2.r"), ("RightLittleDistal", "c_pinky3.r"),
+    };
+
+    public static (string human, string tripo)[] Mapping(Transform root) =>
+        Find(root, "root.x") != null ? FixedBodyMap : Map;
+
+    /// <summary>초기화 때 찾고, 재생 중에는 호출 쪽에서 참조를 보관한다.</summary>
+    public static Transform FindBone(Transform root, HumanBodyBones bone)
+    {
+        string name = bone.ToString();
+        foreach (var entry in Mapping(root))
+            if (entry.human == name) return Find(root, entry.tripo);
+        return null;
+    }
+
     static Transform Find(Transform root, string name)
     {
+        if (root == null) return null;
         foreach (var t in root.GetComponentsInChildren<Transform>(true))
             if (t.name == name) return t;
         return null;
     }
 
     /// <summary>
-    /// 뼈를 바인드 포즈(=T포즈)로 되돌린다. 아바타는 T포즈에서 만들어야 하는데, 로드된
+    /// 뼈를 스킨의 바인드 자세로 되돌린다. 바인드 자세가 Humanoid의 T포즈와 같은 것은 아니다. 로드된
     /// animated.glb 는 노드가 이미 자세를 먹고 있을 수 있다. 정점 가중치와 함께 저장된
     /// 바인드포즈 역행렬이 자세와 무관한 기준이라 그걸 쓴다.
     /// </summary>
     public static bool ForceBindPose(SkinnedMeshRenderer renderer)
     {
-        if (renderer == null || renderer.sharedMesh == null) return false;
-        var bones = renderer.bones;
-        var binds = renderer.sharedMesh.bindposes;
-        if (bones == null || binds == null || bones.Length != binds.Length) return false;
+        return RestoreBindPose(new[] { renderer });
+    }
 
-        var toWorld = renderer.transform.localToWorldMatrix;
-        for (int i = 0; i < bones.Length; i++)
+    static bool RestoreBindPose(SkinnedMeshRenderer[] renderers, Transform gltfBindSpace = null)
+    {
+        // 결합 GLB의 첫 메시가 머리일 수도 있다. 모든 스킨에서 기준 행렬을 먼저 수집한다.
+        var poses = new Dictionary<Transform, Matrix4x4>();
+        foreach (var renderer in renderers)
         {
-            if (bones[i] == null) continue;
-            Matrix4x4 m = toWorld * binds[i].inverse;
-            bones[i].SetPositionAndRotation(
-                m.GetColumn(3),
-                Quaternion.LookRotation(m.GetColumn(2), m.GetColumn(1)));
+            if (renderer == null || renderer.sharedMesh == null) continue;
+            var bones = renderer.bones;
+            var binds = renderer.sharedMesh.bindposes;
+            if (bones.Length != binds.Length) continue;
+            // glTF의 inverseBindMatrices는 파일의 공통 좌표계 기준이다.
+            // 메시 노드의 0.01 배율을 다시 곱하면 Human의 팔다리가 100배 줄어든다.
+            // FBX의 Unity bindposes는 Renderer 기준이므로 기존 행렬을 사용한다.
+            var toWorld = gltfBindSpace != null ? gltfBindSpace.localToWorldMatrix
+                                               : renderer.transform.localToWorldMatrix;
+            for (int i = 0; i < bones.Length; i++)
+                if (bones[i] != null && !poses.ContainsKey(bones[i]))
+                    poses.Add(bones[i], toWorld * binds[i].inverse);
         }
-        return true;
+        var ordered = new List<Transform>(poses.Keys);
+        ordered.Sort((a, b) => Depth(a).CompareTo(Depth(b)));
+        // 부모를 나중에 복원하면 이미 맞춘 자식까지 움직이므로 계층 순서로 적용한다.
+        foreach (var bone in ordered)
+        {
+            var matrix = poses[bone];
+            bone.SetPositionAndRotation(matrix.GetColumn(3),
+                Quaternion.LookRotation(matrix.GetColumn(2), matrix.GetColumn(1)));
+        }
+        return ordered.Count > 0;
+    }
+
+    static int Depth(Transform bone)
+    {
+        int depth = 0;
+        while (bone.parent != null) { depth++; bone = bone.parent; }
+        return depth;
+    }
+
+    /// <summary>몸체 전체를 기준 자세로 맞추고 Avatar를 만든다. 실패하면 원래 자세를 복원한다.</summary>
+    public static bool TryPrepare(Transform personaRoot, out Transform skeletonRoot,
+                                  out Avatar avatar, out string error, Transform gltfBindSpace = null,
+                                  PersonaHumanoidReferencePose referencePose = null)
+    {
+        skeletonRoot = null;
+        avatar = null;
+        error = null;
+        if (personaRoot == null) { error = "인물 루트가 없다"; return false; }
+        var hip = FindBone(personaRoot, HumanBodyBones.Hips);
+        if (hip == null) { error = "몸체의 골반 본을 찾지 못했다"; return false; }
+        skeletonRoot = hip;
+        while (skeletonRoot.parent != null && skeletonRoot.parent != personaRoot)
+            skeletonRoot = skeletonRoot.parent;
+
+        var transforms = personaRoot.GetComponentsInChildren<Transform>(true);
+        var positions = new Vector3[transforms.Length];
+        var rotations = new Quaternion[transforms.Length];
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            positions[i] = transforms[i].localPosition;
+            rotations[i] = transforms[i].localRotation;
+        }
+        if (!RestoreBindPose(personaRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true), gltfBindSpace))
+            error = "몸체의 스킨 바인드 포즈가 없다";
+        else
+        {
+            Vector3 facing = personaRoot.InverseTransformDirection(MeasureFacing(personaRoot));
+            facing = Vector3.ProjectOnPlane(facing, Vector3.up);
+            if (facing.sqrMagnitude < 1e-8f) facing = Vector3.forward;
+            Quaternion fix = Quaternion.FromToRotation(facing.normalized, Vector3.forward);
+            if (skeletonRoot != personaRoot)
+            {
+                skeletonRoot.localRotation = fix * skeletonRoot.localRotation;
+                personaRoot.localRotation *= Quaternion.Inverse(fix);
+            }
+            // 바인드 자세와 Humanoid 기준 자세는 다르다. 같은 몸체로 만든 Mixamo 기준을 먼저 맞춘다.
+            if (referencePose == null || Mapping(personaRoot) != FixedBodyMap || referencePose.TryApply(personaRoot, out error))
+            {
+                avatar = Build(skeletonRoot, out error);
+                if (avatar != null) return true;
+            }
+        }
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            transforms[i].localPosition = positions[i];
+            transforms[i].localRotation = rotations[i];
+        }
+        return false;
     }
 
     /// <summary>
-    /// 바인드 포즈 복원이 실제로 T포즈를 만들었는지 확인한다. 아바타 품질이 여기에 전적으로 달려 있다.
+    /// 팔 높이로 기준 자세를 대략 확인한다. 정확한 Humanoid 기준은 애니메이션 Avatar에 맞춘다.
     /// T포즈가 아닌 상태로 구우면 Unity 가 뼈 축을 잘못 잡아 팔다리가 늘어나거나 꺾인다.
     /// </summary>
     public static string DescribePose(Transform root)
     {
-        Transform lh = Find(root, "L_Hand"), rh = Find(root, "R_Hand");
-        Transform arm = Find(root, "L_Upperarm"), hip = Find(root, "Hip"), head = Find(root, "Head");
+        Transform lh = FindBone(root, HumanBodyBones.LeftHand), rh = FindBone(root, HumanBodyBones.RightHand);
+        Transform arm = FindBone(root, HumanBodyBones.LeftUpperArm), hip = FindBone(root, HumanBodyBones.Hips),
+                  head = FindBone(root, HumanBodyBones.Head);
         if (lh == null || rh == null || arm == null || hip == null || head == null)
             return "뼈 일부를 찾지 못해 자세를 재지 못했다";
 
@@ -88,8 +192,8 @@ public static class PersonaHumanoid
     /// <summary>인물이 보는 방향(월드). 루트 회전과 무관하게 발목→발가락 뼈로 잰다.</summary>
     public static Vector3 MeasureFacing(Transform root)
     {
-        Transform lf = Find(root, "L_Foot"), lt = Find(root, "L_ToeBase");
-        Transform rf = Find(root, "R_Foot"), rt = Find(root, "R_ToeBase");
+        Transform lf = FindBone(root, HumanBodyBones.LeftFoot), lt = FindBone(root, HumanBodyBones.LeftToes);
+        Transform rf = FindBone(root, HumanBodyBones.RightFoot), rt = FindBone(root, HumanBodyBones.RightToes);
         if (lf == null || lt == null || rf == null || rt == null) return root.forward;
         Vector3 f = (lt.position - lf.position) + (rt.position - rf.position);
         f = Vector3.ProjectOnPlane(f, Vector3.up);
@@ -105,13 +209,15 @@ public static class PersonaHumanoid
         error = null;
         var human = new List<HumanBone>();
         var missing = new List<string>();
-        foreach (var (humanName, tripoName) in Map)
+        var humanNames = HumanTrait.BoneName;
+        foreach (var (humanName, tripoName) in Mapping(skeletonRoot))
         {
             var bone = Find(skeletonRoot, tripoName);
             if (bone == null) { missing.Add(tripoName); continue; }
             human.Add(new HumanBone
             {
-                humanName = humanName,
+                // 손가락의 공식 이름에는 공백이 있다("Left Thumb Proximal").
+                humanName = humanNames[(int)(HumanBodyBones)System.Enum.Parse(typeof(HumanBodyBones), humanName)],
                 boneName = bone.name,
                 limit = new HumanLimit { useDefaultValues = true },
             });
@@ -122,7 +228,7 @@ public static class PersonaHumanoid
             return null;
         }
 
-        // skeleton 배열은 계층 전체의 현재(=T포즈) 로컬 TRS 를 담는다.
+        // skeleton 배열은 계층 전체의 현재 기준 자세 로컬 TRS를 담는다.
         var skeleton = new List<SkeletonBone>();
         foreach (var t in skeletonRoot.GetComponentsInChildren<Transform>(true))
             skeleton.Add(new SkeletonBone
@@ -148,6 +254,11 @@ public static class PersonaHumanoid
         {
             error = avatar == null ? "BuildHumanAvatar 가 null 을 돌려줬다"
                                    : $"아바타가 쓸 수 없는 상태다(isValid={avatar.isValid}, isHuman={avatar.isHuman})";
+            if (avatar != null)
+            {
+                if (Application.isPlaying) Object.Destroy(avatar);
+                else Object.DestroyImmediate(avatar);
+            }
             return null;
         }
         avatar.name = "PersonaHumanoid";
@@ -224,10 +335,6 @@ public class PersonaHumanoidProbe : MonoBehaviour
         var renderer = personaRoot.GetComponentInChildren<SkinnedMeshRenderer>();
         if (renderer == null) { Debug.LogError("[PersonaHumanoidProbe] 스킨 메시가 없다"); return; }
 
-        // 스포너가 만든 Persona_* 아래에 glTF 장면이 자식으로 들어온다. 뼈대는 그 자식 쪽이다.
-        Transform skeletonRoot = renderer.rootBone != null ? renderer.rootBone : renderer.transform;
-        while (skeletonRoot.parent != null && skeletonRoot.parent != personaRoot) skeletonRoot = skeletonRoot.parent;
-
         // 1) 자세를 먹기 전 기준으로 되돌린다. legacy Animation 이 매 프레임 덮어쓰므로 먼저 끈다.
         var legacy = personaRoot.GetComponentInChildren<Animation>();
         if (legacy != null) legacy.enabled = false;
@@ -240,31 +347,17 @@ public class PersonaHumanoidProbe : MonoBehaviour
             Debug.Log("[PersonaHumanoidProbe] 시험을 위해 스포너의 호흡(breathe)을 껐다");
         }
 
-        if (!PersonaHumanoid.ForceBindPose(renderer))
-            Debug.LogWarning("[PersonaHumanoidProbe] 바인드 포즈 복원 실패 — 현재 자세로 진행한다");
-        Debug.Log("[PersonaHumanoidProbe] 복원한 자세: " + PersonaHumanoid.DescribePose(skeletonRoot));
-
-        // 2) 이 리그는 +X 를 본다. Humanoid 는 +Z 전제라 뼈대를 돌린다.
-        //    아바타는 뼈대의 *로컬* rest 자세를 굽는다. 그래서 보정도 로컬에서 해야 한다 —
-        //    월드 회전으로 돌려놓고 부모를 되돌리면 자식 월드가 다시 틀어져 기준이 깨진다.
-        Vector3 facingLocal = personaRoot.InverseTransformDirection(PersonaHumanoid.MeasureFacing(skeletonRoot));
-        facingLocal = Vector3.ProjectOnPlane(facingLocal, Vector3.up);
-        if (facingLocal.sqrMagnitude < 1e-8f) facingLocal = Vector3.forward;
-        Quaternion fix = Quaternion.FromToRotation(facingLocal.normalized, Vector3.forward);
-        if (skeletonRoot != personaRoot)
+        // 운영 재생과 같은 GLB 좌표계·매핑을 사용한다.
+        if (!PersonaHumanoid.TryPrepare(personaRoot, out var skeletonRoot, out var avatar,
+                                       out string error, personaRoot))
         {
-            skeletonRoot.localRotation = fix * skeletonRoot.localRotation;
-            personaRoot.localRotation = personaRoot.localRotation * Quaternion.Inverse(fix);
+            if (legacy != null) legacy.enabled = true;
+            Debug.LogError("[PersonaHumanoidProbe] 아바타 생성 실패 — " + error);
+            return;
         }
-        else Debug.LogWarning("[PersonaHumanoidProbe] 뼈대와 루트가 같아 방향 보정을 상쇄하지 못한다 — 90° 틀어져 보일 수 있다");
-
-        Debug.Log($"[PersonaHumanoidProbe] 보던 방향(루트 기준) {facingLocal.normalized} → 보정 {fix.eulerAngles.y:0}° (Y축)");
-
-        // 3) 아바타 생성
-        var avatar = PersonaHumanoid.Build(skeletonRoot, out string error);
-        if (avatar == null) { Debug.LogError("[PersonaHumanoidProbe] 아바타 생성 실패 — " + error); return; }
+        Debug.Log("[PersonaHumanoidProbe] 복원한 자세: " + PersonaHumanoid.DescribePose(skeletonRoot));
         avatarReady = true;
-        Debug.Log($"[PersonaHumanoidProbe] 아바타 생성 성공: 매핑 {PersonaHumanoid.Map.Length}개, " +
+        Debug.Log($"[PersonaHumanoidProbe] 아바타 생성 성공: 매핑 {PersonaHumanoid.Mapping(skeletonRoot).Length}개, " +
                   $"isHuman={avatar.isHuman}, isValid={avatar.isValid}");
 
         if (humanoidClip == null)
