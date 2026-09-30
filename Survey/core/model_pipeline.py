@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import face_paste, head_cutout, model_queue, storage
+from . import head_cutout, model_queue, storage
 from .tripo import image_extension, image_url
 
 BLENDER_DIR = Path(__file__).resolve().parents[1] / "blender"
@@ -28,11 +28,6 @@ def fixture_glb():
     return path if path.is_file() else None
 
 
-def flag(name, default):
-    """.env 의 켜고 끄기. 값이 비어 있으면 꺼진 것으로 본다."""
-    return os.environ.get(name, default).strip().lower() not in {"0", "false", "no", "off", ""}
-
-
 def body_glb():
     """머리를 얹을 고정 몸통. HEAD_BODY_GLB 가 가리키는 리깅된 GLB.
 
@@ -44,20 +39,19 @@ def body_glb():
     return path if path.is_file() else None
 
 
-def pipeline_mode():
-    """'head' 면 머리만 만들어 고정 몸통에 얹고, 'full' 이면 예전처럼 전신을 만든다.
+def require_head_assets():
+    """머리 경로에 필요한 것이 다 있는지 확인한다. 없으면 작업을 세운다.
 
-    머리 경로는 몸통 자산과 Blender 가 있어야 돌아간다. 둘 중 하나라도 없으면 전신
-    경로로 내려간다 — 조용히 내려가면 안 되므로 호출부가 사유를 기록에 남긴다.
+    예전에는 없으면 전신 경로로 내려갔는데, 전신 경로 자체를 걷어냈으므로 이제는
+    조용히 대신할 것이 없다. 설정이 빠진 채로 도는 것보다 여기서 멈추고 운영자가
+    보는 편이 낫다 — 고정 GLB 우회 때 사진과 무관한 모델이 나가는 줄도 모르고
+    한참을 보낸 적이 있다.
     """
-    wanted = os.environ.get("TRIPO_PIPELINE", "head").strip().lower() or "head"
-    if wanted != "head":
-        return "full", ""
     if body_glb() is None:
-        return "full", "HEAD_BODY_GLB 가 없어 전신 경로를 씁니다"
-    if shutil.which(blender_bin()) is None and not Path(blender_bin()).is_file():
-        return "full", "Blender 실행 파일이 없어 전신 경로를 씁니다"
-    return "head", ""
+        raise PipelineFailure("몸통 자산이 설정되지 않았습니다. 운영자에게 알려 주세요")
+    binary = blender_bin()
+    if shutil.which(binary) is None and not Path(binary).is_file():
+        raise PipelineFailure("모델 합치기 도구가 설치되지 않았습니다. 운영자에게 알려 주세요")
 
 
 def blender_bin():
@@ -131,66 +125,6 @@ class ModelPipeline:
                 raise PipelineFailure(name + ": 외부 작업 " + status)
             self.sleep(3)
         raise PipelineFailure(name + ": 대기 시간 초과 · 작업 ID를 유지했습니다")
-
-    def tpose(self, sid, path):
-        """사진을 Tripo generate_image(t_pose)로 T포즈 이미지로 바꿔 그 파일을 돌려준다.
-
-        손이 몸에 닿은 사진은 리깅 뒤 팔을 들 때 옷이 손을 따라 늘어나므로, 어떤
-        사진이 들어와도 팔을 벌린 이미지로 만든 다음 생성한다. 유료 제출은 task()
-        가 먼저 기록하고, 받은 파일은 해시로 재사용해 재시작 때 다시 요청하지 않는다."""
-        steps = self.job["steps"]
-        asset = (steps.get("tpose") or {}).get("asset")
-        if asset:
-            dest = storage.session_dir(sid) / asset["file"]
-            if dest.is_file() and hashlib.sha256(dest.read_bytes()).hexdigest() == asset["sha256"]:
-                return dest
-        _, data = self.task("tpose", lambda: self.client.submit_tpose_image(path))
-        url = image_url(data.get("output") or {})
-        if not isinstance(url, str) or not url:
-            raise PipelineFailure("T포즈 이미지 다운로드 주소가 없습니다")
-        partial = storage.session_dir(sid) / "tpose.part"
-        self.client.download_file(url, partial)
-        self.check()
-        with partial.open("rb") as stream:
-            ext = image_extension(stream.read(16))
-        if ext is None:
-            raise PipelineFailure("T포즈 결과가 이미지 파일이 아닙니다")
-        dest = storage.session_dir(sid) / ("tpose." + ext)
-        os.replace(partial, dest)
-        steps["tpose"]["asset"] = {"file": dest.name, "bytes": dest.stat().st_size,
-                                   "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()}
-        self.save()
-        return dest
-
-    def transplant(self, sid, tpose_path, photo_path):
-        """T포즈 얼굴 자리에 원본 사진의 얼굴을 얹은 이미지를 돌려준다.
-
-        Tripo 가 보는 얼굴 픽셀을 늘리려는 단계다. 유료 호출이 아니고 결과는 파일 하나라,
-        실패하면 원래 T포즈로 계속 간다 — 사람 하나가 모델을 아예 못 받는 것보다 낫다.
-        효과가 세 사진 중 하나에서만 확인됐다는 점은 face_paste 의 주석에 적어 두었다."""
-        steps = self.job["steps"]
-        record = steps.get("transplant")
-        dest = storage.session_dir(sid) / "tpose_face.png"
-        if record and record.get("state") == "done" and dest.is_file():
-            if hashlib.sha256(dest.read_bytes()).hexdigest() == record["sha256"]:
-                return dest
-        if record and record.get("state") == "skipped":
-            return tpose_path
-        try:
-            info = face_paste.transplant(tpose_path, photo_path, dest)
-        except face_paste.TransplantUnavailable as exc:
-            steps["transplant"] = {"state": "skipped", "reason": "라이브러리 없음: " + str(exc)}
-            self.save()
-            return tpose_path
-        except Exception as exc:
-            # 얼굴을 못 찾는 사진은 있을 수 있다. 여기서 작업을 죽이지 않는다.
-            steps["transplant"] = {"state": "skipped", "reason": str(exc)[:200]}
-            self.save()
-            return tpose_path
-        steps["transplant"] = {"state": "done",
-                               "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(), **info}
-        self.save()
-        return dest
 
     def cutout(self, sid, photo):
         """사진에서 머리카락·얼굴·목만 오려 낸 PNG 를 돌려준다.
@@ -275,19 +209,16 @@ class ModelPipeline:
         fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
         steps = self.job["steps"]
         if "input" not in steps:
-            mode, note = pipeline_mode()
-            steps["input"] = {"sha256": fingerprint,
-                              "pipeline": mode,
-                              "pose": os.environ.get("TRIPO_POSE", "preset:sit").strip(),
-                              "tpose": flag("TRIPO_TPOSE", "1"),
-                              "transplant": flag("TRIPO_FACE_TRANSPLANT", "1")}
-            # 머리 경로를 원했는데 못 쓴 이유는 반드시 남긴다. 조용히 옛 경로로
-            # 내려가면 왜 얼굴이 그대로인지 나중에 알 방법이 없다(고정 GLB 때 겪었다).
-            if note:
-                steps["input"]["pipeline_note"] = note
+            require_head_assets()
+            steps["input"] = {"sha256": fingerprint, "pipeline": "head"}
             self.save()
         elif fingerprint != steps["input"]["sha256"]:
             raise PipelineFailure("입력 이미지가 변경되었습니다. 새 생성 작업이 필요합니다")
+        elif steps["input"].get("pipeline") != "head":
+            # 예전 방식(T포즈 → 전신 생성 → 리깅)으로 접수된 작업이다. 그 경로를
+            # 걷어냈으므로 이어서 돌 수 없다. 저장된 task_id 를 그대로 쓰면 T포즈로
+            # 만든 전신 모델을 머리인 줄 알고 자르게 된다.
+            raise PipelineFailure("예전 방식으로 접수된 작업입니다. 다시 접수해 주세요")
         dest = storage.session_dir(sid) / "model.glb"
         artifact = steps.get("artifact")
         if artifact and (not dest.is_file() or hashlib.sha256(dest.read_bytes()).hexdigest() != artifact["sha256"]):
@@ -310,16 +241,10 @@ class ModelPipeline:
             self.save()
             artifact = steps["artifact"]
         if not artifact:
-            mode = steps["input"].get("pipeline", "full")
-            if mode == "head":
-                # 머리만 만들어 미리 리깅된 몸통에 얹는다. T포즈를 거치지 않으므로
-                # 원본 사진이 image_to_model 로 직행하고, Tripo 가 보는 얼굴이
-                # 70x100px 에서 420x550px 로 올라간다.
-                source = self.cutout(sid, path)
-            else:
-                source = self.tpose(sid, path) if steps["input"].get("tpose") else path
-                if steps["input"].get("transplant"):
-                    source = self.transplant(sid, source, path)
+            # 머리만 만들어 미리 리깅된 몸통에 얹는다. T포즈를 거치지 않으므로 원본
+            # 사진이 image_to_model 로 직행하고, Tripo 가 보는 얼굴이 70x100px 에서
+            # 420x550px 로 올라간다.
+            source = self.cutout(sid, path)
             # 생성 설정을 .env 로 돌릴 수 있게 둔다. 기본값은 지금 운영값 그대로다.
             # face_limit=auto 로 두면 Tripo 가 적응적으로 정하는데, 실측에서 195만
             # 삼각형·79MB 가 나왔다. Quest 에 그대로 못 올리므로 감축 도구를 서버에
@@ -328,49 +253,23 @@ class ModelPipeline:
             extra = {} if limit == "auto" else {"face_limit": int(limit)}
             extra["geometry_quality"] = os.environ.get(
                 "TRIPO_GEOMETRY_QUALITY", "standard").strip()
-            model_id, result = self.task(
+            _, result = self.task(
                 "model", lambda: self.client.submit_image_to_3d(source, **extra))
-            if mode != "head":
-                # 전신 경로에서만 Tripo 리깅을 부른다. 머리 경로는 몸통이 이미
-                # 리깅되어 있어 prerigcheck/rig/retarget 이 통째로 빠진다 —
-                # 운영 실패 8건 중 6건이 여기서 났고, 크레딧도 95에서 60으로 준다.
-                pose = steps["input"]["pose"]
-                if pose:
-                    _, check = self.task("prerigcheck", lambda: self.client._submit({
-                        "type": "animate_prerigcheck", "original_model_task_id": model_id}))
-                    out = check.get("output") or {}
-                    if not out.get("riggable"):
-                        raise PipelineFailure("리깅할 수 없는 모델입니다. 입력 자세를 확인해 주세요")
-                    rig_id, _ = self.task("rig", lambda: self.client.rig_model(
-                        model_id, rig_type=out.get("rig_type") or "biped"))
-                    _, result = self.task(
-                        "animation", lambda: self.client.retarget_animation(rig_id, pose))
             output = result.get("output") or {}
             url = output.get("pbr_model") or output.get("model")
             if not isinstance(url, str) or not url:
                 raise PipelineFailure("완성된 모델 다운로드 주소가 없습니다")
-            if mode == "head":
-                # 받은 것은 머리뿐이다. 옷을 잘라 내고 고정 몸통에 얹어야 model.glb 가 된다.
-                raw = storage.session_dir(sid) / "head_raw.glb"
-                if not raw.is_file():
-                    partial = raw.with_suffix(".glb.part")
-                    self.client.download_glb(url, partial)
-                    self.check()
-                    with partial.open("rb") as stream:
-                        if stream.read(4) != b"glTF":
-                            raise PipelineFailure("다운로드한 파일이 GLB가 아닙니다")
-                    os.replace(partial, raw)
-                self.merge(sid, self.trim(sid, raw), dest)
-            else:
-                partial = dest.with_suffix(".glb.part")
+            # 받은 것은 머리뿐이다. 옷을 잘라 내고 고정 몸통에 얹어야 model.glb 가 된다.
+            raw = storage.session_dir(sid) / "head_raw.glb"
+            if not raw.is_file():
+                partial = raw.with_suffix(".glb.part")
                 self.client.download_glb(url, partial)
                 self.check()
                 with partial.open("rb") as stream:
                     if stream.read(4) != b"glTF":
                         raise PipelineFailure("다운로드한 파일이 GLB가 아닙니다")
-                if partial.stat().st_size > 100 * 1024 * 1024:
-                    raise PipelineFailure("모델 파일 크기 제한 초과")
-                os.replace(partial, dest)
+                os.replace(partial, raw)
+            self.merge(sid, self.trim(sid, raw), dest)
             steps["artifact"] = {"sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
                                  "bytes": dest.stat().st_size}
             self.save()

@@ -15,14 +15,12 @@ def load_settings():
     """Read only worker settings; never import the web app or AI dependencies."""
     path = Path(os.environ.get("MODEL_WORKER_ENV") or
                 Path(__file__).resolve().parents[1] / "Web" / ".env")
-    allowed = {"TRIPO_API_KEY", "TRIPO_POSE", "TRIPO_TPOSE", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR",
+    allowed = {"TRIPO_API_KEY", "SESSION_URL", "SESSION_TOKEN", "SURVEY_DATA_DIR",
                "MODEL_FIXTURE_GLB",
-               "TRIPO_FACE_TRANSPLANT", "TRIPO_FACE_LIMIT",
-               "TRIPO_GEOMETRY_QUALITY",
-               # 머리 경로(TRIPO_PIPELINE=head)용. 몸통 자산과 Blender 가 있어야 돌아가고,
-               # 없으면 전신 경로로 내려가며 그 사유가 작업 기록에 남는다.
-               "TRIPO_PIPELINE", "HEAD_BODY_GLB", "BLENDER_BIN",
-               "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT",
+               "TRIPO_FACE_LIMIT", "TRIPO_GEOMETRY_QUALITY",
+               # 머리만 만들어 고정 몸통에 얹는 경로. 몸통 자산과 Blender 가 없으면
+               # 작업이 선다 — 대신할 경로가 없다.
+               "HEAD_BODY_GLB", "BLENDER_BIN", "HEAD_CUTOUT_MODEL", "HEAD_CUTOUT_FIT",
                "HEAD_BODY_BONE", "HEAD_BODY_FROM", "HEAD_BODY_SHARE",
                "HEAD_BODY_YAW", "HEAD_BODY_OUT_SCALE"}
     values = {}

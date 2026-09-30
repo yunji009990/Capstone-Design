@@ -1,4 +1,11 @@
-"""Independent worker tests. Tripo and registration delivery are simulated."""
+"""Independent worker tests. Tripo, Blender and the cutout are simulated.
+
+파이프라인은 이제 한 가지 경로뿐이다 — 사진에서 머리만 오려 image_to_model 로
+머리를 만들고, 지어낸 옷을 잘라 낸 뒤 미리 리깅된 고정 몸통에 얹는다. 예전의
+전신 경로(T포즈 생성 → 3D 생성 → 리깅 검사 → 리깅 → 앉기)는 걷어냈으므로
+FakeTripo 에도 그 메서드를 두지 않는다. 실수로 부르면 AttributeError 로 드러난다.
+"""
+import hashlib
 import os
 import sys
 import tempfile
@@ -8,25 +15,22 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import database, model_queue, storage
-from core import face_paste
-from core.head_cutout import CutoutFailed
+from core.head_cutout import CutoutFailed, CutoutUnavailable
 from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
+
+HEAD_PNG = b"\x89PNG\r\n\x1a\nfake-head-cutout"
 
 
 class FakeTripo:
     def __init__(self):
         self.submissions = []
         self.unknown = False
-        self.riggable = True
 
     def _submit(self, body):
         self.submissions.append(body["type"])
         if self.unknown:
             raise TimeoutError("lost submission response")
         return body["type"]
-
-    def submit_tpose_image(self, path):
-        return self._submit({"type": "tpose"})
 
     def submit_image_to_3d(self, path, **options):
         # 실제 클라이언트는 face_limit·geometry_quality 를 받는다. 파이프라인이
@@ -35,38 +39,53 @@ class FakeTripo:
         self.model_options = options
         return self._submit({"type": "model"})
 
-    def rig_model(self, task, **kwargs):
-        return self._submit({"type": "rig"})
-
-    def retarget_animation(self, task, pose):
-        return self._submit({"type": "animation"})
-
     def get_task(self, task):
-        if task == "animate_prerigcheck":
-            output = {"riggable": self.riggable, "rig_type": "biped"}
-        elif task == "tpose":
-            output = {"generated_image": "https://fake.invalid/tpose"}
-        else:
-            output = {"model": "https://fake.invalid/model"}
-        return {"data": {"status": "success", "output": output, "consumed_credit": 0}}
+        return {"data": {"status": "success", "consumed_credit": 0,
+                         "output": {"model": "https://fake.invalid/model"}}}
 
     def download_glb(self, url, dest):
-        dest.write_bytes(b"glTF-test-result")
-
-    def download_file(self, url, dest):
-        dest.write_bytes(TPOSE_PNG)
+        dest.write_bytes(b"glTF-head-from-tripo")
 
 
-TPOSE_PNG = b"\x89PNG\r\n\x1a\nfake-tpose-image"
+def fake_blender(calls):
+    """Blender 를 부르는 대신 출력 파일만 만들어 둔다.
+
+    두 스크립트 모두 「입력들… 출력 [옵션들]」 순서다. 옵션 앞의 마지막 위치 인자가
+    출력이다 — 첫 .glb 를 잡으면 입력에 덮어쓰게 된다."""
+    def run(script, *args, **kwargs):
+        calls.append(script)
+        positional = []
+        for value in args:
+            if str(value).startswith("--"):
+                break
+            positional.append(value)
+        Path(positional[-1]).write_bytes(b"glTF-merged")
+        return ""
+    return run
+
+
+def fake_cutout(photo, dest, **kwargs):
+    dest.write_bytes(HEAD_PNG)
+    return {"file": dest.name}
 
 
 class ModelWorkerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
-        self.patches = [patch.object(database, "DB_PATH", root / "sessions.db"),
-                        patch.object(storage, "ASSETS_ROOT", root / "assets"),
-                        patch.dict(os.environ, {"TRIPO_POSE": "preset:sit", "TRIPO_TPOSE": "1"})]
+        self.body = root / "body.glb"
+        self.body.write_bytes(b"glTF-body")
+        self.blender_calls = []
+        # BLENDER_BIN 은 존재하는 파일이기만 하면 된다. 실제로 부르지는 않고
+        # run_blender 를 바꿔 끼운다.
+        self.patches = [
+            patch.object(database, "DB_PATH", root / "sessions.db"),
+            patch.object(storage, "ASSETS_ROOT", root / "assets"),
+            patch.dict(os.environ, {"HEAD_BODY_GLB": str(self.body),
+                                    "BLENDER_BIN": sys.executable}),
+            patch("core.model_pipeline.run_blender", fake_blender(self.blender_calls)),
+            patch("core.head_cutout.cutout", fake_cutout),
+        ]
         for item in self.patches:
             item.start()
         database.insert_session("person-a", {}, True, True, True, 1, True, True)
@@ -82,21 +101,39 @@ class ModelWorkerTests(unittest.TestCase):
         model_queue.enqueue("person-a")
         return model_queue.claim(owner)
 
+    def another(self, name="person-b"):
+        database.insert_session(name, {}, True, True, True, 1, True, True)
+        (storage.session_dir(name) / "front.png").write_bytes(b"test-image")
+        model_queue.enqueue(name)
+
+    # ── 기본 흐름 ──────────────────────────────────────────────
     def test_duplicate_requests_have_one_owner_and_ready_requires_delivery(self):
         job = self.claim()
         self.assertEqual(model_queue.enqueue("person-a"), "running")
         self.assertIsNone(model_queue.claim("worker-2"))
         delivered = []
-        ModelPipeline(job, "worker-1", self.client, lambda sid, path: delivered.append(path.read_bytes())).run()
-        self.assertEqual(delivered, [b"glTF-test-result"])
+        ModelPipeline(job, "worker-1", self.client,
+                      lambda sid, path: delivered.append(path.read_bytes())).run()
+        self.assertEqual(delivered, [b"glTF-merged"])
         self.assertEqual(database.get_session("person-a")["model_status"], "ready")
         self.assertEqual(model_queue.enqueue("person-a"), "ready")
-        self.assertEqual(self.client.submissions, ["tpose", "model", "animate_prerigcheck", "rig", "animation"])
-        # 생성 입력은 원본 사진이 아니라 T포즈 이미지다.
-        self.assertEqual(self.client.model_input, ("tpose.png", TPOSE_PNG))
+
+    def test_tripo_is_called_once_and_gets_the_cutout_not_the_photo(self):
+        """Tripo 호출은 image_to_model 한 번뿐이다. T포즈·리깅이 빠지면서 다섯 번이
+        한 번이 됐고(크레딧 95 → 60), 리깅 거부로 실패하던 경로가 사라졌다.
+
+        생성 입력은 원본 사진이 아니라 오려낸 머리여야 한다. 어깨가 남으면 흉상이
+        만들어져 고정 몸통과 겹친다."""
+        job = self.claim()
+        ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(self.client.submissions, ["model"])
+        self.assertEqual(self.client.model_input, ("head_input.png", HEAD_PNG))
+        self.assertEqual(self.blender_calls, ["head_trim.py", "head_body_merge.py"])
+        self.assertEqual(job["steps"]["input"]["pipeline"], "head")
 
     def test_delivery_failure_resumes_without_any_new_tripo_request(self):
         job = self.claim()
+
         def failed_delivery(*args):
             raise PipelineFailure("registration offline")
         with self.assertRaises(PipelineFailure):
@@ -105,10 +142,12 @@ class ModelWorkerTests(unittest.TestCase):
         self.assertNotEqual(database.get_session("person-a")["model_status"], "ready")
         restored = self.claim("worker-2")
         ModelPipeline(restored, "worker-2", self.client, lambda *_: None).run()
-        self.assertEqual(len(self.client.submissions), 5)
+        self.assertEqual(self.client.submissions, ["model"])
         self.assertEqual(model_queue.get_job("person-a")["state"], "ready")
 
-    def test_tpose_image_is_reused_on_restart_and_can_be_disabled(self):
+    def test_finished_model_is_not_rebuilt_when_only_delivery_failed(self):
+        """전달만 실패했으면 모델은 이미 완성돼 있다. 다시 만들지 않고 같은 바이트를
+        올리기만 한다 — Blender 두 단계가 건당 수십 초라 그냥 두면 재시작이 느려진다."""
         job = self.claim()
 
         def offline(*args):
@@ -116,54 +155,30 @@ class ModelWorkerTests(unittest.TestCase):
         with self.assertRaises(PipelineFailure):
             ModelPipeline(job, "worker-1", self.client, offline).run()
         model_queue.save(job, "worker-1", state="failed", error="delivery failed")
-        self.assertEqual((storage.session_dir("person-a") / "tpose.png").read_bytes(), TPOSE_PNG)
-        self.assertEqual(job["steps"]["tpose"]["asset"]["file"], "tpose.png")
+        self.assertEqual((storage.session_dir("person-a") / "head_input.png").read_bytes(),
+                         HEAD_PNG)
+        self.assertEqual(job["steps"]["cutout"]["file"], "head_input.png")
+
         restored = self.claim("worker-2")
         ModelPipeline(restored, "worker-2", self.client, lambda *_: None).run()
-        self.assertEqual(self.client.submissions.count("tpose"), 1)
-        # 끄면 원본 사진으로 바로 생성한다.
-        database.insert_session("person-b", {}, True, True, True, 1, True, True)
-        (storage.session_dir("person-b") / "front.png").write_bytes(b"test-image")
-        model_queue.enqueue("person-b")
-        plain = FakeTripo()
-        with patch.dict(os.environ, {"TRIPO_TPOSE": "0"}):
-            ModelPipeline(model_queue.claim("worker-3"), "worker-3", plain, lambda *_: None).run()
-        self.assertEqual(plain.submissions, ["model", "animate_prerigcheck", "rig", "animation"])
-        self.assertEqual(plain.model_input, ("front.png", b"test-image"))
-
-    def test_face_transplant_failure_never_blocks_the_job(self):
-        """얼굴 이식은 확률을 올리는 시도일 뿐이라, 실패해도 모델은 나와야 한다.
-
-        사진 3장 중 1장에서만 뚜렷하게 좋아졌고(A +0.153 / B -0.042 / C +0.023,
-        노이즈 0.045), 얼굴을 못 찾는 사진도 있을 수 있다. 그때 사람 하나가 모델을
-        아예 못 받는 것이 더 나쁘다."""
-        def unavailable(*args, **kwargs):
-            raise face_paste.TransplantUnavailable("insightface 없음")
-
-        job = self.claim()
-        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "1"}),              patch.object(face_paste, "transplant", unavailable):
-            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
-        self.assertEqual(job["steps"]["transplant"]["state"], "skipped")
-        self.assertEqual(model_queue.get_job("person-a")["state"], "ready")
-        # 건너뛰었으면 원래 T포즈 이미지가 생성으로 들어가야 한다.
-        self.assertEqual(self.client.model_input, ("tpose.png", TPOSE_PNG))
+        # 첫 회차에서 두 번 부르고 끝이다. 두 번째 회차는 저장된 model.glb 를 그대로 올린다.
+        self.assertEqual(self.blender_calls, ["head_trim.py", "head_body_merge.py"])
+        self.assertEqual(self.client.submissions, ["model"])
 
     def test_generation_options_come_from_the_environment(self):
         """face_limit=auto 는 필드를 빼서 Tripo 가 정하게 한다. 실측 195만면·79MB 라
         감축 도구를 서버에 넣기 전에는 켜면 안 되고, 그래서 기본값은 숫자다."""
         job = self.claim()
-        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "0"}):
-            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
         self.assertEqual(self.client.model_options,
                          {"face_limit": 50000, "geometry_quality": "standard"})
 
-        database.insert_session("person-b", {}, True, True, True, 1, True, True)
-        (storage.session_dir("person-b") / "front.png").write_bytes(b"test-image")
-        model_queue.enqueue("person-b")
+        self.another()
         tuned = FakeTripo()
-        with patch.dict(os.environ, {"TRIPO_FACE_TRANSPLANT": "0", "TRIPO_FACE_LIMIT": "auto",
+        with patch.dict(os.environ, {"TRIPO_FACE_LIMIT": "auto",
                                      "TRIPO_GEOMETRY_QUALITY": "detailed"}):
-            ModelPipeline(model_queue.claim("worker-2"), "worker-2", tuned, lambda *_: None).run()
+            ModelPipeline(model_queue.claim("worker-2"), "worker-2", tuned,
+                          lambda *_: None).run()
         self.assertEqual(tuned.model_options, {"geometry_quality": "detailed"})
 
     def test_submission_response_loss_is_never_automatically_resubmitted(self):
@@ -179,72 +194,42 @@ class ModelWorkerTests(unittest.TestCase):
             ModelPipeline(restored, "worker-2", self.client, lambda *_: None).run()
         self.assertEqual(len(self.client.submissions), 1)
 
-    def test_rig_failure_is_not_published_as_an_animated_model(self):
+    # ── 준비물이 없을 때 ────────────────────────────────────────
+    def test_missing_body_asset_stops_the_job_before_spending_credits(self):
+        """대신할 경로가 없다. 예전에는 전신 경로로 내려갔지만 그것을 걷어냈으므로
+        여기서 멈춘다 — 설정이 빠진 채로 도는 것보다 낫다."""
         job = self.claim()
-        self.client.riggable = False
-        delivered = []
-        with self.assertRaises(PipelineFailure):
-            ModelPipeline(job, "worker-1", self.client, lambda *_: delivered.append(True)).run()
-        self.assertEqual(delivered, [])
-        self.assertNotEqual(database.get_session("person-a")["model_status"], "ready")
-
-    def test_head_pipeline_falls_back_loudly_when_the_body_asset_is_missing(self):
-        """머리 경로를 원했는데 몸통이 없으면 전신 경로로 내려간다. 조용히 내려가면
-        나중에 왜 얼굴이 그대로인지 알 수 없으므로 사유를 기록에 남겨야 한다."""
-        job = self.claim()
-        with patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": ""}):
-            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
-        self.assertEqual(job["steps"]["input"]["pipeline"], "full")
-        self.assertIn("HEAD_BODY_GLB", job["steps"]["input"]["pipeline_note"])
-        self.assertIn("tpose", self.client.submissions)
-
-    def test_head_pipeline_skips_tripo_rigging_and_uses_the_fixed_body(self):
-        """머리 경로에서는 몸통이 이미 리깅되어 있으므로 prerigcheck/rig/retarget 을
-        부르지 않는다. 운영 실패 8건 중 6건이 그 단계였고 크레딧도 95에서 60으로 준다."""
-        body = Path(self.temp.name) / "body.glb"
-        body.write_bytes(b"glTF-body")
-        job = self.claim()
-        calls = []
-
-        def fake_blender(script, *args, **kwargs):
-            # 두 스크립트 모두 「입력들… 출력 [옵션들]」 순서다. 옵션 앞의 마지막
-            # 위치 인자가 출력이다 — 첫 .glb 를 잡으면 입력에 덮어쓰게 된다.
-            calls.append(script)
-            positional = []
-            for value in args:
-                if str(value).startswith("--"):
-                    break
-                positional.append(value)
-            Path(positional[-1]).write_bytes(b"glTF-merged")
-            return ""
-
-        def fake_cutout(photo, dest, **kwargs):
-            dest.write_bytes(TPOSE_PNG)
-            return {"file": dest.name}
-
-        with (patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": str(body),
-                                     "BLENDER_BIN": sys.executable}),
-              patch("core.model_pipeline.run_blender", fake_blender),
-              patch("core.head_cutout.cutout", fake_cutout)):
-            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
-
-        self.assertEqual(job["steps"]["input"]["pipeline"], "head")
-        self.assertEqual(self.client.submissions, ["model"])
-        self.assertEqual(calls, ["head_trim.py", "head_body_merge.py"])
-        self.assertNotIn("tpose", job["steps"])
-
-    def test_head_pipeline_stops_when_no_face_is_found(self):
-        """컷아웃은 머리 경로의 전제다. 얼굴 이식과 달리 건너뛰고 계속할 수 없으므로
-        작업을 세우고 사유를 남긴다 — 어깨가 남으면 몸통과 겹친 흉상이 나간다."""
-        body = Path(self.temp.name) / "body.glb"
-        body.write_bytes(b"glTF-body")
-        job = self.claim()
-
-        with (patch.dict(os.environ, {"TRIPO_PIPELINE": "head", "HEAD_BODY_GLB": str(body),
-                                     "BLENDER_BIN": sys.executable}),
-              patch("core.head_cutout.cutout", side_effect=CutoutFailed("얼굴 없음"))):
+        with patch.dict(os.environ, {"HEAD_BODY_GLB": ""}):
             with self.assertRaises(PipelineFailure):
                 ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(self.client.submissions, [])
+
+    def test_missing_blender_stops_the_job_before_spending_credits(self):
+        job = self.claim()
+        with patch.dict(os.environ, {"BLENDER_BIN": "/nonexistent/blender"}):
+            with self.assertRaises(PipelineFailure):
+                ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+        self.assertEqual(self.client.submissions, [])
+
+    def test_cutout_failure_stops_the_job(self):
+        """오려내기는 이 경로의 전제다. 건너뛰고 계속할 방법이 없으므로 작업을 세운다 —
+        어깨가 남으면 몸통과 겹친 흉상이 나간다."""
+        for error in (CutoutFailed("얼굴 없음"), CutoutUnavailable("mediapipe 없음")):
+            job = self.claim()
+            with patch("core.head_cutout.cutout", side_effect=error):
+                with self.assertRaises(PipelineFailure):
+                    ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
+            model_queue.save(job, "worker-1", state="failed", error="cutout failed")
+        self.assertEqual(self.client.submissions, [])
+
+    def test_job_accepted_by_the_old_pipeline_is_refused(self):
+        """예전 방식(T포즈 → 전신 생성 → 리깅)으로 접수된 작업은 이어서 돌 수 없다.
+        저장된 task_id 를 그대로 쓰면 전신 모델을 머리인 줄 알고 자르게 된다."""
+        job = self.claim()
+        job["steps"]["input"] = {"sha256": hashlib.sha256(b"test-image").hexdigest(),
+                                 "pipeline": "full", "tpose": True}
+        with self.assertRaises(PipelineFailure):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
         self.assertEqual(self.client.submissions, [])
 
     def test_deleted_person_loses_job_lease_and_cannot_be_queued(self):
