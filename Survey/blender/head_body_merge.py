@@ -241,8 +241,11 @@ def main():
         if obj.type == "MESH":
             print(f"[merge] 내보낼 메시: {obj.name} · 정점 {len(obj.data.vertices)}")
 
+    # 애니메이션은 싣지 않는다. 몸통 FBX 에 들어 있는 것은 1프레임짜리 rigAction 뿐이라
+    # 쓸모가 없고, 자세는 유니티에서 Mixamo 클립으로 입힌다. 스켈레톤은 그대로 둔다 —
+    # 그게 있어야 나중에 클립을 얹을 수 있다.
     bpy.ops.export_scene.gltf(filepath=dst, export_format="GLB", export_yup=True,
-                              export_animations=True, export_skins=True)
+                              export_animations=False, export_skins=True)
     print("[done]", dst)
 
 

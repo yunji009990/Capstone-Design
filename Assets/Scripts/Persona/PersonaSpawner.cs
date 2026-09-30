@@ -23,7 +23,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using GLTFast;
 using UnityEngine;
@@ -546,97 +545,23 @@ public class PersonaSpawner : MonoBehaviour
         bone.localRotation = Quaternion.Inverse(parent) * world;
     }
 
-    /// <summary>
-    /// 모델 최상위에 배율이 걸린 래퍼 노드가 있으면 그 배율을 부모로 올리고 노드를 1 로 만든다.
-    ///
-    /// 도착 연출(PersonaArrival)은 이 노드를 휴머노이드 아바타의 뼈대 루트로 쓴다. 거기에
-    /// 배율이 남아 있으면 AvatarBuilder 가 만든 아바타가 깨져 몸이 접힌다 — 합친 모델의
-    /// scale_root(0.7) 에서 실제로 그랬다. 부모(Persona_*)의 배율은 아바타 밖이라 안전하다.
-    ///
-    /// 눈에 보이는 크기는 그대로다. 부모 × 자식의 곱이 같기 때문이다.
-    /// </summary>
-    void LiftWrapperScale(Transform root)
-    {
-        var renderer = root.GetComponentInChildren<SkinnedMeshRenderer>();
-        if (renderer == null || renderer.bones == null) return;
-        var bones = new HashSet<Transform>(renderer.bones);
-
-        // 뼈에 닿을 때까지 내려가며 래퍼 노드를 모은다. glTF 는 아마추어 노드와
-        // (우리가 넣은) 배율 노드를 뼈 위에 한 단씩 쌓는다.
-        var wrappers = new List<Transform>();
-        Transform node = root;
-        while (true)
-        {
-            Transform next = null;
-            foreach (Transform child in node)
-            {
-                if (bones.Contains(child)) { next = null; break; }
-                if (child.GetComponentsInChildren<Transform>(true).Any(bones.Contains))
-                {
-                    next = child;
-                    break;
-                }
-            }
-            if (next == null) break;
-            wrappers.Add(next);
-            node = next;
-        }
-        if (wrappers.Count == 0) return;
-
-        // 배율이 뼈 계층 안에 남아 있으면 휴머노이드 아바타가 깨져 몸이 접힌다. 유니티는
-        // rest 자세에 낀 배율을 감당하지 못하고 뼈 길이·축을 엉뚱하게 잡는다. 한 단만
-        // 걷어내면 아래 단이 그대로 남아 증상이 똑같다 — 실제로 scale_root(0.7) 만
-        // 올렸다가 root(0.01) 이 남아 계속 접혔다. 뼈에 닿을 때까지 전부 올린다.
-        float lifted = 1f;
-        foreach (var wrapper in wrappers)
-        {
-            Vector3 scale = wrapper.localScale;
-            if ((scale - Vector3.one).sqrMagnitude < 1e-12f) continue;
-            if (Mathf.Abs(scale.x - scale.y) > 1e-5f || Mathf.Abs(scale.y - scale.z) > 1e-5f)
-            {
-                Debug.LogWarning($"[PersonaSpawner] '{wrapper.name}' 배율이 균일하지 않아 그대로 둔다: {scale}");
-                continue;
-            }
-            if (Mathf.Abs(scale.x) < 1e-9f) continue;
-            root.localScale = Vector3.Scale(root.localScale, scale);
-            wrapper.localScale = Vector3.one;
-            wrapper.localPosition /= scale.x;
-            lifted *= scale.x;
-        }
-
-        if (verboseLog)
-        {
-            var chain = string.Join(" > ", wrappers.Select(w => $"{w.name}({w.localScale.x:0.###})"));
-            Debug.Log($"[PersonaSpawner] 뼈 위 래퍼 {wrappers.Count}단: {chain} · " +
-                      $"올린 배율 {lifted:0.####} → {root.name} {root.localScale}");
-        }
-    }
-
     void FindBreathBones(GameObject root)
     {
-        // 뼈 이름을 여기 적어 두면 몸통을 바꾸는 순간 호흡과 시선이 조용히 죽는다.
-        // 실제로 새 몸통에서 neck 말고는 하나도 못 찾아, 머리가 따라 돌지 않았다.
-        // 대응표(PersonaHumanoid.Map)를 거쳐 찾는다.
-        _spine = Bone(root, "Spine");
-        _chest = Bone(root, "Chest") ?? Bone(root, "UpperChest");
-        _neck = Bone(root, "Neck");
-        _lClav = Bone(root, "LeftShoulder");
-        _rClav = Bone(root, "RightShoulder");
-        _head = Bone(root, "Head");
+        _spine = _chest = _neck = _lClav = _rClav = _head = null;
+        foreach (var t in root.GetComponentsInChildren<Transform>(true))
+        {
+            string n = t.name.ToLowerInvariant();
+            if (_spine == null && n.EndsWith("spine01")) _spine = t;
+            else if (_chest == null && n.EndsWith("spine02")) _chest = t;
+            else if (_neck == null && n.Contains("neck")) _neck = t;
+            else if (_lClav == null && n.Contains("l_clavicle")) _lClav = t;
+            else if (_rClav == null && n.Contains("r_clavicle")) _rClav = t;
+            else if (_head == null && n.EndsWith("head")) _head = t;
+        }
         CaptureBreathBase();
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 호흡 뼈: spine={_spine?.name} chest={_chest?.name} neck={_neck?.name} " +
                       $"clavicle={_lClav?.name}/{_rClav?.name} head={_head?.name}");
-    }
-
-    /// <summary>Humanoid 이름으로 뼈를 찾는다. 대응표에 없으면 null.</summary>
-    static Transform Bone(GameObject root, string human)
-    {
-        string name = PersonaHumanoid.BoneOf(human);
-        if (string.IsNullOrEmpty(name)) return null;
-        foreach (var t in root.GetComponentsInChildren<Transform>(true))
-            if (t.name == name) return t;
-        return null;
     }
 
     void CaptureBreathBase()
@@ -819,7 +744,6 @@ public class PersonaSpawner : MonoBehaviour
             return;
         }
 
-        LiftWrapperScale(_spawnedInstance.transform);
         FindFacing(_spawnedInstance);
         // 도착 연출을 쓰면 자세는 그쪽이 잡는다. 여기서 preset:sit 을 틀면 서로 덮어쓴다.
         bool useArrival = arrival != null && arrival.CanRun;

@@ -200,26 +200,12 @@ public class PersonaArrival : MonoBehaviour
 
         _skeleton = renderer.rootBone != null ? renderer.rootBone : renderer.transform;
         while (_skeleton.parent != null && _skeleton.parent != _persona) _skeleton = _skeleton.parent;
-        // 걷기·회전 계산이 이 노드를 _persona 바로 아래로 전제한다(아래 Face/Turn).
-        // 그래서 뼈대 루트를 더 깊이 잡을 수 없다 — 대신 모델 쪽에서 래퍼 노드를
-        // 만들지 않는다. 배율이 걸린 노드가 여기 잡히면 아바타가 깨져 몸이 접힌다.
-        Debug.Log($"[PersonaArrival] 뼈대 루트: {_skeleton.name} " +
-                  $"(로컬 배율 {_skeleton.localScale}, 뼈 {renderer.bones.Length}개)");
 
         // 1) 기존 재생을 비켜세우고 바인드 포즈(=T포즈)로 되돌린다. 아바타는 T포즈에서 구워야 한다.
         var legacy = _persona.GetComponentInChildren<Animation>();
         if (legacy != null) legacy.enabled = false;
         if (!PersonaHumanoid.ForceBindPose(renderer))
             Debug.LogWarning("[PersonaArrival] 바인드 포즈 복원 실패 — 현재 자세로 진행한다");
-        // 아바타 품질이 여기에 전적으로 달려 있다. T포즈가 아닌 상태로 구우면 유니티가
-        // 뼈 축을 잘못 잡아 팔다리가 늘어나거나 접힌다. 배율을 다 걷어냈는데도 접히면
-        // 다음으로 볼 곳이 여기다.
-        Debug.Log("[PersonaArrival] 복원한 자세: " + PersonaHumanoid.DescribePose(_skeleton));
-        int scaled = 0;
-        foreach (var bone in renderer.bones)
-            if (bone != null && (bone.localScale - Vector3.one).sqrMagnitude > 1e-8f) scaled++;
-        if (scaled > 0)
-            Debug.LogWarning($"[PersonaArrival] 뼈 {scaled}개에 배율이 남아 있다 — 아바타가 깨질 수 있다");
 
         // 2) 이 리그는 +X 를 본다. 아바타는 뼈대의 *로컬* rest 를 굽으므로 보정도 로컬에서 한다.
         //    월드로 돌려놓고 부모를 되돌리면 기준이 다시 깨져 팔다리가 늘어진다.
@@ -241,11 +227,8 @@ public class PersonaArrival : MonoBehaviour
             return;
         }
 
-        // 골반 뼈 이름을 여기 박아 두면 몸통을 바꾸는 순간 높이 보정이 조용히 죽는다.
-        // 대응표에서 가져온다.
-        string hipName = PersonaHumanoid.BoneOf("Hips");
         foreach (var t in _skeleton.GetComponentsInChildren<Transform>(true))
-            if (t.name == hipName) { _hip = t; break; }
+            if (t.name == "Hip") { _hip = t; break; }
 
         _animator = _skeleton.GetComponent<Animator>();
         if (_animator == null) _animator = _skeleton.gameObject.AddComponent<Animator>();

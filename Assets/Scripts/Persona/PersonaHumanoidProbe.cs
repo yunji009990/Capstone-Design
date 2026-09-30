@@ -20,44 +20,20 @@ using UnityEngine.Playables;
 
 public static class PersonaHumanoid
 {
-    /// <summary>Unity Humanoid 뼈 이름 → 고정 몸통(Auto-Rig Pro 계열)의 뼈 이름.
-    ///
-    /// root.x 가 골반이다 — 여기서 다리가 갈라진다. 손가락 뼈는 있지만 도착 연출에
-    /// 쓰지 않으므로 매핑하지 않는다. 트위스트 뼈도 마찬가지다.</summary>
-    public static readonly (string human, string bone)[] Map =
+    /// <summary>Unity Humanoid 뼈 이름 → Tripo 뼈 이름. 트위스트 뼈 14개는 매핑하지 않는다.</summary>
+    public static readonly (string human, string tripo)[] Map =
     {
-        ("Hips", "root.x"), ("Spine", "spine_01.x"), ("Chest", "spine_02.x"),
-        ("UpperChest", "spine_03.x"), ("Neck", "neck.x"), ("Head", "head.x"),
-        ("LeftShoulder", "shoulder.l"), ("LeftUpperArm", "arm_stretch.l"),
-        ("LeftLowerArm", "forearm_stretch.l"), ("LeftHand", "hand.l"),
-        ("RightShoulder", "shoulder.r"), ("RightUpperArm", "arm_stretch.r"),
-        ("RightLowerArm", "forearm_stretch.r"), ("RightHand", "hand.r"),
-        ("LeftUpperLeg", "thigh_stretch.l"), ("LeftLowerLeg", "leg_stretch.l"),
-        ("LeftFoot", "foot.l"), ("LeftToes", "toes_01.l"),
-        ("RightUpperLeg", "thigh_stretch.r"), ("RightLowerLeg", "leg_stretch.r"),
-        ("RightFoot", "foot.r"), ("RightToes", "toes_01.r"),
+        ("Hips", "Hip"), ("Spine", "Waist"), ("Chest", "Spine01"), ("UpperChest", "Spine02"),
+        ("Neck", "NeckTwist01"), ("Head", "Head"),
+        ("LeftShoulder", "L_Clavicle"), ("LeftUpperArm", "L_Upperarm"),
+        ("LeftLowerArm", "L_Forearm"), ("LeftHand", "L_Hand"),
+        ("RightShoulder", "R_Clavicle"), ("RightUpperArm", "R_Upperarm"),
+        ("RightLowerArm", "R_Forearm"), ("RightHand", "R_Hand"),
+        ("LeftUpperLeg", "L_Thigh"), ("LeftLowerLeg", "L_Calf"),
+        ("LeftFoot", "L_Foot"), ("LeftToes", "L_ToeBase"),
+        ("RightUpperLeg", "R_Thigh"), ("RightLowerLeg", "R_Calf"),
+        ("RightFoot", "R_Foot"), ("RightToes", "R_ToeBase"),
     };
-
-    /// <summary>Humanoid 이름으로 뼈 이름을 찾는다. 없으면 null.</summary>
-    public static string BoneOf(string human)
-    {
-        foreach (var (h, b) in Map) if (h == human) return b;
-        return null;
-    }
-
-    // 이것들이 다 있어야 아바타를 만든다. 팔다리 끝과 몸통 축이 맞으면 나머지는 따라온다.
-    static readonly string[] Essential =
-    {
-        "Hips", "Head", "LeftHand", "RightHand", "LeftFoot", "RightFoot",
-    };
-
-    /// <summary>이 뼈대가 고정 몸통 규격인지 본다.</summary>
-    public static bool Matches(Transform root)
-    {
-        foreach (var human in Essential)
-            if (Find(root, BoneOf(human)) == null) return false;
-        return true;
-    }
 
     static Transform Find(Transform root, string name)
     {
@@ -96,9 +72,8 @@ public static class PersonaHumanoid
     /// </summary>
     public static string DescribePose(Transform root)
     {
-        Transform lh = Find(root, BoneOf("LeftHand")), rh = Find(root, BoneOf("RightHand"));
-        Transform arm = Find(root, BoneOf("LeftUpperArm"));
-        Transform hip = Find(root, BoneOf("Hips")), head = Find(root, BoneOf("Head"));
+        Transform lh = Find(root, "L_Hand"), rh = Find(root, "R_Hand");
+        Transform arm = Find(root, "L_Upperarm"), hip = Find(root, "Hip"), head = Find(root, "Head");
         if (lh == null || rh == null || arm == null || hip == null || head == null)
             return "뼈 일부를 찾지 못해 자세를 재지 못했다";
 
@@ -113,8 +88,8 @@ public static class PersonaHumanoid
     /// <summary>인물이 보는 방향(월드). 루트 회전과 무관하게 발목→발가락 뼈로 잰다.</summary>
     public static Vector3 MeasureFacing(Transform root)
     {
-        Transform lf = Find(root, BoneOf("LeftFoot")), lt = Find(root, BoneOf("LeftToes"));
-        Transform rf = Find(root, BoneOf("RightFoot")), rt = Find(root, BoneOf("RightToes"));
+        Transform lf = Find(root, "L_Foot"), lt = Find(root, "L_ToeBase");
+        Transform rf = Find(root, "R_Foot"), rt = Find(root, "R_ToeBase");
         if (lf == null || lt == null || rf == null || rt == null) return root.forward;
         Vector3 f = (lt.position - lf.position) + (rt.position - rf.position);
         f = Vector3.ProjectOnPlane(f, Vector3.up);
@@ -128,17 +103,12 @@ public static class PersonaHumanoid
     public static Avatar Build(Transform skeletonRoot, out string error)
     {
         error = null;
-        if (!Matches(skeletonRoot))
-        {
-            error = "고정 몸통 규격이 아니다 (root.x / head.x / hand.l 같은 뼈를 찾지 못했다)";
-            return null;
-        }
         var human = new List<HumanBone>();
         var missing = new List<string>();
-        foreach (var (humanName, boneName) in Map)
+        foreach (var (humanName, tripoName) in Map)
         {
-            var bone = Find(skeletonRoot, boneName);
-            if (bone == null) { missing.Add(boneName); continue; }
+            var bone = Find(skeletonRoot, tripoName);
+            if (bone == null) { missing.Add(tripoName); continue; }
             human.Add(new HumanBone
             {
                 humanName = humanName,
@@ -225,9 +195,16 @@ public class PersonaHumanoidProbe : MonoBehaviour
         }
         foreach (var renderer in renderers)
         {
-            if (renderer.bones == null) continue;
-            // 뼈 이름을 직접 보지 않고 규격 판별에 맡긴다. 몸통을 바꾸면 이름이 달라진다.
-            if (PersonaHumanoid.Matches(renderer.transform.root)) return renderer.transform.root;
+            var bones = renderer.bones;
+            if (bones == null) continue;
+            bool tripo = false, hip = false;
+            foreach (var b in bones)
+            {
+                if (b == null) continue;
+                if (b.name == "L_Upperarm") tripo = true;
+                else if (b.name == "Hip") hip = true;
+            }
+            if (tripo && hip) return renderer.transform.root;
         }
         return null;
     }
