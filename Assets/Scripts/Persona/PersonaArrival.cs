@@ -211,6 +211,15 @@ public class PersonaArrival : MonoBehaviour
         if (legacy != null) legacy.enabled = false;
         if (!PersonaHumanoid.ForceBindPose(renderer))
             Debug.LogWarning("[PersonaArrival] 바인드 포즈 복원 실패 — 현재 자세로 진행한다");
+        // 아바타 품질이 여기에 전적으로 달려 있다. T포즈가 아닌 상태로 구우면 유니티가
+        // 뼈 축을 잘못 잡아 팔다리가 늘어나거나 접힌다. 배율을 다 걷어냈는데도 접히면
+        // 다음으로 볼 곳이 여기다.
+        Debug.Log("[PersonaArrival] 복원한 자세: " + PersonaHumanoid.DescribePose(_skeleton));
+        int scaled = 0;
+        foreach (var bone in renderer.bones)
+            if (bone != null && (bone.localScale - Vector3.one).sqrMagnitude > 1e-8f) scaled++;
+        if (scaled > 0)
+            Debug.LogWarning($"[PersonaArrival] 뼈 {scaled}개에 배율이 남아 있다 — 아바타가 깨질 수 있다");
 
         // 2) 이 리그는 +X 를 본다. 아바타는 뼈대의 *로컬* rest 를 굽으므로 보정도 로컬에서 한다.
         //    월드로 돌려놓고 부모를 되돌리면 기준이 다시 깨져 팔다리가 늘어진다.

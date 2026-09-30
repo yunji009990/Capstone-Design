@@ -23,6 +23,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GLTFast;
 using UnityEngine;
@@ -556,24 +557,59 @@ public class PersonaSpawner : MonoBehaviour
     /// </summary>
     void LiftWrapperScale(Transform root)
     {
-        if (root.childCount != 1) return;
-        Transform child = root.GetChild(0);
-        Vector3 scale = child.localScale;
-        if ((scale - Vector3.one).sqrMagnitude < 1e-10f) return;
-        // 축마다 배율이 다르면 부모로 올려도 회전이 섞여 어긋난다. 균일할 때만 손댄다.
-        if (Mathf.Abs(scale.x - scale.y) > 1e-5f || Mathf.Abs(scale.y - scale.z) > 1e-5f)
-        {
-            Debug.LogWarning($"[PersonaSpawner] 최상위 배율이 균일하지 않아 그대로 둔다: {scale}");
-            return;
-        }
-        if (Mathf.Abs(scale.x) < 1e-6f) return;
+        var renderer = root.GetComponentInChildren<SkinnedMeshRenderer>();
+        if (renderer == null || renderer.bones == null) return;
+        var bones = new HashSet<Transform>(renderer.bones);
 
-        root.localScale = Vector3.Scale(root.localScale, scale);
-        child.localScale = Vector3.one;
-        child.localPosition /= scale.x;
+        // 뼈에 닿을 때까지 내려가며 래퍼 노드를 모은다. glTF 는 아마추어 노드와
+        // (우리가 넣은) 배율 노드를 뼈 위에 한 단씩 쌓는다.
+        var wrappers = new List<Transform>();
+        Transform node = root;
+        while (true)
+        {
+            Transform next = null;
+            foreach (Transform child in node)
+            {
+                if (bones.Contains(child)) { next = null; break; }
+                if (child.GetComponentsInChildren<Transform>(true).Any(bones.Contains))
+                {
+                    next = child;
+                    break;
+                }
+            }
+            if (next == null) break;
+            wrappers.Add(next);
+            node = next;
+        }
+        if (wrappers.Count == 0) return;
+
+        // 배율이 뼈 계층 안에 남아 있으면 휴머노이드 아바타가 깨져 몸이 접힌다. 유니티는
+        // rest 자세에 낀 배율을 감당하지 못하고 뼈 길이·축을 엉뚱하게 잡는다. 한 단만
+        // 걷어내면 아래 단이 그대로 남아 증상이 똑같다 — 실제로 scale_root(0.7) 만
+        // 올렸다가 root(0.01) 이 남아 계속 접혔다. 뼈에 닿을 때까지 전부 올린다.
+        float lifted = 1f;
+        foreach (var wrapper in wrappers)
+        {
+            Vector3 scale = wrapper.localScale;
+            if ((scale - Vector3.one).sqrMagnitude < 1e-12f) continue;
+            if (Mathf.Abs(scale.x - scale.y) > 1e-5f || Mathf.Abs(scale.y - scale.z) > 1e-5f)
+            {
+                Debug.LogWarning($"[PersonaSpawner] '{wrapper.name}' 배율이 균일하지 않아 그대로 둔다: {scale}");
+                continue;
+            }
+            if (Mathf.Abs(scale.x) < 1e-9f) continue;
+            root.localScale = Vector3.Scale(root.localScale, scale);
+            wrapper.localScale = Vector3.one;
+            wrapper.localPosition /= scale.x;
+            lifted *= scale.x;
+        }
+
         if (verboseLog)
-            Debug.Log($"[PersonaSpawner] 최상위 배율 {scale.x:0.###} 를 부모로 올렸다 " +
-                      $"({child.name} → 1, {root.name} → {root.localScale})");
+        {
+            var chain = string.Join(" > ", wrappers.Select(w => $"{w.name}({w.localScale.x:0.###})"));
+            Debug.Log($"[PersonaSpawner] 뼈 위 래퍼 {wrappers.Count}단: {chain} · " +
+                      $"올린 배율 {lifted:0.####} → {root.name} {root.localScale}");
+        }
     }
 
     void FindBreathBones(GameObject root)
