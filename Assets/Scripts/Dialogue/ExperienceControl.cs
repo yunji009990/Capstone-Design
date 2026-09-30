@@ -3,7 +3,7 @@
 //
 // 이 프로젝트에는 "게임 시작"에 해당하는 코드가 따로 없었다. MainScene 의
 // ButtonController.StartContent 는 치료 콘텐츠 애니메이터를 트리거하는 것이라 여기와
-// 상관이 없다. 여기서 체험이 시작된다는 것은 곧 대화를 받기 시작한다는 뜻이다.
+// 상관이 없다. 시작 버튼으로 대화를 열고, 연결된 인물의 입장 연출도 시작한다.
 //
 // 말을 걸 때 단추를 누를 필요는 없다 — 자동 감지가 켜져 있어 그냥 말하면 된다.
 // 그래서 단추 하나가 시작과 종료를 번갈아 맡는다.
@@ -18,6 +18,8 @@ public class ExperienceControl : MonoBehaviour
     [Tooltip("비워두면 씬에서 찾는다.")]
     public DialogueVoiceClient voice;
     public ConversationLog log;
+    [Tooltip("체험 시작을 기다리도록 설정한 인물. 비워두면 씬에서 찾는다.")]
+    public PersonaSpawner spawner;
 
     [Header("단추")]
     public Button startButton;
@@ -36,6 +38,7 @@ public class ExperienceControl : MonoBehaviour
     {
         if (voice == null) voice = FindObjectOfType<DialogueVoiceClient>();
         if (log == null) log = FindObjectOfType<ConversationLog>();
+        if (spawner == null) spawner = FindObjectOfType<PersonaSpawner>();
         if (buttonImage == null && startButton != null)
             buttonImage = startButton.GetComponent<Image>();
     }
@@ -72,10 +75,12 @@ public class ExperienceControl : MonoBehaviour
     /// <summary>대화 맥락과 기록을 비우고 듣기 시작한다. 앞사람 이야기를 이어받으면 안 된다.</summary>
     public void Begin()
     {
+        if (!isActiveAndEnabled || Started) return;
         if (voice == null || !voice.HasSession) return;
         if (!voice.BeginExperience()) return;
         if (log != null) log.Clear();
         Started = true;
+        if (spawner != null && spawner.waitForExperienceStart) spawner.BeginPresentation();
         Refresh();
     }
 
@@ -91,18 +96,28 @@ public class ExperienceControl : MonoBehaviour
         // 이미 실패 등으로 끝난 뒤라면 그때 잡힌 실제 원인을 덮어쓰지 않는다.
         if (voice != null && (voice.ExperienceActive || string.IsNullOrEmpty(voice.LastEndReason)))
             voice.EndExperience(reason);
+        if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
         Started = false;
         Refresh();
     }
 
     void Update()
     {
-        if (Started && (voice == null || !voice.ExperienceActive)) Started = false;
+        if (Started && (voice == null || !voice.ExperienceActive))
+        {
+            if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
+            Started = false;
+        }
         Refresh();
     }
 
     // 사용자가 단추를 누른 것이 아니다. ui_finish 로 위장하지 않는다.
     void OnDisable() => FinishWith("control_disabled");
+
+    void OnDestroy()
+    {
+        if (startButton) startButton.onClick.RemoveListener(Toggle);
+    }
 
     void Refresh()
     {
