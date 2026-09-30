@@ -9,7 +9,17 @@ import time
 from pathlib import Path
 
 from . import head_cutout, model_queue, storage
-from .tripo import image_extension, image_url
+from .tripo import TransientError, image_extension, image_url
+
+# 재시도 간격. 상대가 죽어 있는 동안 3초마다 두드리면 복구를 돕기는커녕 방해가
+# 되므로 점점 뜸하게 묻되, 30초를 넘기지는 않는다 — 대기 한도가 30분이라 너무
+# 뜸하면 상대가 돌아온 뒤에도 한참을 못 알아챈다.
+RETRY_STEPS = (5, 10, 20, 30)
+
+
+def backoff(attempts: int) -> int:
+    """연속 실패 횟수에 따라 다음에 다시 물어보기까지 쉴 시간(초)."""
+    return RETRY_STEPS[min(attempts, len(RETRY_STEPS)) - 1]
 
 BLENDER_DIR = Path(__file__).resolve().parents[1] / "blender"
 
@@ -91,6 +101,20 @@ class ModelPipeline:
         self.check()
         model_queue.save(self.job, self.owner)
 
+    def fetch(self, call, tries=5):
+        """일시적 통신 오류면 쉬었다 다시 부른다. 그 밖의 오류는 그대로 올린다.
+
+        값을 치르지 않는 호출(내려받기)에만 쓴다. 제출에 쓰면 같은 작업을 두 번
+        만들 수 있다."""
+        for attempt in range(1, tries + 1):
+            self.check()
+            try:
+                return call()
+            except TransientError:
+                if attempt == tries:
+                    raise
+                self.sleep(backoff(attempt))
+
     def task(self, name, submit):
         self.check()
         steps = self.job["steps"]
@@ -110,9 +134,20 @@ class ModelPipeline:
         elif not record.get("task_id"):
             raise SubmissionUnknown(name)
         deadline = time.monotonic() + 1800
+        trouble, attempts = None, 0
         while time.monotonic() < deadline:
             self.check()
-            response = self.client.get_task(record["task_id"])
+            try:
+                response = self.client.get_task(record["task_id"])
+            except TransientError as exc:
+                # 상대 게이트웨이가 잠깐 흔들린 것이다. 30분을 기다리기로 해 놓고
+                # 502 한 번에 작업을 접으면, 이미 값을 치른 Tripo 작업을 버리게 된다.
+                # 실측(2026-09-30)에서 그렇게 죽은 두 작업 모두 Tripo 쪽에서는
+                # success 로 끝나 있었다.
+                trouble, attempts = exc, attempts + 1
+                self.sleep(backoff(attempts))
+                continue
+            trouble, attempts = None, 0
             data = response.get("data") or {}
             status = str(data.get("status", "")).lower()
             if status == "success":
@@ -124,6 +159,11 @@ class ModelPipeline:
                 self.save()
                 raise PipelineFailure(name + ": 외부 작업 " + status)
             self.sleep(3)
+        if trouble is not None:
+            # 마지막까지 말을 못 붙인 채 시간이 다 갔다. 작업 ID 는 그대로 두므로
+            # 상대가 돌아오면 같은 작업을 이어받는다 — 크레딧이 더 들지 않는다.
+            raise PipelineFailure(
+                f"{name}: 생성 서버와 통신하지 못했습니다 · 작업 ID를 유지했습니다 · {trouble}")
         raise PipelineFailure(name + ": 대기 시간 초과 · 작업 ID를 유지했습니다")
 
     def cutout(self, sid, photo):
@@ -266,7 +306,9 @@ class ModelPipeline:
             raw = storage.session_dir(sid) / "head_raw.glb"
             if not raw.is_file():
                 partial = raw.with_suffix(".glb.part")
-                self.client.download_glb(url, partial)
+                # 다 만들어 놓고 받는 길만 막혀 작업을 버리는 일이 없도록, 폴링과
+                # 같은 규율로 다시 받는다. CDN 은 API 와 다른 호스트라 따로 흔들린다.
+                self.fetch(lambda: self.client.download_glb(url, partial))
                 self.check()
                 with partial.open("rb") as stream:
                     if stream.read(4) != b"glTF":

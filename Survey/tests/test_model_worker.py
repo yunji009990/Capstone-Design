@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import database, model_queue, storage
 from core.head_cutout import CutoutFailed, CutoutUnavailable
 from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
+from core.tripo import TransientError, _classify
 
 HEAD_PNG = b"\x89PNG\r\n\x1a\nfake-head-cutout"
 
@@ -25,6 +26,10 @@ class FakeTripo:
     def __init__(self):
         self.submissions = []
         self.unknown = False
+        # 앞에서부터 하나씩 꺼내 get_task·download_glb 대신 던진다. 비면 정상 동작.
+        self.get_faults = []
+        self.download_faults = []
+        self.polls = 0
 
     def _submit(self, body):
         self.submissions.append(body["type"])
@@ -40,10 +45,15 @@ class FakeTripo:
         return self._submit({"type": "model"})
 
     def get_task(self, task):
+        self.polls += 1
+        if self.get_faults:
+            raise self.get_faults.pop(0)
         return {"data": {"status": "success", "consumed_credit": 0,
                          "output": {"model": "https://fake.invalid/model"}}}
 
     def download_glb(self, url, dest):
+        if self.download_faults:
+            raise self.download_faults.pop(0)
         dest.write_bytes(b"glTF-head-from-tripo")
 
 
@@ -238,6 +248,80 @@ class ModelWorkerTests(unittest.TestCase):
         with self.assertRaises(PipelineFailure):
             ModelPipeline(job, "worker-1", self.client, lambda *_: None).run()
         self.assertEqual(self.client.submissions, [])
+
+    # ── 일시적 통신 오류 ───────────────────────────────────────
+    #
+    # 2026-09-30 운영에서 같은 사진이 세 번 성공하고 두 번 죽었다. 죽은 쪽의
+    # 오류는 Tripo 게이트웨이의 502 였고, 그 두 작업은 Tripo 쪽에서 success 로
+    # 끝나 있었다(각 40 크레딧). 30분을 기다리기로 해 놓고 한 번 흔들렸다고
+    # 값을 치른 작업을 버린 것이라, 그 구조를 여기서 붙잡아 둔다.
+
+    def test_gateway_hiccup_while_polling_does_not_lose_a_paid_task(self):
+        naps = []
+        self.client.get_faults = [TransientError("Tripo GET 실패 [502]"),
+                                  TransientError("Tripo GET 실패 [503]")]
+        job = self.claim()
+        delivered = []
+        ModelPipeline(job, "worker-1", self.client,
+                      lambda sid, path: delivered.append(path.read_bytes()),
+                      sleep=naps.append).run()
+        self.assertEqual(delivered, [b"glTF-merged"])
+        # 제출은 한 번뿐이어야 한다. 다시 냈으면 크레딧을 또 쓴 것이다.
+        self.assertEqual(self.client.submissions, ["model"])
+        self.assertEqual(self.client.polls, 3)
+        # 3초 간격으로 들이받지 않고 점점 뜸하게 물어본다.
+        self.assertEqual(naps[:2], [5, 10])
+
+    def test_a_real_api_error_while_polling_fails_at_once(self):
+        """401·400 은 몇 번을 물어도 같은 답이 온다. 재시도하면 고장을 30분 감춘다."""
+        naps = []
+        self.client.get_faults = [RuntimeError("Tripo GET 실패 [401]: bad key")]
+        job = self.claim()
+        with self.assertRaisesRegex(RuntimeError, "401"):
+            ModelPipeline(job, "worker-1", self.client, lambda *_: None,
+                          sleep=naps.append).run()
+        self.assertEqual(self.client.polls, 1)
+        self.assertEqual(naps, [])
+
+    def test_download_hiccup_is_retried_without_resubmitting(self):
+        """CDN 은 API 와 다른 호스트라 따로 흔들린다. 다 만들어 놓고 받는 길만
+        막혀 작업을 버리면 크레딧을 그대로 버리는 것이다."""
+        naps = []
+        self.client.download_faults = [TransientError("Tripo 다운로드 통신 실패")]
+        job = self.claim()
+        delivered = []
+        ModelPipeline(job, "worker-1", self.client,
+                      lambda sid, path: delivered.append(path.read_bytes()),
+                      sleep=naps.append).run()
+        self.assertEqual(delivered, [b"glTF-merged"])
+        self.assertEqual(self.client.submissions, ["model"])
+
+    def test_persistent_outage_keeps_the_task_id_for_a_later_retry(self):
+        """상대가 끝내 돌아오지 않아도 task_id 는 남아야 한다. 남아 있어야 나중에
+        같은 작업을 이어받고, 크레딧을 다시 쓰지 않는다."""
+        self.client.get_faults = [TransientError("Tripo GET 실패 [502]")] * 400
+        job = self.claim()
+        # 쉬는 동안 시계가 도는 것까지 흉내 내야 대기 한도(30분)에 닿는다.
+        clock = [0.0]
+        with patch("core.model_pipeline.time.monotonic", lambda: clock[0]):
+            with self.assertRaisesRegex(PipelineFailure, "작업 ID를 유지"):
+                ModelPipeline(job, "worker-1", self.client, lambda *_: None,
+                              sleep=lambda s: clock.__setitem__(0, clock[0] + s)).run()
+        self.assertEqual(job["steps"]["model"]["task_id"], "model")
+        self.assertEqual(self.client.submissions, ["model"])
+
+    def test_http_codes_are_split_into_retry_and_give_up(self):
+        import urllib.error
+
+        def error(code):
+            return urllib.error.HTTPError("u", code, "m", None, None)
+        for code in (408, 429, 500, 502, 503, 504):
+            self.assertIsInstance(_classify(error(code), "x"), TransientError, code)
+        for code in (400, 401, 403, 404):
+            self.assertNotIsInstance(_classify(error(code), "x"), TransientError, code)
+        # HTTPError 가 아닌 끊김(DNS·TCP·TLS)은 다시 걸어 볼 값어치가 있다.
+        self.assertIsInstance(_classify(urllib.error.URLError("reset"), "x"), TransientError)
+
 
     def test_deleted_person_loses_job_lease_and_cannot_be_queued(self):
         job = self.claim()

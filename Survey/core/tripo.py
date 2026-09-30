@@ -63,6 +63,35 @@ def _ssl_context() -> ssl.SSLContext:
 
 _SSL_CTX = _ssl_context()
 
+# 상대가 잠깐 흔들린 것뿐인 응답들. 다시 물으면 될 상태이지 작업의 실패가 아니다.
+# 408 요청 시간 초과, 425 너무 이름, 429 요청 과다, 5xx 게이트웨이·서버 오류.
+TRANSIENT_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+class TransientError(RuntimeError):
+    """다시 시도하면 될 일시적 통신 오류.
+
+    Tripo 게이트웨이가 502 를 한 번 돌려줬다고 이미 값을 치른 작업을 버리면 안 된다.
+    실측(2026-09-30)에서 같은 사진이 세 번 성공하고 두 번 이 오류로 죽었는데, 죽은
+    두 작업 모두 Tripo 쪽에서는 success 로 끝나 있었다 — 크레딧 80 을 버린 셈이다.
+
+    RuntimeError 를 물려받으므로, 이 구분을 모르고 RuntimeError 만 잡던 기존
+    호출부도 예전과 똑같이 동작한다.
+    """
+
+
+def _classify(exc: Exception, message: str) -> RuntimeError:
+    """통신 예외를 「다시 물어볼 것」과 「진짜 실패」로 가른다.
+
+    401·403 은 키가 틀린 것이고 400 은 요청이 틀린 것이라, 몇 번을 다시 물어도
+    같은 답이 온다. 그런 것까지 재시도하면 고장을 30분 동안 감추기만 한다.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return (TransientError if exc.code in TRANSIENT_CODES else RuntimeError)(message)
+    # HTTPError 가 아닌 URLError 는 DNS·TCP·TLS 가 끊긴 것이다. 상대 서버가
+    # 대답을 거절한 게 아니므로 다시 걸어 볼 값어치가 있다.
+    return TransientError(message)
+
 
 @dataclass
 class TaskResult:
@@ -388,7 +417,12 @@ class TripoClient:
         except urllib.error.HTTPError as e:
             # 다른 헬퍼들과 같은 형식으로 감싼다. 날것의 `HTTP Error 403: Forbidden`
             # 만 남으면 네 군데 중 어디서 터진 것인지 로그로 가려낼 수 없다.
-            raise RuntimeError(f"Tripo 다운로드 실패 [{e.code}]: {url}")
+            raise _classify(e, f"Tripo 다운로드 실패 [{e.code}]: {url}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            # 받다 만 파일을 남기면 다음 시도가 이어 쓸까 봐 지운다. 호출부가
+            # .part 로 받아 끝나고 나서 옮기므로, 여기서 지우는 것이 안전하다.
+            dest.unlink(missing_ok=True)
+            raise TransientError(f"Tripo 다운로드 통신 실패: {url} · {e}") from e
         return dest
 
     # ── HTTP 헬퍼 ──────────────────────────────────────────────
@@ -410,6 +444,10 @@ class TripoClient:
             with urllib.request.urlopen(req, timeout=60, context=_SSL_CTX) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
+            # POST 는 일부러 TransientError 로 분류하지 않는다. 제출은 값을 치르는
+            # 호출이라, 재시도가 붙으면 같은 사진으로 작업을 두 번 만들어 크레딧을
+            # 두 배로 쓸 수 있다. 제출이 흔들렸을 때의 처리는 호출부의
+            # SubmissionUnknown 규율(POST 전에 먼저 기록)이 이미 맡고 있다.
             raise RuntimeError(f"Tripo POST 실패 [{e.code}]: {e.read().decode('utf-8', errors='replace')}")
 
     def _get(self, url: str) -> dict[str, Any]:
@@ -422,7 +460,10 @@ class TripoClient:
             with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Tripo GET 실패 [{e.code}]: {e.read().decode('utf-8', errors='replace')}")
+            body = e.read().decode("utf-8", errors="replace")
+            raise _classify(e, f"Tripo GET 실패 [{e.code}]: {body}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise TransientError(f"Tripo GET 통신 실패: {e}") from e
 
     def _upload_image(self, image_path: Path) -> str:
         """multipart/form-data로 이미지 업로드 → image_token 반환."""
