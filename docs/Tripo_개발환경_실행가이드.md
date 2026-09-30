@@ -1,21 +1,27 @@
 # Tripo 개발환경과 현재 도구 사용법
 
-기준일: 2026-09-15. 담당 범위·미구현 기능·완료 기준은 [AI 작업 지시서](Tripo_팀원_AI_작업지시서.md)를 따른다.
-아래 명령은 기존 도구를 실행하는 방법이다. T포즈 자동화와 사진 전용 웹이 완성되어 있다는 뜻은 아니다.
+기준일: 2026-09-29. 담당 범위·미구현 기능·완료 기준은 [AI 작업 지시서](Tripo_팀원_AI_작업지시서.md)를 따른다.
+운영 기본은 [머리 생성·고정 몸체 결합](Tripo_머리_생성_파이프라인.md)이다. 기존 전신 실험 도구도 유지한다.
+등록 웹은 설문·참조 음성을 요구하며 사진 전용 제작 웹은 미구현이다.
 
 ## 1. 전달할 것
 
 | 자료 | 전달 방법 |
 |---|---|
-| 프로젝트 기본 자산·Git 이력 | 팀 저장소에서 기준 커밋 clone |
-| 현재 분리 코드·문서·설정 예제 | 인수인계 ZIP 적용. 기준 커밋·파일 해시는 ZIP manifest |
+| 프로젝트 기본 자산·Git 이력 | 최신 팀 저장소 clone. 9월 29일 병합은 `135fd4da` |
+| 현재 코드·문서·설정 예제 | 최신 Git clone 기준. 기존 인계 ZIP은 아래 포함 범위 제한 확인 |
 | Unity | 2022.3.62f2 설치. 기존 manifest/lock의 패키지 사용 |
-| Python | 작업자 모의 검사·실험 도구는 3.9 이상. 웹 환경 재현은 3.12 권장 |
+| Python | 모의 검사는 3.9에서 확인. 실제 머리 처리 의존성은 서버 Python 3.12 기준 |
+| 머리 처리 준비물 | Blender 실행 파일, 리깅된 몸체 GLB, MediaPipe 분할 모델, InsightFace 가중치 |
 | Node.js | 웹 등록 검사를 포함한 `platform`/`all` 실행에 22 이상 필요. 현재 로컬·CI 기준은 24 |
 | Tripo·이미지 편집 키, 서버 접속 권한 | 팀의 비밀 설정 전달 수단으로 별도 전달. 코드·문서·ZIP에는 없음 |
 | 실제 사진·T포즈·GLB | 별도 자료 전달 또는 사용할 수 있는 새 사진 준비. ZIP에 없음 |
 
 로컬에서 새 인수인계 묶음을 만들 때:
+
+**현재 `tripo_handoff.py`는 새 머리 도구·`Survey/blender/`·머리 문서·몸체 자산 일부를 선택하지 않는다.**
+머리 기능을 받을 때에는 최신 Git clone과 별도 준비물을 사용한다. 아래 ZIP 절차는 기존 인계 범위이며,
+필요한 모든 파일이 manifest에 들어 있는지 확인하기 전에는 완전한 머리 개발 환경으로 안내하지 않는다.
 
 ```powershell
 python tools/tripo_handoff.py build --out tools/_work/handoff/tripo_handoff_20260915.zip
@@ -56,6 +62,10 @@ worker 검사에는 가짜 이미지·Tripo 응답·등록 전달과 임시 DB�
 
 ## 3. Unity에서 기존 결과 확인
 
+머리·몸체·결합 GLB는 `Tools > 다시봄 > 모델 미리보기`를 쓴다. `tools/_work/`의 로컬 GLB를 선택하며
+API를 자동 호출하지 않는다. 결합 전신은 원본 크기·발바닥 기준 배치를 사용한다.
+아래 `Tripo_Model_Test` 절차는 기존 전신·리깅·동작 팩 실험용이다.
+
 1. 수신 프로젝트를 Unity Hub에 추가하고 2022.3.62f2로 연다.
 2. `Assets/Scenes/Tripo_Model_Test.unity` 또는 `Tools > Tripo > Open model test scene`을 연다.
 3. 전달받은 모델 폴더가 있으면 `모델 폴더 선택`으로 선택한다.
@@ -79,6 +89,20 @@ tripo_trial_<고유이름>/
 자세한 조작은 [모델 테스트 씬 문서](Tripo_모델_테스트_씬.md)를 참고한다.
 
 ## 4. 현재 실험 도구로 모델 만들기
+
+### 머리 단독·전처리
+
+실제 ML 의존성과 모델을 준비한 Python에서 실행한다. `--dry-run`은 전처리까지만 수행하고,
+생성 결과를 몸체와 결합하는 작업은 서버 파이프라인 또는 Blender 도구가 담당한다.
+
+```powershell
+python tools/head_cutout.py --image C:/work/photo.png --out tools/_work/head-test/input.png --fit portrait
+python tools/head_only_trial.py --image C:/work/photo.png --out tools/_work/head-test/trial --prep cutout --fit portrait --dry-run
+```
+
+`--dry-run`을 빼면 유료 Tripo 생성 요청이다. [설정·실패 조건](Tripo_머리_생성_파이프라인.md)을 먼저 확인한다.
+
+### 기존 전신·T포즈 실험
 
 `--tpose` 를 붙이면 원본 사진을 Tripo `generate_image`(`t_pose`)로 T포즈 이미지로 바꾼 뒤 생성한다
 (+5 크레딧, 2026-09-14). 붙이지 않으면 준비된 JPG/PNG T포즈 이미지를 그대로 입력한다.
@@ -132,8 +156,9 @@ py -3.12 -m venv "$tripoRepo/tools/_work/tripo_dev/venv-worker"
 ```
 
 `Web/requirements.txt`는 2026-09-13 실제 운영 웹의 Python 3.12.3 환경에서 확인한 직접 의존성 버전이다.
-플랫폼별 새 설치까지 모두 검증한 lock 파일은 아니다. Tripo 작업자는 웹/음성/GPU 패키지를 요구하지 않는다.
-기존 음성 추출 기능에는 별도 FFmpeg·NeMo 환경이 필요하며 사진 제작 개발의 선행 조건으로 설치하지 않는다.
+플랫폼별 새 설치까지 모두 검증한 lock 파일은 아니다. Tripo 작업자는 대화용 음성/GPU 패키지를 요구하지 않지만
+머리 전처리용 CPU ML 의존성과 모델은 필요하다. 이전 NeMo 화자 분리는 현재 웹에서 호출하지 않으며
+사진 제작 개발의 선행 조건으로 설치하지 않는다. 현재 웹의 음성 파일 변환에는 별도 NeMo가 필요 없다.
 
 개발 clone의 `Web/.env`를 다음 내용으로 설정한다. `SESSION_TOKEN`과 `ADMIN_PASSWORD`는 새 개발용 값을 사용한다.
 Tripo 키는 처음에는 비워 두어도 된다. 입력한 경로의 `<개발 clone>`은 실제 절대 경로로 바꾼다.
@@ -147,7 +172,21 @@ SURVEY_ACCESS_CODE=
 TRIPO_API_KEY=
 TRIPO_POSE=preset:sit
 TRIPO_TPOSE=1
+TRIPO_PIPELINE=head
+HEAD_BODY_GLB=<개발용 리깅 몸체 GLB 절대 경로>
+BLENDER_BIN=<Blender 실행 파일 절대 경로>
+HEAD_CUTOUT_MODEL=<분할 모델 절대 경로>
+HEAD_CUTOUT_FIT=portrait
+# 저장소 Human 몸체를 쓸 때의 예시. 다른 리그에는 본 이름·보정값을 다시 맞춘다.
+HEAD_BODY_BONE=head.x
+HEAD_BODY_FROM=neck.x
+HEAD_BODY_SHARE=0.125
+HEAD_BODY_YAW=-90
+HEAD_BODY_OUT_SCALE=0.7
 ```
+
+몸체 GLB·Blender 누락 시 head가 full로 내려간다. 분할 준비물 누락은 작업 실패다.
+`TRIPO_TPOSE`는 full 경로에서만 적용한다. 운영 서버에 준비된 모델 파일이 새 clone에 자동 복사되지는 않는다.
 
 기동할 각 PowerShell 터미널에서 아래 공통 부분을 먼저 실행한다. 값은 화면에 출력하지 않는다.
 

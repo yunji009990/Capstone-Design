@@ -1,5 +1,6 @@
 # 다시, 봄 — 서버
 
+2026-09-29 점검 기준. 전체 배포·검사 범위는 [현재 구현 현황](../docs/현재_구현_현황.md)을 따른다.
 **2026-09-18 03:49 KST 운영 TTS는 VoxCPM2다.** 현재 설정·전환 검사·Qwen 복구 절차와
 Claude Code 재개는 [TTS 작업 인계](../docs/TTS_작업인계_20260918.md)를 먼저 읽는다.
 사용자 청취와 Scene_2 실제 체험 판정은 남아 있다.
@@ -37,7 +38,7 @@ v2의 말버릇 반복 억제와 약한 전사 거절(`weak_text`)은
 | 8003 (loopback) | tts | `~/venv/qwentts` | 인증·참조 ID·GPU VoxCPM2 참조 음성 복제·생성 중 PCM |
 | 8004 (현재 미사용) | 이전 Qwen 엔진 | `~/venv/qwentts-stream` | vLLM-Omni / Qwen3-TTS 환경은 복구용 보존 |
 | 8500 | web | `~/venv/web` | 등록 웹, 코드 위치 `~/webapp` |
-| 없음 | tripo | `~/venv/tripo` | 별도 CPU 작업자, SQLite 작업 복구·Tripo 요청·GLB 전달 |
+| 없음 | tripo | `~/venv/tripo` | 별도 CPU 작업자, 머리 추출·Tripo 생성·Blender 몸체 결합·GLB 전달 |
 
 웹·Tripo 실행 코드: `~/webapp`. 등록 API: `~/webapp/Server/registration`.
 대화 AI 실행 코드: `~/capstone-server`. 인물 원본: `~/server/sessions`.
@@ -50,6 +51,8 @@ VoxCPM2와 복구용 Qwen 가중치는 Hugging Face 캐시에 있다. TTS가 Gem
 
 각 서비스의 `.env.example`을 `.env`로 복사해 설정한다. 토큰은 Unity와 일치시키며 파일 권한은 600으로 둔다.
 TTS worker 토큰은 `tts.env`의 `TTS_TOKEN`과 `dialogue.env`의 `DIALOGUE_TTS_TOKEN`을 맞춘다.
+현재 운영에는 `tts.env.example`처럼 **`TTS_BACKEND=voxcpm2`를 명시**한다.
+이 변수를 생략한 코드 기본값은 아직 `vllm_omni`이므로 운영 설정과 구분한다.
 네트워크에 노출되는 두 서비스는 토큰이 없으면 시작 스크립트가 실행을 거부한다.
 
 ```bash
@@ -93,6 +96,8 @@ TTS는 `DIALOGUE_TTS_URL=`이면 사용하지 않는다. 다시 사용하려면 
 
 등록 API는 `requirements-registration.txt`, Tripo 작업자는 `Survey/requirements-worker.txt`,
 대화 서비스는 `requirements-dialogue.txt`를 사용한다.
+머리 작업자는 별도로 Blender·몸체 GLB·분할/얼굴 검출 모델을 준비한다.
+[Tripo 머리 파이프라인](../docs/Tripo_머리_생성_파이프라인.md)의 head/full 전환 조건을 확인한다.
 현재 VoxCPM2는 기존 `qwentts` venv의 torch 2.8.0/cu128·soxr와 고정 커밋의 Vox 소스를 사용한다.
 실제 소스·모델 경로는 [인계 문서](../docs/TTS_작업인계_20260918.md)에 있다. 새 PC 설치는 아직 검증하지 않았다.
 `requirements-tts.txt`와 `requirements-tts-streaming.txt`는 이전 Qwen 경로의 의존성이다.
@@ -170,16 +175,18 @@ python tools/service_bundle.py dialogue
 판정 중 다음 TTS 구절을 보류하지만 이미 진행 중인 GPU 계산을 일시정지하는 기능은 아니다.
 Web은 `SESSION_URL`, `SESSION_TOKEN`을 사용하고 하드코딩된 접속 토큰은 제거했다.
 
-TTS는 Base 모델의 ICL 모드로 참조 음성 코드·화자 임베딩·전사를 함께 사용한다.
+현재 TTS는 VoxCPM2의 `reference_audio` 모드로 참조 음성을 사용한다. 참조 전사는 Vox 합성 조건에 넣지 않는다.
+Qwen의 `reference_icl`은 복구용 백엔드 계약으로 남아 있다.
 등록 체험은 해당 세션의 `voice.wav`를 자동으로 읽는다. 테스트 씬은 등록 음성 또는 임시 WAV를 선택한다.
 `POST /references`(multipart `voice`, 생략하면 현재 등록 음성), `GET /references/{id}/audio.wav`,
 `DELETE /references/{id}`는 8002의 인증된 참조 API다. 업로드는 테스트 모드에서만 허용한다.
 테스트 WebSocket `start`에 `reference_id`, `reference_text`를 전달하면 정확한 구간의 전사를 수정할 수 있다.
-참조는 3–12초 연속 구간으로 제한하고 그 구간만 SenseVoice로 전사한다. 원본은 변경하지 않는다.
-참조는 연결마다 한 번 엔진에 등록하고, 엔진의 ICL 특징 캐시를 구절마다 재사용하며 연결 종료 시 해제한다.
+참조는 3–12초 연속 구간으로 제한하고 그 구간만 운영 STT인 Whisper로 전사한다. 원본은 변경하지 않는다.
+전사 확인·수정 API는 유지하지만 Vox의 음색을 바꾸는 입력으로 해석하지 않는다.
+참조는 연결마다 한 번 TTS에 등록하고 준비된 특징을 구절마다 재사용하며 연결 종료 시 해제한다.
 임시 WAV는 메모리에 최대 8개, 30분 미사용 후 만료된다. 끊긴 준비 요청의 GPU 캐시는 최대 6시간 후 정리한다.
 
-현재 TTS는 첫 구절부터 합성을 요청하고 생성 중인 음성 코드를 청크별로 디코딩해 전송한다.
+현재 TTS는 첫 구절부터 합성을 요청하고 생성 중 PCM을 전송한다. Vox의 48kHz 출력을 잔여 샘플 배출까지 포함해 24kHz로 변환한다.
 `TTS_BACKEND=legacy`만 구절 전체를 합성한 후 전송하는 복구 경로다.
 억양·운율은 참조를 조건으로 생성하며 문장별 높낮이와 길이를 동일하게 재현하는 기능은 아니다.
 `AI_Response_Test` 사용자 화면에서는 마이크로 질문한다. Editor의 `Run text response check`는

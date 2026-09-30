@@ -5,13 +5,21 @@
 `python tools/check.py --area dialogue`로 하네스·서버 모의 검사를 묶어서 실행하고 JSON·로그를 남긴다.
 공통 변경은 `--area all`, 하네스만 변경하면 `--area harness`를 사용한다.
 실제 모델·Unity·마이크 검사는 이 명령과 구분한다.
-최신 통합 검증은 [캐릭터 대기 리액션](../docs/캐릭터_대기_리액션.md)에 있다.
-TTS 설치·예열·복구·동일 문장 비교는 [TTS 실시간 스트리밍](../docs/TTS_실시간_스트리밍.md)을 따른다.
+최신 코드·서버 확인과 검사 범위는 [현재 구현 현황](../docs/현재_구현_현황.md)에 있다.
+현재 VoxCPM2 운영·참조 음성·복구는 [TTS 인계](../docs/TTS_작업인계_20260918.md)를 따른다.
+[TTS 실시간 스트리밍](../docs/TTS_실시간_스트리밍.md)은 이전 Qwen 설치·실측 기록이다.
 
 Tripo 팀원 인수인계는 [AI 작업 지시서](../docs/Tripo_팀원_AI_작업지시서.md)와
 [개발환경 실행 가이드](../docs/Tripo_개발환경_실행가이드.md)를 따른다.
-`tripo_handoff.py`는 현재 소스·문서와 삭제 목록을 ZIP으로 묶고, 새 clone의 기준 파일을 확인한 뒤 적용한다.
+`tripo_handoff.py`는 지정된 소스·문서와 삭제 목록을 ZIP으로 묶고, 새 clone의 기준 파일을 확인한 뒤 적용한다.
 기존 Git index·브랜치를 변경하지 않으며 실제 키·사진·GLB는 담지 않는다.
+현재 선택 목록에는 새 머리 처리 파일 일부가 빠져 있다. 머리 개발은 최신 Git clone과
+별도 준비물을 기준으로 하며, 실행 가이드 1장의 포함 범위를 확인한다.
+
+9월 29일 머리 경로의 도구는 `head_cutout.py`(로컬 전처리), `head_only_trial.py`(머리 단독 생성),
+`Survey/blender/head_trim.py`·`head_body_merge.py`(Blender 정리·결합)다.
+의존성·설정·유료 요청 경계는 [머리 파이프라인](../docs/Tripo_머리_생성_파이프라인.md)을 따른다.
+`head_only_trial.py --dry-run`은 전처리만 수행한다. 기존 `tripo_trial.py`·`tripo_motion_pack.py`는 전신·동작 실험용으로 남아 있다.
 
 2026-09-10 Raon 제거에 맞춰 폐기된 `/chat`·`/talk`·`/stt` API와 고정 참조 파일에
 의존하던 실행기를 정리했다. 이전 조건·결과·평가 교훈은

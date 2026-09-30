@@ -39,4 +39,4 @@ MonoBehaviour:
   clip: {fileID: 8300000, guid: e20b6d07f737d4946a90e4a42eda3a49, type: 3}
   audioMixer: {fileID: -3960138857348764796, guid: 7657aaa11fc9748449b9a88b6a5dc9ca,
     type: 2}
-  maximumVolume: 1
+  maximumVolume: 0
