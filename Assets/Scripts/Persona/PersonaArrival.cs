@@ -200,6 +200,11 @@ public class PersonaArrival : MonoBehaviour
 
         _skeleton = renderer.rootBone != null ? renderer.rootBone : renderer.transform;
         while (_skeleton.parent != null && _skeleton.parent != _persona) _skeleton = _skeleton.parent;
+        // 걷기·회전 계산이 이 노드를 _persona 바로 아래로 전제한다(아래 Face/Turn).
+        // 그래서 뼈대 루트를 더 깊이 잡을 수 없다 — 대신 모델 쪽에서 래퍼 노드를
+        // 만들지 않는다. 배율이 걸린 노드가 여기 잡히면 아바타가 깨져 몸이 접힌다.
+        Debug.Log($"[PersonaArrival] 뼈대 루트: {_skeleton.name} " +
+                  $"(로컬 배율 {_skeleton.localScale}, 뼈 {renderer.bones.Length}개)");
 
         // 1) 기존 재생을 비켜세우고 바인드 포즈(=T포즈)로 되돌린다. 아바타는 T포즈에서 구워야 한다.
         var legacy = _persona.GetComponentInChildren<Animation>();
