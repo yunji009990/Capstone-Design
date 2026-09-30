@@ -48,6 +48,10 @@ HAIR_MAX = 0.35      # 베이스컬러 휘도가 이보다 어두우면 머리�
                      # 자르고 나면 아래쪽 머리가 너덜너덜해졌다(head03 실측).
                      # 피부는 0.5~0.8 이라 0.35 까지 올려도 안 섞인다.
 WHITE_MIN = 0.75     # 이보다 밝으면 옷 후보. 흰 옷 0.85~1.0, 피부 0.5~0.8
+NEUTRAL_MAX = 0.10   # 옷 후보는 무채색이어야 한다. 밝기만으로는 창백한 피부를
+                     # 흰 옷과 가르지 못한다 — 스튜디오 증명사진의 피부는 휘도
+                     # 0.95 까지 올라간다. 색기로는 확연히 갈린다.
+                     # 실측(99cd66fc): 흰 옷 채도 0.002 / 피부 채도 0.24
 GROW = 4             # 머리카락 판정을 이웃으로 넓히는 횟수
 PROBE = 256          # 텍스처를 이 크기로 줄여 찍는다. 색만 보면 되므로 충분하다
 PERCENTILE = 99.9    # 옷으로 잡힌 면들의 높이 중 이 백분위를 옷의 윗끝으로 본다.
@@ -82,19 +86,36 @@ def base_color_pixels(obj):
     return None
 
 
-def face_luma(mesh, uv_layer, pixels):
-    """면마다 UV 중심의 베이스컬러 휘도를 찍어 배열로 돌려준다. 선형 공간이다."""
+def face_colour(mesh, uv_layer, pixels):
+    """면마다 UV 중심의 베이스컬러를 찍어 (면수, 3) 으로 돌려준다. 선형 공간이다.
+
+    휘도와 채도를 따로 찍지 않고 여기서 한 번만 찍는다. 같은 면을 두 군데서
+    표본하면 UV 뒤집기 같은 사소한 차이로 둘이 어긋나고, 그러면 두 값을 함께
+    쓰는 판정이 조용히 틀린다."""
     if pixels is None or uv_layer is None:
         return None
-    table = (0.2126 * pixels[..., 0] + 0.7152 * pixels[..., 1] + 0.0722 * pixels[..., 2])
-    values = np.empty(len(mesh.faces), dtype=np.float32)
+    values = np.empty((len(mesh.faces), 3), dtype=np.float32)
     for face in mesh.faces:
         u = sum(loop[uv_layer].uv.x for loop in face.loops) / len(face.loops)
         v = sum(loop[uv_layer].uv.y for loop in face.loops) / len(face.loops)
         x = int(np.clip(u % 1.0, 0, 0.9999) * PROBE)
         y = int(np.clip(v % 1.0, 0, 0.9999) * PROBE)
-        values[face.index] = table[y, x]
+        values[face.index] = pixels[y, x, :3]
     return values
+
+
+def luminance(rgb):
+    if rgb is None:
+        return None
+    return 0.2126 * rgb[:, 0] + 0.7152 * rgb[:, 1] + 0.0722 * rgb[:, 2]
+
+
+def saturation(rgb):
+    """HSV 채도. 흰·회색 옷은 0 에 가깝고, 피부는 붉은 기가 있어 0.2 를 넘는다."""
+    if rgb is None:
+        return None
+    top = rgb.max(axis=1)
+    return np.where(top > 1e-6, (top - rgb.min(axis=1)) / np.maximum(top, 1e-6), 0.0)
 
 
 def hair_faces(mesh, luma, grow):
@@ -124,31 +145,67 @@ def hair_faces(mesh, luma, grow):
     return found
 
 
-def find_neck(mesh, luma, lo, hi):
+def narrowest_ring(mesh, lo, hi):
+    """5~55% 구간에서 가로 단면이 가장 가는 높이를 돌려준다. 색을 보지 않는다.
+
+    흉상의 목은 옷(어깨)과 턱 사이에서 가장 가늘다. 색 판정과 완전히 다른 잣대라,
+    둘이 서로를 검산한다. 실측: 현재 머리 21% / head01 18% / head02 20% /
+    head03 51% / bd290323 25% — 색 판정이 내놓은 값과 같은 자리를 가리킨다.
+
+    이 값은 상한으로만 쓴다. 더 아래에서 자르면 옷이 조금 남을 뿐이고 그건 몸통
+    깃 안으로 들어가 보이지 않지만, 이 위에서 자르면 얼굴이 잘려 나간다.
+    """
+    z = np.array([v.co.z for v in mesh.verts], dtype=np.float64)
+    if z.size < 200:
+        return None
+    xy = np.array([(v.co.x, v.co.y) for v in mesh.verts], dtype=np.float64)
+    span = (hi - lo) * 0.008
+    best = None
+    for step in range(11, 112):           # 5.5% ~ 55.5% 를 0.5% 간격으로
+        level = lo + (hi - lo) * step / 200.0
+        band = xy[np.abs(z - level) < span]
+        if len(band) < 12:
+            continue
+        radius = float(np.hypot(*(band - band.mean(axis=0)).T).mean())
+        if best is None or radius < best[1]:
+            best = (level, radius)
+    if best is None:
+        return None
+    print(f"[trim] 가장 가는 단면: z={best[0]:.4f} (아래 {(best[0] - lo) / (hi - lo):.0%}) "
+          f"반지름 {best[1]:.4f}")
+    return best[0]
+
+
+def find_neck(mesh, luma, sat, lo, hi):
     """지어낸 옷이 어디서 끝나는지 찾아 자를 높이를 돌려준다.
 
-    옷은 흰색이고 모델 아래쪽에 몰려 있다. 높이를 칸으로 나눠 밝은 면 수를 세면 바닥에서
-    가장 많고 목으로 올라가며 급격히 줄어든다(head03 실측: 4540 → 496 → 103 → 16).
-    아래에서 올라가며 최대치의 DROP 아래로 처음 떨어지는 칸의 위 끝을 자를 높이로 쓴다.
+    옷은 무채색(흰·회색)이고 모델 아래쪽에 몰려 있다. 피부는 아무리 창백해도 붉은
+    기가 남아 채도가 0.2 를 넘으므로, 밝기와 채도를 함께 보면 둘이 갈린다.
+
+    밝기만 보면 안 된다. 예전에는 「밝은 면」만 골라 놓고 얼굴의 밝은 면을 피하려고
+    후보를 모델 중간 아래로 잘랐는데, 그러면 99.9백분위가 그 자른 자리에 눌어붙는다.
+    피부가 밝아 중간 높이까지 후보가 깔리기 때문이다. 실측한 다섯 모델이 전부
+    45~50% 에서 잘렸다 — 얼굴 한가운데다. MAX_FRACTION 상한은 값이 구조상 50% 를
+    넘을 수 없어 한 번도 걸리지 않았다.
     """
-    if luma is None:
+    if luma is None or sat is None:
         return None
     centres = np.array([f.calc_center_median().z for f in mesh.faces], dtype=np.float32)
-    middle = (lo + hi) / 2.0
-    # 얼굴 위쪽에도 밝은 면이 있다(흰자·피부 하이라이트). 옷은 아래쪽에만 있으므로
-    # 모델 중간보다 아래만 본다.
-    garment = centres[(luma > WHITE_MIN) & (centres < middle)]
+    # 이제는 채도가 피부를 걸러 주므로 후보 범위를 상한까지 열어 둔다. 상한이 비로소
+    # 살아 있는 안전장치가 된다 — 여기 걸리면 로그에 남는다.
+    ceiling = lo + (hi - lo) * MAX_FRACTION
+    garment = centres[(luma > WHITE_MIN) & (sat < NEUTRAL_MAX) & (centres < ceiling)]
     if garment.size < 50:
         return None                       # 지어낸 옷이 없다. 자동 판단을 포기한다.
     # 「옷이 어디서 끝나는가」를 직접 잡는다. 칸을 나눠 급락 지점을 찾는 방식은 옷의
     # 아래쪽만 지워 칼라 띠가 남았다(head03: 0.33 에서 잘랐는데 목 아래 흰 띠가 남음).
     # 흩어진 오분류에 끌려가지 않게 최댓값 대신 높은 백분위를 쓴다.
     cut = float(np.percentile(garment, PERCENTILE))
-    ceiling = lo + (hi - lo) * MAX_FRACTION
+    print(f"[trim] 옷 탐지: 밝고 무채색인 면 {garment.size}개 · "
+          f"{PERCENTILE}백분위 {cut:.4f} (아래 {(cut - lo) / (hi - lo):.0%})")
     if cut > ceiling:
         print(f"[trim] 옷 탐지 결과 {cut:.4f} 가 상한 {ceiling:.4f} 을 넘어 상한을 쓴다")
         cut = ceiling
-    print(f"[trim] 옷 탐지: 밝은 면 {garment.size}개 · {PERCENTILE}백분위 {cut:.4f}")
     return cut
 
 
@@ -196,13 +253,24 @@ def main():
         mesh.faces.ensure_lookup_table()
         uv_layer = mesh.loops.layers.uv.active
         before = len(mesh.faces)
-        luma = face_luma(mesh, uv_layer, pixels)
+        rgb = face_colour(mesh, uv_layer, pixels)
+        luma, sat = luminance(rgb), saturation(rgb)
 
-        cut = None if fraction is not None else find_neck(mesh, luma, lo, hi)
+        cut = None if fraction is not None else find_neck(mesh, luma, sat, lo, hi)
         if cut is None:
             used = FALLBACK if fraction is None else fraction
             cut = lo + (hi - lo) * used
             print(f"[trim] 자동 탐지를 쓰지 않음 · 비율 {used:.2f}")
+
+        # 색으로 고른 높이를 기하로 검산한다. 색 판정이 어긋나도 얼굴은 지킨다 —
+        # 예전에 창백한 피부를 흰 옷으로 잘못 보고 다섯 모델을 전부 얼굴 한가운데서
+        # 자른 적이 있다. 손으로 비율을 준 경우(fraction)는 사람의 판단을 존중한다.
+        if fraction is None:
+            limit = narrowest_ring(mesh, lo, hi)
+            if limit is not None and cut > limit:
+                print(f"[trim] 자를 높이 {cut:.4f} 가 가장 가는 단면 {limit:.4f} 보다 "
+                      f"위여서 단면 쪽을 쓴다")
+                cut = limit
         print(f"[trim] 높이 {lo:.4f}~{hi:.4f}  자르는 높이 {cut:.4f}  "
               f"(아래 {(cut - lo) / (hi - lo):.0%})")
 
