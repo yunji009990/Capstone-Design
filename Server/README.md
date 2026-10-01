@@ -97,7 +97,8 @@ TTS는 `DIALOGUE_TTS_URL=`이면 사용하지 않는다. 다시 사용하려면 
 등록 API는 `requirements-registration.txt`, Tripo 작업자는 `Survey/requirements-worker.txt`,
 대화 서비스는 `requirements-dialogue.txt`를 사용한다.
 머리 작업자는 별도로 Blender·몸체 GLB·분할/얼굴 검출 모델을 준비한다.
-[Tripo 머리 파이프라인](../docs/Tripo_머리_생성_파이프라인.md)의 head/full 전환 조건을 확인한다.
+[Tripo 머리 파이프라인](../docs/Tripo_머리_생성_파이프라인.md)의 준비물과 실패·재시도 조건을 확인한다.
+현재 작업자는 머리 경로만 사용하며 몸체·Blender가 없으면 실패한다. 전신 자동 대체는 제거됐다.
 현재 VoxCPM2는 기존 `qwentts` venv의 torch 2.8.0/cu128·soxr와 고정 커밋의 Vox 소스를 사용한다.
 실제 소스·모델 경로는 [인계 문서](../docs/TTS_작업인계_20260918.md)에 있다. 새 PC 설치는 아직 검증하지 않았다.
 `requirements-tts.txt`와 `requirements-tts-streaming.txt`는 이전 Qwen 경로의 의존성이다.

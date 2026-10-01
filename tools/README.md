@@ -16,8 +16,9 @@ Tripo 팀원 인수인계는 [AI 작업 지시서](../docs/Tripo_팀원_AI_작�
 현재 선택 목록에는 새 머리 처리 파일 일부가 빠져 있다. 머리 개발은 최신 Git clone과
 별도 준비물을 기준으로 하며, 실행 가이드 1장의 포함 범위를 확인한다.
 
-9월 29일 머리 경로의 도구는 `head_cutout.py`(로컬 전처리), `head_only_trial.py`(머리 단독 생성),
-`Survey/blender/head_trim.py`·`head_body_merge.py`(Blender 정리·결합)다.
+10월 1일 코드 기준 머리 경로의 도구는 `head_cutout.py`(로컬 전처리), `head_only_trial.py`(머리 단독 생성),
+`body_prep.py`(고정 Human FBX의 배율·재질 정리), `Survey/blender/head_trim.py`·`head_body_merge.py`(Blender 정리·결합)다.
+결합 GLB는 리그를 보존하고 클립은 제외한다. 동작은 Unity에서 Mixamo 클립으로 적용한다.
 의존성·설정·유료 요청 경계는 [머리 파이프라인](../docs/Tripo_머리_생성_파이프라인.md)을 따른다.
 `head_only_trial.py --dry-run`은 전처리만 수행한다. 기존 `tripo_trial.py`·`tripo_motion_pack.py`는 전신·동작 실험용으로 남아 있다.
 

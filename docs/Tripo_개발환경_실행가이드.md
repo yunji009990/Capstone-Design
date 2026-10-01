@@ -1,7 +1,7 @@
 # Tripo 개발환경과 현재 도구 사용법
 
-기준일: 2026-09-29. 담당 범위·미구현 기능·완료 기준은 [AI 작업 지시서](Tripo_팀원_AI_작업지시서.md)를 따른다.
-운영 기본은 [머리 생성·고정 몸체 결합](Tripo_머리_생성_파이프라인.md)이다. 기존 전신 실험 도구도 유지한다.
+기준일: 2026-10-01. 담당 범위·미구현 기능·완료 기준은 [AI 작업 지시서](Tripo_팀원_AI_작업지시서.md)를 따른다.
+작업자는 [머리 생성·고정 몸체 결합](Tripo_머리_생성_파이프라인.md)만 사용한다. 기존 전신 실험 도구는 별도로 유지한다.
 등록 웹은 설문·참조 음성을 요구하며 사진 전용 제작 웹은 미구현이다.
 
 ## 1. 전달할 것
@@ -170,9 +170,8 @@ SURVEY_DATA_DIR=<개발 clone>/tools/_work/tripo_dev/survey
 ADMIN_PASSWORD=<개발용 관리자 비밀번호>
 SURVEY_ACCESS_CODE=
 TRIPO_API_KEY=
-TRIPO_POSE=preset:sit
-TRIPO_TPOSE=1
-TRIPO_PIPELINE=head
+TRIPO_FACE_LIMIT=50000
+TRIPO_GEOMETRY_QUALITY=standard
 HEAD_BODY_GLB=<개발용 리깅 몸체 GLB 절대 경로>
 BLENDER_BIN=<Blender 실행 파일 절대 경로>
 HEAD_CUTOUT_MODEL=<분할 모델 절대 경로>
@@ -185,8 +184,10 @@ HEAD_BODY_YAW=-90
 HEAD_BODY_OUT_SCALE=0.7
 ```
 
-몸체 GLB·Blender 누락 시 head가 full로 내려간다. 분할 준비물 누락은 작업 실패다.
-`TRIPO_TPOSE`는 full 경로에서만 적용한다. 운영 서버에 준비된 모델 파일이 새 clone에 자동 복사되지는 않는다.
+몸체 GLB·Blender 또는 분할 준비물이 없으면 작업이 실패한다. 전신 대체 경로는 제거됐다.
+`TRIPO_PIPELINE`·`TRIPO_TPOSE`·`TRIPO_FACE_TRANSPLANT`·`TRIPO_POSE`는 현재 작업자가 읽지 않는다.
+운영 서버의 모델 파일은 새 clone에 자동 복사되지 않는다. 고정 Human 몸체는 `tools/body_prep.py`로
+배율·재질을 정리해 GLB로 준비한다. 호출 예시는 머리 파이프라인 문서 3장에 있다.
 
 기동할 각 PowerShell 터미널에서 아래 공통 부분을 먼저 실행한다. 값은 화면에 출력하지 않는다.
 

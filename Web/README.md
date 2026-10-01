@@ -67,12 +67,17 @@ ssh raon bash /home/crc_unity/webapp/web_stop.sh
 사진이 없으면 3D 생성 없이 인물만 등록된다. 웹은 SQLite에 생성 작업을 넣고,
 `Survey/model_worker.py`가 별도 프로세스에서 Tripo 요청·결과 다운로드·등록 API 전달을 수행한다.
 **사진 선택만으로 생성하지 않으며 `세션 시작` 제출이 접수 시점이다.**
-현재 서버의 `TRIPO_PIPELINE=head`는 얼굴·머리카락·목을 추출해 머리만 생성한 뒤,
+2026-10-01 코드 기준 작업자는 얼굴·머리카락·목을 추출해 머리만 생성한 뒤,
 Blender로 다듬고 리깅된 고정 몸체에 결합한다. 사진의 의상·전신을 재현하는 경로가 아니다.
 기본 생성은 `v3.1-20260211`·5만 면·standard 형상·detailed 텍스처이며 별도 P2 실험 설정과 구분한다.
-몸체 GLB·Blender가 없으면 전신 경로로 내려가므로 설정 문자열과 실제 선택 경로를 함께 확인한다.
+몸체 GLB·Blender 또는 전처리 준비물이 없으면 작업이 실패한다. 전신 대체 경로와
+`TRIPO_PIPELINE`·`TRIPO_TPOSE`·`TRIPO_FACE_TRANSPLANT`·`TRIPO_POSE` 선택 설정은 제거됐다.
+완성 GLB는 리그를 보존하고 내장 애니메이션은 제외한다. Unity가 고정 몸체에 Mixamo 클립을 연결한다.
 완성된 GLB가 `/session/{sid}/model`로 전달된 뒤 완료 상태가 된다. Unity가 현재 인물과 GLB를 조회한다.
 웹을 재시작해도 작업 ID는 남는다. `/status`의 `model_worker`에서 작업자 상태를 확인한다.
+Tripo 조회·다운로드의 일시적 통신 오류는 간격을 늘려 재시도한다. 유료 제출은 자동 재시도하지 않으며
+응답을 잃어 작업 ID를 확인하지 못하면 `submission_unknown`으로 멈춘다.
+9월 30일 새 웹 등록의 `ready`·등록 API `has_model=true`를 확인했다. 외관 품질·VR 체험 검수는 별도다.
 참조 음성은 24kHz 모노로 변환하며 `/last_ref.wav`에서 실제 전송 파일을 확인할 수 있다.
 
 ## 오디오 변환
