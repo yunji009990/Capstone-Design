@@ -17,13 +17,16 @@ public static class Scene2GraphicsCapture
     internal const string ScenePath = "Assets/Scenes/Scene_2.unity";
     internal const string CafeAssets = "Assets/Models/Cozy cafe - confectionery and bakery/";
     internal static string OutputDirectory => Path.Combine(Path.GetDirectoryName(Application.dataPath),
-        "tools", "_work", "graphics_20261007");
+        "tools", "_work", "graphics_" + DateTime.Now.ToString("yyyyMMdd"));
 
     [MenuItem("Tools/다시봄/그래픽/변경 전 촬영·검사")]
     public static void CaptureBefore() => CaptureAndInspect("before");
 
     [MenuItem("Tools/다시봄/그래픽/변경 후 촬영·검사")]
     public static void CaptureAfter() => CaptureAndInspect("after");
+
+    [MenuItem("Tools/다시봄/그래픽/창 유리 조정 비교 촬영")]
+    public static void CaptureGlass() => CaptureAndInspect("glass");
 
     [MenuItem("Tools/다시봄/그래픽/완성된 카페 보기")]
     public static void ViewCafe()
@@ -81,7 +84,10 @@ public static class Scene2GraphicsCapture
             smoothness = material.HasProperty(smoothness) ? material.GetFloat(smoothness) : 0f,
             metallic = material.HasProperty("_Metallic") ? material.GetFloat("_Metallic") : 0f,
             baseColor = Components(material.HasProperty(color) ? material.GetColor(color) : Color.white),
-            emission = Components(material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.black)
+            emission = Components(material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.black),
+            preserveSpecular = material.HasProperty("_BlendModePreserveSpecular") ? material.GetFloat("_BlendModePreserveSpecular") : 0f,
+            environmentReflections = material.HasProperty("_EnvironmentReflections") ? material.GetFloat("_EnvironmentReflections") : 0f,
+            keywords = material.shaderKeywords
         };
     }
 
@@ -89,7 +95,9 @@ public static class Scene2GraphicsCapture
     {
         var scene = RequireScene();
         Directory.CreateDirectory(OutputDirectory);
-        var renderers = CafeRenderers();
+        var exterior = SceneObject("카페 앞 정원");
+        var renderers = CafeRenderers().Concat(exterior != null ?
+            exterior.GetComponentsInChildren<Renderer>(true) : Array.Empty<Renderer>()).ToArray();
         var materials = renderers.SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct().ToArray();
         var lights = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<Light>(true))
             .Select(l => new
@@ -114,6 +122,22 @@ public static class Scene2GraphicsCapture
             probeGroups = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<LightProbeGroup>(true))
                 .Select(p => new { p.name, count = p.probePositions.Length }).ToArray(),
             materials = materials.Select(MaterialInfo).ToArray(),
+            glass = renderers.Where(r => r.sharedMaterials.Any(m => m != null && m.name.Contains("Glass")))
+                .Select(r => new { r.name, center = Components(r.bounds.center), size = Components(r.bounds.size),
+                    materials = r.sharedMaterials.Where(m => m != null).Select(m => m.name).ToArray(),
+                    reflections = r.reflectionProbeUsage.ToString() }).ToArray(),
+            exteriorPrefabs = new[] { "Flower_Pot", "Ivy_long", "Ivy_Middle", "Table", "Chair" }.Select(name =>
+            {
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CafeAssets + "Models/Prefab/" + name + ".prefab");
+                var parts = prefab != null ? prefab.GetComponentsInChildren<Renderer>(true) : Array.Empty<Renderer>();
+                var bounds = new Bounds();
+                if (parts.Length > 0)
+                {
+                    bounds = parts[0].bounds;
+                    foreach (var part in parts.Skip(1)) bounds.Encapsulate(part.bounds);
+                }
+                return new { name, center = Components(bounds.center), size = Components(bounds.size) };
+            }).ToArray(),
             geometry = renderers.OrderByDescending(r => r.bounds.size.sqrMagnitude).Take(20)
                 .Select(r => new { r.name, center = Components(r.bounds.center), size = Components(r.bounds.size), isStatic = r.gameObject.isStatic }).ToArray(),
             lights,
@@ -126,6 +150,12 @@ public static class Scene2GraphicsCapture
         Capture(stage + "_entrance", new Vector3(-3.1f, 1.35f, -2.2f), new Vector3(0f, 0f, 0f));
         Capture(stage + "_counter", new Vector3(-3.1f, 1.35f, -2.2f), new Vector3(0f, 75f, 0f));
         Capture(stage + "_seating", new Vector3(-2.35f, 1.35f, -0.1f), new Vector3(0f, 235f, 0f));
+        // 실제 HMD 검사를 대신하지 않는다. 눈 간격과 고개 이동 시 창밖의 상대 위치를 비교한다.
+        var windowEye = new Vector3(-.3f, 1.55f, .2f);
+        Capture(stage + "_window_left", windowEye + Vector3.left * .032f, new Vector3(8f, 0f, 0f));
+        Capture(stage + "_window_right", windowEye + Vector3.right * .032f, new Vector3(8f, 0f, 0f));
+        Capture(stage + "_window_shift", windowEye + Vector3.left * .5f, new Vector3(8f, 0f, 0f));
+        Capture(stage + "_standing", new Vector3(-3.1f, 1.7f, -2.2f), new Vector3(10f, 0f, 0f));
         Debug.Log($"[Scene2Graphics] {stage}: 배경 {renderers.Length}개, 재질 {materials.Length}개, 라이트맵 {LightmapSettings.lightmaps.Length}개. 촬영·검사 완료.");
     }
 

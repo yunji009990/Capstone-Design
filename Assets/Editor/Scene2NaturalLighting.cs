@@ -20,9 +20,6 @@ public static class Scene2NaturalLighting
         var scene = Scene2GraphicsCapture.RequireScene();
         if (Lightmapping.isRunning) throw new InvalidOperationException("조명 베이크가 끝난 뒤 적용하세요.");
         EnsureFolder(AssetsRoot + "/Materials");
-        var skySource = AssetDatabase.LoadAssetAtPath<Material>(Scene2GraphicsCapture.CafeAssets + "Sky/Sky_material.mat");
-        if (skySource == null || !(skySource.GetTexture("_Tex") is Cubemap))
-            throw new InvalidOperationException("카페의 HDR 하늘 큐브맵을 확인하세요.");
 
         Undo.IncrementCurrentGroup();
         int undoGroup = Undo.GetCurrentGroup();
@@ -39,12 +36,8 @@ public static class Scene2NaturalLighting
             Undo.RecordObject(weather, UndoName);
             weather.SetActive(false);
         }
-        var sky = CloneMaterial(skySource, AssetsRoot + "/CafeDaylightSky.mat");
-        sky.SetColor("_Tint", new Color(.5f, .5f, .5f, 1f));
-        sky.SetFloat("_Exposure", 1f);
-        sky.SetFloat("_Rotation", 38f);
-        EditorUtility.SetDirty(sky);
-        RenderSettings.skybox = sky;
+        Scene2Courtyard.ConfigureEnvironment();
+        Scene2Courtyard.ConfigureGarden();
         RenderSettings.fog = false;
         RenderSettings.ambientMode = AmbientMode.Skybox;
         RenderSettings.ambientIntensity = .85f;
@@ -71,6 +64,7 @@ public static class Scene2NaturalLighting
 
         ConfigureIndoorLights(lightingRoot, group);
         ConfigureMaterials();
+        ConfigureWindowGlass();
         ConfigureStaticGeometry();
         ConfigureProbes(group);
         ConfigureReflectionResolution();
@@ -201,7 +195,8 @@ public static class Scene2NaturalLighting
                 renderer.scaleInLightmap = renderer.bounds.size.magnitude < .3f ? .25f : .8f;
             }
             renderer.lightProbeUsage = LightProbeUsage.BlendProbes;
-            renderer.reflectionProbeUsage = ReflectionProbeUsage.BlendProbes;
+            renderer.reflectionProbeUsage = renderer.sharedMaterials.Any(m => m != null && m.name == "WindowGlass")
+                ? ReflectionProbeUsage.Off : ReflectionProbeUsage.BlendProbes;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer.gameObject);
         }
@@ -241,13 +236,58 @@ public static class Scene2NaturalLighting
         if (material.name == "Glass")
         {
             // URP 14의 Premultiply는 이미 알파가 곱해진 색을 전제로 한다.
-            // Lit 유리는 Alpha + Preserve Specular로 투과와 반사를 분리해야 뿌옇게 더해지지 않는다.
+            // 곡면 진열장 유리는 투과와 반사를 분리한다. 큰 평면 창은 아래 전용 재질을 쓴다.
             material.SetFloat("_Blend", 0f);
             material.SetFloat("_BlendModePreserveSpecular", 1f);
         }
         // 투명 블렌딩·노멀맵 키워드를 URP의 Inspector와 같은 규칙으로 검증한다.
         BaseShaderGUI.SetMaterialKeywords(material,
             UnityEditor.Rendering.Universal.ShaderGUI.LitGUI.SetMaterialKeywords);
+    }
+
+    [MenuItem("Tools/다시봄/그래픽/창 유리 반사 수정")]
+    public static void ApplyWindowGlass()
+    {
+        var scene = Scene2GraphicsCapture.RequireScene();
+        if (Lightmapping.isRunning) throw new InvalidOperationException("조명 베이크가 끝난 뒤 적용하세요.");
+        ConfigureWindowGlass();
+        AssetDatabase.SaveAssets();
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        SceneView.RepaintAll();
+    }
+
+    static void ConfigureWindowGlass()
+    {
+        EnsureFolder(AssetsRoot + "/Materials");
+        var source = AssetDatabase.LoadAssetAtPath<Material>(AssetsRoot + "/Materials/Glass.mat") ??
+            AssetDatabase.LoadAssetAtPath<Material>(Scene2GraphicsCapture.CafeAssets + "Models/Materials/Glass.mat");
+        if (source == null) throw new InvalidOperationException("카페 유리 원본 재질을 찾지 못했습니다.");
+        var window = CloneMaterial(source, AssetsRoot + "/Materials/WindowGlass.mat");
+        window.name = "WindowGlass";
+        window.SetFloat("_Surface", 1f);
+        window.SetFloat("_Blend", 0f);
+        window.SetFloat("_BlendModePreserveSpecular", 0f);
+        window.SetFloat("_EnvironmentReflections", 0f);
+        window.SetFloat("_ReceiveShadows", 0f);
+        window.SetFloat("_Metallic", 0f);
+        window.SetFloat("_Smoothness", .86f);
+        window.SetColor("_BaseColor", new Color(.96f, .985f, 1f, .03f));
+        // 정적인 실내 큐브맵은 큰 창의 평면 반사와 위치가 맞지 않는다.
+        // 창에서는 공간 이미지 반사를 끄고, 약한 색·빛만 알파에 비례해 남긴다.
+        ValidateLitMaterial(window);
+        EditorUtility.SetDirty(window);
+        foreach (var renderer in Scene2GraphicsCapture.CafeRenderers().Where(r =>
+            r.name == "door_glass" || r.name == "window_glass_l1" || r.name == "window_glass_r"))
+        {
+            Undo.RecordObject(renderer, UndoName);
+            renderer.sharedMaterials = renderer.sharedMaterials.Select(m =>
+                m != null && (m.name == "Glass" || m.name == "WindowGlass") ? window : m).ToArray();
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+        }
     }
 
     static ReflectionProbe[] SceneProbes() => Scene2GraphicsCapture.RequireScene().GetRootGameObjects()
