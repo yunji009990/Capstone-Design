@@ -20,6 +20,8 @@ public class ExperienceControl : MonoBehaviour
     public ConversationLog log;
     [Tooltip("체험 시작을 기다리도록 설정한 인물. 비워두면 씬에서 찾는다.")]
     public PersonaSpawner spawner;
+    [Tooltip("체험자가 걸어 들어오는 연출. 비워두면 씬에서 찾고, 없으면 기본값으로 만든다.")]
+    public PlayerArrival playerArrival;
 
     [Header("단추")]
     public Button startButton;
@@ -39,6 +41,8 @@ public class ExperienceControl : MonoBehaviour
         if (voice == null) voice = FindObjectOfType<DialogueVoiceClient>();
         if (log == null) log = FindObjectOfType<ConversationLog>();
         if (spawner == null) spawner = FindObjectOfType<PersonaSpawner>();
+        if (playerArrival == null) playerArrival = FindObjectOfType<PlayerArrival>();
+        if (playerArrival == null) playerArrival = gameObject.AddComponent<PlayerArrival>();
         if (buttonImage == null && startButton != null)
             buttonImage = startButton.GetComponent<Image>();
     }
@@ -80,6 +84,7 @@ public class ExperienceControl : MonoBehaviour
         if (!voice.BeginExperience()) return;
         if (log != null) log.Clear();
         Started = true;
+        if (playerArrival != null) playerArrival.Play();
         if (spawner != null && spawner.waitForExperienceStart) spawner.BeginPresentation();
         Refresh();
     }
@@ -97,6 +102,7 @@ public class ExperienceControl : MonoBehaviour
         if (voice != null && (voice.ExperienceActive || string.IsNullOrEmpty(voice.LastEndReason)))
             voice.EndExperience(reason);
         if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
+        if (playerArrival != null) playerArrival.Stop(true);
         Started = false;
         Refresh();
     }
@@ -106,6 +112,7 @@ public class ExperienceControl : MonoBehaviour
         if (Started && (voice == null || !voice.ExperienceActive))
         {
             if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
+            if (playerArrival != null) playerArrival.Stop(true);
             Started = false;
         }
         Refresh();
