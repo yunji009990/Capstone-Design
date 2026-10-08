@@ -1,6 +1,7 @@
 // 창밖 근경을 실제 크기의 마당으로 구성한다. 실행 중 생성하거나 운영 서버를 사용하지 않는다.
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -241,14 +242,14 @@ public static class Scene2Courtyard
 
     static void DistantTrees(Transform root)
     {
-        const string texturePath = AssetsRoot + "/DistantTrees.png";
+        const string texturePath = AssetsRoot + "/DistantTreesComplete.png";
         var importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
         if (importer == null) throw new InvalidOperationException("먼 수목 텍스처를 먼저 가져오세요.");
-        if (!importer.alphaIsTransparency || importer.wrapModeU != TextureWrapMode.Mirror ||
+        if (!importer.alphaIsTransparency || importer.wrapModeU != TextureWrapMode.Repeat ||
             importer.wrapModeV != TextureWrapMode.Clamp || importer.maxTextureSize != 2048)
         {
             importer.alphaIsTransparency = true;
-            importer.wrapModeU = TextureWrapMode.Mirror;
+            importer.wrapModeU = TextureWrapMode.Repeat;
             importer.wrapModeV = TextureWrapMode.Clamp;
             importer.mipmapEnabled = true;
             importer.maxTextureSize = 2048;
@@ -265,13 +266,45 @@ public static class Scene2Courtyard
         material.SetFloat("_Cull", 0f);
         BaseShaderGUI.SetMaterialKeywords(material);
         EditorUtility.SetDirty(material);
-        DistantArc(root, "먼 수목 배경", "DistantTreesGeometry", texture, material, 26f, 0f);
-        DistantArc(root, "왼쪽 먼 수목", "LeftDistantTreesGeometry", texture, material, 30f, -120f);
-        DistantArc(root, "뒤쪽 먼 수목", "RearDistantTreesGeometry", texture, material, 32f, 120f);
+        float rootUv = TreeGroundContact(texturePath);
+        DistantArc(root, "먼 수목 배경", "DistantTreesGeometry", texture, material, rootUv, 0f);
+        DistantArc(root, "왼쪽 먼 수목", "LeftDistantTreesGeometry", texture, material, rootUv, -120f);
+        DistantArc(root, "뒤쪽 먼 수목", "RearDistantTreesGeometry", texture, material, rootUv, 120f);
+    }
+
+    static float TreeGroundContact(string texturePath)
+    {
+        // PNG의 투명 여백을 땅 밑으로 보내고, 실제 밑동 픽셀을 바닥 높이에 맞춘다.
+        // 원본 PNG를 읽기만 하므로 플레이어의 텍스처 Read/Write 설정은 켜지 않는다.
+        var source = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        try
+        {
+            if (!source.LoadImage(File.ReadAllBytes(texturePath)))
+                throw new InvalidOperationException("수목 PNG를 읽을 수 없습니다.");
+            var pixels = source.GetPixels32();
+            int minX = source.width, maxX = -1, minY = source.height, maxY = -1;
+            for (int y = 0; y < source.height; y++)
+            for (int x = 0; x < source.width; x++)
+            {
+                if (pixels[y * source.width + x].a < 102) continue;
+                minX = Mathf.Min(minX, x);
+                maxX = Mathf.Max(maxX, x);
+                minY = Mathf.Min(minY, y);
+                maxY = Mathf.Max(maxY, y);
+            }
+            if (maxX < 0 || minX <= 0 || maxX >= source.width - 1 ||
+                minY <= 0 || maxY >= source.height - 1)
+                throw new InvalidOperationException("전체 나무와 사방의 투명 여백이 있는 수목 PNG가 필요합니다.");
+            return (minY + .5f) / source.height;
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(source);
+        }
     }
 
     static void DistantArc(Transform root, string name, string meshName, Texture2D texture, Material material,
-        float radius, float yaw)
+        float rootUv, float yaw)
     {
         var found = root.Find(name);
         var go = found != null ? found.gameObject : GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -282,12 +315,14 @@ public static class Scene2Courtyard
             Undo.RegisterCreatedObjectUndo(go, UndoName);
             Undo.DestroyObjectImmediate(go.GetComponent<Collider>());
         }
-        // 원경을 얕은 호로 둘러 수목 이미지의 수직 끝이 창 안에서 드러나지 않게 한다.
-        // 나무의 높이·폭을 같은 비율로 줄이면서, 원경 둘레는 수목의 반복 배치로 채운다.
+        // 같은 반경의 120도 호 3개를 맞붙인다. 겹친 판의 잘린 끝은 만들지 않는다.
+        // 전역 각도에서 연속 UV를 계산해 메시가 나뉘어도 하나의 수목 둘레로 이어진다.
         const int segments = 32;
-        const float arcDegrees = 130f;
+        const float arcDegrees = 120f;
+        const float radius = 30f;
         const float height = 10f;
-        float imageRepeats = radius * arcDegrees * Mathf.Deg2Rad * texture.height / (texture.width * height);
+        float circumference = 2f * Mathf.PI * radius;
+        int imageRepeats = Mathf.Max(1, Mathf.RoundToInt(circumference * texture.height / (texture.width * height)));
         string meshPath = AssetsRoot + "/" + meshName + ".asset";
         var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
         if (mesh == null)
@@ -303,12 +338,15 @@ public static class Scene2Courtyard
         for (int i = 0; i <= segments; i++)
         {
             float u = (float)i / segments;
-            float angle = ((u - .5f) * arcDegrees + yaw) * Mathf.Deg2Rad;
-            var bottom = new Vector3(-1.4f + Mathf.Sin(angle) * radius, -.6f, 1.7f + Mathf.Cos(angle) * radius);
+            float angleDegrees = (u - .5f) * arcDegrees + yaw;
+            float angle = angleDegrees * Mathf.Deg2Rad;
+            var bottom = new Vector3(-1.4f + Mathf.Sin(angle) * radius, FloorY - height * rootUv,
+                1.7f + Mathf.Cos(angle) * radius);
             vertices.Add(bottom);
             vertices.Add(bottom + Vector3.up * height);
-            uv.Add(new Vector2(u * imageRepeats, 0f));
-            uv.Add(new Vector2(u * imageRepeats, 1f));
+            float textureU = (angleDegrees + 180f) / 360f * imageRepeats;
+            uv.Add(new Vector2(textureU, 0f));
+            uv.Add(new Vector2(textureU, 1f));
             if (i == segments) continue;
             int start = i * 2;
             triangles.AddRange(new[] { start, start + 1, start + 3, start, start + 3, start + 2 });

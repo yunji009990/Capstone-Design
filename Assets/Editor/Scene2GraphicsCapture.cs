@@ -42,6 +42,22 @@ public static class Scene2GraphicsCapture
         CaptureOvalWindows("trees_after");
     }
 
+    [MenuItem("Tools/다시봄/그래픽/수목 잘림 수정 전 촬영")]
+    public static void CaptureTreeRootsBefore() => CaptureTreeRoots("roots_before");
+
+    [MenuItem("Tools/다시봄/그래픽/수목 잘림 수정 후 촬영")]
+    public static void CaptureTreeRootsAfter() => CaptureTreeRoots("roots_after");
+
+    static void CaptureTreeRoots(string stage)
+    {
+        CaptureAndInspect(stage);
+        CaptureOvalWindows(stage);
+        // 카페 안뿐 아니라 배경 판의 연결부·나무 밑동이 보이는 바깥 시점도 확인한다.
+        Capture(stage + "_tree_left_join", new Vector3(-8f, 1.55f, 9f), new Vector3(0f, -60f, 0f));
+        Capture(stage + "_tree_right_join", new Vector3(6f, 1.55f, 10f), new Vector3(0f, 60f, 0f));
+        Capture(stage + "_tree_rear_join", new Vector3(-1.4f, 1.55f, -10f), new Vector3(0f, 180f, 0f));
+    }
+
     [MenuItem("Tools/다시봄/그래픽/타원 창 바깥 촬영")]
     public static void CaptureOvalWindows() => CaptureOvalWindows("after");
 
