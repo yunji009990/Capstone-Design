@@ -34,11 +34,11 @@ Material:
     m_Ints: []
     m_Floats:
     - _Cull: 2
-    - _GrazingOpacity: 0.16
-    - _HighlightCompression: 0.35
+    - _GrazingOpacity: 0.877
+    - _HighlightCompression: 0.726
     - _PlanarValid: 0
-    - _ReflectionGain: 0.8
-    - _ReflectionOpacity: 0.075
+    - _ReflectionGain: 0.835
+    - _ReflectionOpacity: 0.807
     m_Colors:
     - _BaseColor: {r: 0.97, g: 0.99, b: 1, a: 0.003}
   m_BuildTextureStacks: []

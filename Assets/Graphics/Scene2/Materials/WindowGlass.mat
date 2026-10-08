@@ -131,7 +131,7 @@ Material:
     - _QueueOffset: 0
     - _ReceiveShadows: 0
     - _ReflectionGain: 0.6
-    - _ReflectionOpacity: 0.006
+    - _ReflectionOpacity: 0.189
     - _Smoothness: 0.86
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
