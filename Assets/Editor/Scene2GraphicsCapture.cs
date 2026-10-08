@@ -28,14 +28,30 @@ public static class Scene2GraphicsCapture
     [MenuItem("Tools/다시봄/그래픽/창 유리 조정 비교 촬영")]
     public static void CaptureGlass() => CaptureAndInspect("glass");
 
+    [MenuItem("Tools/다시봄/그래픽/수목 크기 조정 전 촬영")]
+    public static void CaptureTreesBefore()
+    {
+        CaptureAndInspect("trees_before");
+        CaptureOvalWindows("trees_before");
+    }
+
+    [MenuItem("Tools/다시봄/그래픽/수목 크기 조정 후 촬영")]
+    public static void CaptureTreesAfter()
+    {
+        CaptureAndInspect("trees_after");
+        CaptureOvalWindows("trees_after");
+    }
+
     [MenuItem("Tools/다시봄/그래픽/타원 창 바깥 촬영")]
-    public static void CaptureOvalWindows()
+    public static void CaptureOvalWindows() => CaptureOvalWindows("after");
+
+    static void CaptureOvalWindows(string stage)
     {
         RequireScene();
         Directory.CreateDirectory(OutputDirectory);
-        Capture("after_oval_front", new Vector3(-2.5f, 1.55f, -.76f), new Vector3(0f, -90f, 0f));
-        Capture("after_oval_back", new Vector3(-2.5f, 1.55f, -3.86f), new Vector3(0f, -90f, 0f));
-        Capture("after_oval_oblique", new Vector3(-2.9f, 1.55f, -2.0f), new Vector3(0f, -125f, 0f));
+        Capture(stage + "_oval_front", new Vector3(-2.5f, 1.55f, -.76f), new Vector3(0f, -90f, 0f));
+        Capture(stage + "_oval_back", new Vector3(-2.5f, 1.55f, -3.86f), new Vector3(0f, -90f, 0f));
+        Capture(stage + "_oval_oblique", new Vector3(-2.9f, 1.55f, -2.0f), new Vector3(0f, -125f, 0f));
         Debug.Log("[Scene2Graphics] 타원 창 두 곳·비스듬한 시점 촬영 완료.");
     }
 

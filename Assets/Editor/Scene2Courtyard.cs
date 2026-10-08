@@ -244,10 +244,12 @@ public static class Scene2Courtyard
         const string texturePath = AssetsRoot + "/DistantTrees.png";
         var importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
         if (importer == null) throw new InvalidOperationException("먼 수목 텍스처를 먼저 가져오세요.");
-        if (!importer.alphaIsTransparency || importer.wrapMode != TextureWrapMode.Clamp || importer.maxTextureSize != 2048)
+        if (!importer.alphaIsTransparency || importer.wrapModeU != TextureWrapMode.Mirror ||
+            importer.wrapModeV != TextureWrapMode.Clamp || importer.maxTextureSize != 2048)
         {
             importer.alphaIsTransparency = true;
-            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.wrapModeU = TextureWrapMode.Mirror;
+            importer.wrapModeV = TextureWrapMode.Clamp;
             importer.mipmapEnabled = true;
             importer.maxTextureSize = 2048;
             importer.textureCompression = TextureImporterCompression.CompressedHQ;
@@ -281,10 +283,11 @@ public static class Scene2Courtyard
             Undo.DestroyObjectImmediate(go.GetComponent<Collider>());
         }
         // 원경을 얕은 호로 둘러 수목 이미지의 수직 끝이 창 안에서 드러나지 않게 한다.
-        // UV 비율은 이미지와 같고 바닥은 실제 포장 메시만 사용한다.
+        // 나무의 높이·폭을 같은 비율로 줄이면서, 원경 둘레는 수목의 반복 배치로 채운다.
         const int segments = 32;
         const float arcDegrees = 130f;
-        float height = radius * arcDegrees * Mathf.Deg2Rad * texture.height / texture.width;
+        const float height = 10f;
+        float imageRepeats = radius * arcDegrees * Mathf.Deg2Rad * texture.height / (texture.width * height);
         string meshPath = AssetsRoot + "/" + meshName + ".asset";
         var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
         if (mesh == null)
@@ -304,8 +307,8 @@ public static class Scene2Courtyard
             var bottom = new Vector3(-1.4f + Mathf.Sin(angle) * radius, -.6f, 1.7f + Mathf.Cos(angle) * radius);
             vertices.Add(bottom);
             vertices.Add(bottom + Vector3.up * height);
-            uv.Add(new Vector2(u, 0f));
-            uv.Add(new Vector2(u, 1f));
+            uv.Add(new Vector2(u * imageRepeats, 0f));
+            uv.Add(new Vector2(u * imageRepeats, 1f));
             if (i == segments) continue;
             int start = i * 2;
             triangles.AddRange(new[] { start, start + 1, start + 3, start, start + 3, start + 2 });
