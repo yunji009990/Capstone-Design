@@ -17,7 +17,7 @@ public static class Scene2GraphicsCapture
     internal const string ScenePath = "Assets/Scenes/Scene_2.unity";
     internal const string CafeAssets = "Assets/Models/Cozy cafe - confectionery and bakery/";
     internal static string OutputDirectory => Path.Combine(Path.GetDirectoryName(Application.dataPath),
-        "tools", "_work", "graphics_" + DateTime.Now.ToString("yyyyMMdd"));
+        "tools", "_work", "graphics_" + DateTime.Now.ToString("yyyyMMdd") + "_rework");
 
     [MenuItem("Tools/다시봄/그래픽/변경 전 촬영·검사")]
     public static void CaptureBefore() => CaptureAndInspect("before");
@@ -27,6 +27,17 @@ public static class Scene2GraphicsCapture
 
     [MenuItem("Tools/다시봄/그래픽/창 유리 조정 비교 촬영")]
     public static void CaptureGlass() => CaptureAndInspect("glass");
+
+    [MenuItem("Tools/다시봄/그래픽/타원 창 바깥 촬영")]
+    public static void CaptureOvalWindows()
+    {
+        RequireScene();
+        Directory.CreateDirectory(OutputDirectory);
+        Capture("after_oval_front", new Vector3(-2.5f, 1.55f, -.76f), new Vector3(0f, -90f, 0f));
+        Capture("after_oval_back", new Vector3(-2.5f, 1.55f, -3.86f), new Vector3(0f, -90f, 0f));
+        Capture("after_oval_oblique", new Vector3(-2.9f, 1.55f, -2.0f), new Vector3(0f, -125f, 0f));
+        Debug.Log("[Scene2Graphics] 타원 창 두 곳·비스듬한 시점 촬영 완료.");
+    }
 
     [MenuItem("Tools/다시봄/그래픽/완성된 카페 보기")]
     public static void ViewCafe()
@@ -87,6 +98,10 @@ public static class Scene2GraphicsCapture
             emission = Components(material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.black),
             preserveSpecular = material.HasProperty("_BlendModePreserveSpecular") ? material.GetFloat("_BlendModePreserveSpecular") : 0f,
             environmentReflections = material.HasProperty("_EnvironmentReflections") ? material.GetFloat("_EnvironmentReflections") : 0f,
+            planarFrontal = material.HasProperty("_ReflectionOpacity") ? material.GetFloat("_ReflectionOpacity") : 0f,
+            planarGrazing = material.HasProperty("_GrazingOpacity") ? material.GetFloat("_GrazingOpacity") : 0f,
+            planarGain = material.HasProperty("_ReflectionGain") ? material.GetFloat("_ReflectionGain") : 0f,
+            planarHighlights = material.HasProperty("_HighlightCompression") ? material.GetFloat("_HighlightCompression") : 0f,
             keywords = material.shaderKeywords
         };
     }

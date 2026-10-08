@@ -195,7 +195,8 @@ public static class Scene2NaturalLighting
                 renderer.scaleInLightmap = renderer.bounds.size.magnitude < .3f ? .25f : .8f;
             }
             renderer.lightProbeUsage = LightProbeUsage.BlendProbes;
-            renderer.reflectionProbeUsage = renderer.sharedMaterials.Any(m => m != null && m.name == "WindowGlass")
+            renderer.reflectionProbeUsage = renderer.sharedMaterials.Any(m => m != null &&
+                (m.name == "WindowGlass" || m.name == "OvalWindowGlass" || m.name == "ClearDoorGlass"))
                 ? ReflectionProbeUsage.Off : ReflectionProbeUsage.BlendProbes;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer.gameObject);
@@ -260,34 +261,8 @@ public static class Scene2NaturalLighting
     static void ConfigureWindowGlass()
     {
         EnsureFolder(AssetsRoot + "/Materials");
-        var source = AssetDatabase.LoadAssetAtPath<Material>(AssetsRoot + "/Materials/Glass.mat") ??
-            AssetDatabase.LoadAssetAtPath<Material>(Scene2GraphicsCapture.CafeAssets + "Models/Materials/Glass.mat");
-        if (source == null) throw new InvalidOperationException("카페 유리 원본 재질을 찾지 못했습니다.");
-        var window = CloneMaterial(source, AssetsRoot + "/Materials/WindowGlass.mat");
-        window.name = "WindowGlass";
-        window.SetFloat("_Surface", 1f);
-        window.SetFloat("_Blend", 0f);
-        window.SetFloat("_BlendModePreserveSpecular", 0f);
-        window.SetFloat("_EnvironmentReflections", 0f);
-        window.SetFloat("_ReceiveShadows", 0f);
-        window.SetFloat("_Metallic", 0f);
-        window.SetFloat("_Smoothness", .86f);
-        window.SetColor("_BaseColor", new Color(.96f, .985f, 1f, .03f));
-        // 정적인 실내 큐브맵은 큰 창의 평면 반사와 위치가 맞지 않는다.
-        // 창에서는 공간 이미지 반사를 끄고, 약한 색·빛만 알파에 비례해 남긴다.
-        ValidateLitMaterial(window);
-        EditorUtility.SetDirty(window);
-        foreach (var renderer in Scene2GraphicsCapture.CafeRenderers().Where(r =>
-            r.name == "door_glass" || r.name == "window_glass_l1" || r.name == "window_glass_r"))
-        {
-            Undo.RecordObject(renderer, UndoName);
-            renderer.sharedMaterials = renderer.sharedMaterials.Select(m =>
-                m != null && (m.name == "Glass" || m.name == "WindowGlass") ? window : m).ToArray();
-            renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
-            renderer.shadowCastingMode = ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
-        }
+        // 자연광 재적용에서도 눈 위치에 맞춘 평면 투영을 보존한다.
+        Scene2PlanarReflectionSetup.Configure();
     }
 
     static ReflectionProbe[] SceneProbes() => Scene2GraphicsCapture.RequireScene().GetRootGameObjects()
@@ -427,19 +402,30 @@ public static class Scene2NaturalLighting
         if (Lightmapping.isRunning) throw new InvalidOperationException("간접광 베이크가 끝난 뒤 실행하세요.");
         var probes = SceneProbes().Where(p => p.enabled && p.gameObject.activeInHierarchy).ToArray();
         if (probes.Length == 0) throw new InvalidOperationException("실내 반사 프로브를 찾지 못했습니다.");
-        int index = 0;
-        foreach (var probe in probes)
+        var planar = scene.GetRootGameObjects().SelectMany(root =>
+            root.GetComponentsInChildren<CafePlanarReflection>(true)).Where(p => p.enabled).ToArray();
+        // 큐브맵 베이크에 이전 눈 위치의 평면 반사 텍스처를 재사용하지 않는다.
+        foreach (var surface in planar) surface.enabled = false;
+        try
         {
-            string path = probe.name == "카페 실내 반사" ? AssetsRoot + "/CafeInteriorReflection.exr" :
-                AssetDatabase.GetAssetPath(probe.bakedTexture);
-            // 베이크로 새로 만든 텍스처만 덮어쓰며 판매자 원본은 건드리지 않는다.
-            if (string.IsNullOrEmpty(path) ||
-                (!path.StartsWith("Assets/Scenes/Scene_2/", StringComparison.Ordinal) &&
-                 !path.StartsWith(AssetsRoot + "/", StringComparison.Ordinal)))
-                path = AssetsRoot + "/CafeReflection_" + index + ".exr";
-            if (!Lightmapping.BakeReflectionProbe(probe, path))
-                throw new InvalidOperationException("실내 반사 베이크에 실패했습니다: " + probe.name);
-            index++;
+            int index = 0;
+            foreach (var probe in probes)
+            {
+                string path = probe.name == "카페 실내 반사" ? AssetsRoot + "/CafeInteriorReflection.exr" :
+                    AssetDatabase.GetAssetPath(probe.bakedTexture);
+                // 베이크로 새로 만든 텍스처만 덮어쓰며 판매자 원본은 건드리지 않는다.
+                if (string.IsNullOrEmpty(path) ||
+                    (!path.StartsWith("Assets/Scenes/Scene_2/", StringComparison.Ordinal) &&
+                     !path.StartsWith(AssetsRoot + "/", StringComparison.Ordinal)))
+                    path = AssetsRoot + "/CafeReflection_" + index + ".exr";
+                if (!Lightmapping.BakeReflectionProbe(probe, path))
+                    throw new InvalidOperationException("실내 반사 베이크에 실패했습니다: " + probe.name);
+                index++;
+            }
+        }
+        finally
+        {
+            foreach (var surface in planar) if (surface != null) surface.enabled = true;
         }
         AssetDatabase.SaveAssets();
         EditorSceneManager.MarkSceneDirty(scene);
