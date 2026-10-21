@@ -9,8 +9,6 @@ using UnityEngine.UIElements;
 [CustomEditor(typeof(CafePlanarReflection))]
 public sealed class CafePlanarReflectionEditor : Editor
 {
-    const string MenuPath = "Tools/다시봄/그래픽/유리 반사 조절 열기";
-
     sealed class Control
     {
         public Material material;
@@ -18,8 +16,7 @@ public sealed class CafePlanarReflectionEditor : Editor
         public Slider slider;
     }
 
-    [MenuItem(MenuPath)]
-    static void OpenControls()
+    internal static void OpenControls()
     {
         var scene = SceneManager.GetActiveScene();
         foreach (var owner in Object.FindObjectsOfType<CafePlanarReflection>(true))

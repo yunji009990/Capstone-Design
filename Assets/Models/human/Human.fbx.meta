@@ -3,7 +3,22 @@ guid: 789f53d0c151992409070b40b13e6f78
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Cuff_Inner_Black
+    second: {fileID: 2100000, guid: 88706e097608c5542b2e31393a11ccfd, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Natural_Hand_Male
+    second: {fileID: 2100000, guid: 473d12b37156e324f93a2ca002ef22ea, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: mtl_avatar_body.001
+    second: {fileID: 2100000, guid: 2bb94f45e63772941a0e06340d26fa76, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

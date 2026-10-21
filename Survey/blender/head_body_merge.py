@@ -244,8 +244,14 @@ def main():
     # 애니메이션은 싣지 않는다. 몸통 FBX 에 들어 있는 것은 1프레임짜리 rigAction 뿐이라
     # 쓸모가 없고, 자세는 유니티에서 Mixamo 클립으로 입힌다. 스켈레톤은 그대로 둔다 —
     # 그게 있어야 나중에 클립을 얹을 수 있다.
-    bpy.ops.export_scene.gltf(filepath=dst, export_format="GLB", export_yup=True,
-                              export_animations=False, export_skins=True)
+    export_options = dict(filepath=dst, export_format="GLB", export_yup=True,
+                          export_animations=False, export_skins=True)
+    # 새 몸체의 의상·손·소매 안감은 같은 스킨의 세 재질이다. 최근 Blender에서
+    # 재질별 accessor를 만들면 glTFast 6.14.1의 가중치 job이 충돌하므로 공유한다.
+    # 이전 Blender의 exporter에는 이 선택 항목이 없을 수 있다.
+    if "export_shared_accessors" in bpy.ops.export_scene.gltf.get_rna_type().properties:
+        export_options["export_shared_accessors"] = True
+    bpy.ops.export_scene.gltf(**export_options)
     print("[done]", dst)
 
 

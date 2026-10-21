@@ -339,6 +339,38 @@ public static class PersonaFixedBodyValidation
             image.ReadPixels(new Rect(0, 0, 640, 640), 0, 0);
             image.Apply();
             File.WriteAllBytes(Path.Combine(OutputFolder, name), image.EncodeToPNG());
+            // 손 제작 변경은 전신 촬영만으로 판단하기 어렵다. 실제 Unity 재질과
+            // 대화 자세의 변형을 양손 손등·손바닥 확대에서도 확인한다.
+            if (name.EndsWith("_original.png") || name.EndsWith("_Sitting_Talking.png"))
+                foreach (bool left in new[] { true, false })
+                {
+                    var wrist = PersonaHumanoid.FindBone(root.transform,
+                        left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+                    var middle = PersonaHumanoid.FindBone(root.transform,
+                        left ? HumanBodyBones.LeftMiddleDistal : HumanBodyBones.RightMiddleDistal);
+                    var thumb = PersonaHumanoid.FindBone(root.transform,
+                        left ? HumanBodyBones.LeftThumbDistal : HumanBodyBones.RightThumbDistal);
+                    if (wrist == null || middle == null || thumb == null) continue;
+                    Vector3 fingerAxis = (middle.position - wrist.position).normalized;
+                    Vector3 normal = Vector3.Cross(fingerAxis, thumb.position - wrist.position).normalized;
+                    if (!left) normal = -normal;
+                    if (normal.sqrMagnitude < .5f) continue;
+                    float scale = Mathf.Abs(root.transform.lossyScale.x);
+                    Vector3 center = wrist.position + fingerAxis * .095f * scale;
+                    camera.orthographicSize = .15f * scale;
+                    foreach (bool palm in new[] { false, true })
+                    {
+                        camera.transform.position = center + normal * (palm ? -.6f : .6f) * scale;
+                        camera.transform.rotation = Quaternion.LookRotation(center - camera.transform.position, -fingerAxis);
+                        light.transform.rotation = camera.transform.rotation * Quaternion.Euler(25, -25, 0);
+                        camera.Render();
+                        image.ReadPixels(new Rect(0, 0, 640, 640), 0, 0);
+                        image.Apply();
+                        string suffix = (left ? "_left_" : "_right_") + (palm ? "palm" : "back");
+                        File.WriteAllBytes(Path.Combine(OutputFolder,
+                            Path.GetFileNameWithoutExtension(name) + suffix + ".png"), image.EncodeToPNG());
+                    }
+                }
         }
         finally
         {

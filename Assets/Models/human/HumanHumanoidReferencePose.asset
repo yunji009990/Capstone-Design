@@ -16,7 +16,101 @@ MonoBehaviour:
   sourceAnimationPath: Assets/Models/use_animation/Walking.fbx
   bones:
   - name: root.x
-    rotationDelta: {x: 0.0000001192093, y: 0.0000020767995, z: -2.1776473e-13, w: 1.0000002}
+    rotationDelta: {x: 1.7967668e-19, y: 0.0000020767993, z: -1.8568033e-13, w: 1}
+  - name: spine_01.x
+    rotationDelta: {x: 0.0016669212, y: -0.0023040045, z: -0.0103318775, w: 0.99994266}
+  - name: spine_02.x
+    rotationDelta: {x: 0.005000131, y: -0.008359058, z: -0.01469019, w: 0.99984485}
+  - name: spine_03.x
+    rotationDelta: {x: 0.008333449, y: -0.014413583, z: -0.01904751, w: 0.9996801}
+  - name: neck.x
+    rotationDelta: {x: 0.008260237, y: -0.010522416, z: -0.008474338, w: 0.9998749}
+  - name: head.x
+    rotationDelta: {x: 0.008260939, y: -0.010522451, z: -0.00847432, w: 0.9998749}
+  - name: shoulder.l
+    rotationDelta: {x: -0.030028883, y: -0.11124464, z: -0.11108817, w: -0.9871084}
+  - name: arm_stretch.l
+    rotationDelta: {x: -0.0046489877, y: -0.015824536, z: 0.14046231, w: -0.9899491}
+  - name: arm_twist.l
+    rotationDelta: {x: -0.0046476927, y: -0.015824404, z: 0.14046228, w: -0.9899491}
+  - name: forearm_stretch.l
+    rotationDelta: {x: 0.18757753, y: -0.10874648, z: -0.07063731, w: 0.9736529}
+  - name: forearm_twist.l
+    rotationDelta: {x: 0.18768364, y: -0.10874153, z: -0.07065547, w: 0.97363186}
+  - name: hand.l
+    rotationDelta: {x: 0.3697656, y: 0.054803137, z: -0.28504294, w: 0.882622}
+  - name: c_index1.l
+    rotationDelta: {x: 0.37395495, y: 0.06717947, z: -0.09398185, w: 0.9202246}
+  - name: c_index2.l
+    rotationDelta: {x: 0.33251664, y: 0.065176845, z: -0.07823176, w: 0.93758494}
+  - name: c_index3.l
+    rotationDelta: {x: 0.36449826, y: -0.054765586, z: 0.19654979, w: 0.9085766}
+  - name: c_middle1.l
+    rotationDelta: {x: -0.33662155, y: -0.15069903, z: 0.066106975, w: -0.92714953}
+  - name: c_middle2.l
+    rotationDelta: {x: -0.3219056, y: -0.15112169, z: 0.06435385, w: -0.9324156}
+  - name: c_middle3.l
+    rotationDelta: {x: -0.369673, y: -0.10249748, z: -0.20378977, w: -0.9007257}
+  - name: c_pinky1.l
+    rotationDelta: {x: 0.18789026, y: 0.26169834, z: -0.030054267, w: 0.9462077}
+  - name: c_pinky2.l
+    rotationDelta: {x: 0.25671318, y: 0.25898564, z: -0.02944081, w: 0.9306768}
+  - name: c_pinky3.l
+    rotationDelta: {x: 0.2487767, y: 0.18051632, z: 0.15138726, w: 0.9394718}
+  - name: c_ring1.l
+    rotationDelta: {x: 0.25508165, y: 0.21288452, z: -0.039754182, w: 0.9423557}
+  - name: c_ring2.l
+    rotationDelta: {x: 0.28649756, y: 0.21174216, z: -0.04150297, w: 0.93346804}
+  - name: c_ring3.l
+    rotationDelta: {x: 0.27755132, y: 0.12475738, z: 0.12925851, w: 0.9437659}
+  - name: c_thumb1.l
+    rotationDelta: {x: 0.068582274, y: 0.21689744, z: -0.6891637, w: 0.6879728}
+  - name: c_thumb2.l
+    rotationDelta: {x: 0.3895159, y: 0.16281193, z: -0.41630065, w: 0.8052731}
+  - name: c_thumb3.l
+    rotationDelta: {x: 0.21256457, y: -0.122404136, z: -0.479752, w: 0.8424208}
+  - name: shoulder.r
+    rotationDelta: {x: 0.030183813, y: -0.07583782, z: -0.15738791, w: 0.9841582}
+  - name: arm_stretch.r
+    rotationDelta: {x: 0.021525353, y: -0.00512402, z: 0.10010678, w: 0.99473095}
+  - name: arm_twist.r
+    rotationDelta: {x: 0.021525418, y: -0.0051239575, z: 0.10010667, w: 0.99473107}
+  - name: forearm_stretch.r
+    rotationDelta: {x: 0.16281803, y: 0.1136524, z: 0.016399777, w: 0.9799518}
+  - name: forearm_twist.r
+    rotationDelta: {x: 0.16291316, y: 0.11364337, z: 0.016415967, w: 0.9799369}
+  - name: hand.r
+    rotationDelta: {x: 0.39219382, y: -0.0030353952, z: 0.19613013, w: 0.89872634}
+  - name: c_index1.r
+    rotationDelta: {x: 0.35688826, y: -0.003374533, z: 0.00025613053, w: 0.93414176}
+  - name: c_index2.r
+    rotationDelta: {x: 0.31710982, y: 0.003801061, z: -0.018845377, w: 0.9481947}
+  - name: c_index3.r
+    rotationDelta: {x: 0.3204208, y: 0.046528872, z: -0.08328173, w: 0.94246036}
+  - name: c_middle1.r
+    rotationDelta: {x: 0.32917434, y: -0.083116256, z: -0.027048578, w: 0.9402155}
+  - name: c_middle2.r
+    rotationDelta: {x: 0.28677163, y: -0.0780617, z: -0.0404805, w: 0.9539554}
+  - name: c_middle3.r
+    rotationDelta: {x: 0.29874545, y: -0.113372326, z: -0.10657998, w: 0.94156235}
+  - name: c_pinky1.r
+    rotationDelta: {x: -0.34590822, y: 0.19188826, z: 0.06796683, w: -0.9159194}
+  - name: c_pinky2.r
+    rotationDelta: {x: -0.40838268, y: 0.19234662, z: 0.076719046, w: -0.8890121}
+  - name: c_pinky3.r
+    rotationDelta: {x: -0.40946373, y: 0.17796025, z: 0.043145303, w: -0.8937616}
+  - name: c_ring1.r
+    rotationDelta: {x: -0.34612697, y: 0.14610845, z: 0.049567506, w: -0.9254148}
+  - name: c_ring2.r
+    rotationDelta: {x: -0.37705985, y: 0.14591353, z: 0.058254313, w: -0.91276675}
+  - name: c_ring3.r
+    rotationDelta: {x: -0.37124696, y: 0.12506725, z: 0.015777446, w: -0.91993815}
+  - name: c_thumb1.r
+    rotationDelta: {x: 0.13609704, y: -0.16997433, z: 0.64887893, w: 0.72907025}
+  - name: c_thumb2.r
+    rotationDelta: {x: -0.5546939, y: 0.124039836, z: -0.42215708, w: -0.70619667}
+  - name: c_thumb3.r
+    rotationDelta: {x: -0.38644636, y: 0.011395352, z: -0.5732368, w: -0.722448}
   - name: thigh_stretch.l
     rotationDelta: {x: 0, y: 0, z: 0, w: 1}
   - name: leg_stretch.l
@@ -41,97 +135,3 @@ MonoBehaviour:
     rotationDelta: {x: 0, y: 0, z: 0, w: 1}
   - name: thigh_twist.r
     rotationDelta: {x: 0, y: 0, z: 0, w: 1}
-  - name: spine_01.x
-    rotationDelta: {x: 0.0016669511, y: -0.0023039712, z: -0.010331877, w: 0.99994284}
-  - name: spine_02.x
-    rotationDelta: {x: 0.005000391, y: -0.008359026, z: -0.014690175, w: 0.9998451}
-  - name: spine_03.x
-    rotationDelta: {x: 0.0083333645, y: -0.014413549, z: -0.019047486, w: 0.9996803}
-  - name: neck.x
-    rotationDelta: {x: 0.008260885, y: -0.010522393, z: -0.008474296, w: 0.99987507}
-  - name: head.x
-    rotationDelta: {x: 0.008260819, y: -0.010522389, z: -0.008474295, w: 0.99987495}
-  - name: shoulder.r
-    rotationDelta: {x: 0.030181693, y: -0.07583871, z: -0.15735747, w: 0.98416317}
-  - name: arm_stretch.r
-    rotationDelta: {x: 0.02152661, y: -0.0051242304, z: 0.10010936, w: 0.99473083}
-  - name: forearm_stretch.r
-    rotationDelta: {x: 0.16281894, y: 0.1136521, z: 0.016402023, w: 0.97995204}
-  - name: hand.r
-    rotationDelta: {x: 0.39219332, y: -0.0030359216, z: 0.1961322, w: 0.89872634}
-  - name: c_thumb1.r
-    rotationDelta: {x: 0.06969918, y: -0.031889193, z: 0.40316567, w: 0.9119122}
-  - name: c_thumb2.r
-    rotationDelta: {x: 0.14541753, y: -0.08242087, z: 0.5532704, w: 0.8160599}
-  - name: c_thumb3.r
-    rotationDelta: {x: -0.14541833, y: 0.08242093, z: -0.5532706, w: -0.81605995}
-  - name: c_pinky1.r
-    rotationDelta: {x: 0.35940924, y: -0.17434636, z: 0.13208827, w: 0.90718395}
-  - name: c_pinky2.r
-    rotationDelta: {x: 0.42850906, y: -0.12153801, z: 0.15307772, w: 0.88214374}
-  - name: c_pinky3.r
-    rotationDelta: {x: 0.4285085, y: -0.12153804, z: 0.15307838, w: 0.8821438}
-  - name: c_ring1.r
-    rotationDelta: {x: 0.36473313, y: -0.09322148, z: 0.16293639, w: 0.9119938}
-  - name: c_ring2.r
-    rotationDelta: {x: 0.37996522, y: -0.07837519, z: 0.24780902, w: 0.88773656}
-  - name: c_ring3.r
-    rotationDelta: {x: 0.37996534, y: -0.07837491, z: 0.24780868, w: 0.8877368}
-  - name: c_middle1.r
-    rotationDelta: {x: 0.36361155, y: 0.020116035, z: 0.1485364, w: 0.919413}
-  - name: c_middle2.r
-    rotationDelta: {x: 0.30122408, y: -0.0069972286, z: 0.21344441, w: 0.929332}
-  - name: c_middle3.r
-    rotationDelta: {x: 0.30122414, y: -0.0069971676, z: 0.21344437, w: 0.9293319}
-  - name: c_index1.r
-    rotationDelta: {x: 0.38939255, y: 0.10220098, z: 0.19089034, w: 0.8952603}
-  - name: c_index2.r
-    rotationDelta: {x: 0.32269865, y: 0.025535, z: 0.23592603, w: 0.91627175}
-  - name: c_index3.r
-    rotationDelta: {x: 0.32269928, y: 0.025535343, z: 0.23592594, w: 0.9162716}
-  - name: forearm_twist.r
-    rotationDelta: {x: 0.1629127, y: 0.113642976, z: 0.01641837, w: 0.9799372}
-  - name: arm_twist.r
-    rotationDelta: {x: 0.02152657, y: -0.0051243645, z: 0.100109726, w: 0.9947308}
-  - name: shoulder.l
-    rotationDelta: {x: -0.030025044, y: -0.111245334, z: -0.111057796, w: -0.987112}
-  - name: arm_stretch.l
-    rotationDelta: {x: -0.004650717, y: -0.015824618, z: 0.14046489, w: -0.98994875}
-  - name: forearm_stretch.l
-    rotationDelta: {x: 0.1875786, y: -0.10874627, z: -0.070638455, w: 0.97365296}
-  - name: hand.l
-    rotationDelta: {x: 0.36976635, y: 0.054804068, z: -0.2850427, w: 0.8826218}
-  - name: c_thumb1.l
-    rotationDelta: {x: 0.015822634, y: 0.10350995, z: -0.44289467, w: 0.8904386}
-  - name: c_thumb2.l
-    rotationDelta: {x: -0.035860237, y: 0.07470134, z: -0.49539942, w: 0.8647049}
-  - name: c_thumb3.l
-    rotationDelta: {x: -0.0498891, y: -0.07306373, z: -0.47828844, w: 0.87373614}
-  - name: c_pinky1.l
-    rotationDelta: {x: -0.18576093, y: -0.20753925, z: 0.22370411, w: -0.93401176}
-  - name: c_pinky2.l
-    rotationDelta: {x: 0.25567532, y: 0.14744778, z: -0.24340959, w: 0.923928}
-  - name: c_pinky3.l
-    rotationDelta: {x: -0.28733212, y: -0.10014987, z: 0.033225056, w: -0.9520022}
-  - name: c_ring1.l
-    rotationDelta: {x: 0.25421482, y: 0.13590004, z: -0.24535573, w: 0.9255853}
-  - name: c_ring2.l
-    rotationDelta: {x: 0.26106948, y: 0.109265104, z: -0.33560762, w: 0.8984836}
-  - name: c_ring3.l
-    rotationDelta: {x: 0.3065298, y: 0.059792552, z: -0.13093592, w: 0.94091547}
-  - name: c_middle1.l
-    rotationDelta: {x: 0.3472514, y: 0.044223204, z: -0.24260919, w: 0.9047668}
-  - name: c_middle2.l
-    rotationDelta: {x: 0.30365637, y: 0.08424467, z: -0.31750777, w: 0.89436376}
-  - name: c_middle3.l
-    rotationDelta: {x: 0.38868597, y: 0.026701549, z: -0.12429081, w: 0.9125587}
-  - name: c_index1.l
-    rotationDelta: {x: 0.3808488, y: -0.039491504, z: -0.28602526, w: 0.87839955}
-  - name: c_index2.l
-    rotationDelta: {x: 0.31143096, y: 0.044474833, z: -0.32983062, w: 0.890082}
-  - name: c_index3.l
-    rotationDelta: {x: 0.37661228, y: -0.01733004, z: -0.121859215, w: 0.9181584}
-  - name: forearm_twist.l
-    rotationDelta: {x: 0.187684, y: -0.10874091, z: -0.07065692, w: 0.9736319}
-  - name: arm_twist.l
-    rotationDelta: {x: -0.004649871, y: -0.015824579, z: 0.1404652, w: -0.98994875}

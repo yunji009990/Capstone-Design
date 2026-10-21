@@ -12,7 +12,6 @@ public static class Scene2PlanarReflectionValidation
 {
     const int Size = 800;
 
-    [MenuItem("Tools/다시봄/그래픽/평면 반사 렌더링 검사")]
     public static void Validate()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
