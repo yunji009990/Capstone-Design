@@ -5,6 +5,11 @@
 서버 배포·준비 상태와 9월 30일 사용자가 시작한 새 등록의 모델 완료 상태를 확인했다. 새 결과의 외관 품질·VR 체험은 별도다.
 전체 서비스 상태는 [현재 구현 현황](현재_구현_현황.md)을 따른다.
 
+**몸체 후속 기준 2026-10-13:** 남성 양손 수정과 체형 Blend Shape6개를 서버 기본 몸체에 반영했다.
+현재 등록 인물은 저장된 머리를 재사용해 갱신했고, Unity에서−1~1 체형 조절·등장·착석을 확인했다.
+아래9~10월 초기 파이프라인 검증과 이 후속 반영을 구분한다. 사용법·실측은
+[몸체 수정 검토 25장](몸체_체형_수정_검토_20261011.md#25-unity-inspector-체형-조절과-현재-캐릭터-반영--2026-10-13)에 있다.
+
 ## 1. 입력과 결과
 
 운영 등록 웹에서 설문·단일 화자 참조 음성·사진을 제출하면 머리를 생성하고 준비된 몸체에 붙인다.
@@ -38,6 +43,8 @@
 | `Assets/Editor/HeadPreviewWindow.cs` | 로컬 머리·몸체·결합 GLB 미리보기 |
 | `tools/head_cutout.py`, `tools/head_only_trial.py` | 로컬 전처리·머리 단독 생성 실험 |
 | `tools/body_prep.py` | 고정 Human FBX의 배율·재질을 정리해 작업자용 몸체 GLB 출력 |
+| `tools/body_export.py` | 체형 키·스킨을 보존하는 제작 Blend→FBX 출력, 표시 메시·시연 액션 제외 |
+| `PersonaBodyShapeProfile`·`PersonaBodyShapeController` | Unity 설정 자산의 체형 값6개를 모델 인스턴스의 Blend Shape에 적용 |
 
 현재 작업자는 머리 생성 경로 하나를 사용한다. T포즈 생성·얼굴 이식·Tripo 리깅·동작 요청은 수행하지 않는다.
 몸체의 기존 리그를 보존하며 머리 정점을 지정 머리 본에 붙인다. 결합 GLB는 `export_animations=False`,
@@ -79,12 +86,31 @@
 고정 Human 몸체를 새로 준비할 때는 Blender에서 아래 도구를 사용한다. 경로는 준비한 자산 위치로 바꾼다.
 
 ```powershell
-blender --background --python tools/body_prep.py -- "C:/work/Human.fbx" "C:/work/textures" "C:/work/body.glb"
+blender --background --python-exit-code 1 --python tools/body_prep.py -- "C:/work/Human.fbx" "C:/work/textures" "C:/work/body.glb"
 ```
 
 FBX와 스킨 메시의 변환을 적용해 스켈레톤 루트의 `0.01` 배율을 제거하고,
 `avatar_BaseColor.png`·`avatar_roughness.png`를 연결한다. 스킨 없는 잔재 메시는 이 준비 단계에서 제거한다.
 출력 GLB를 `HEAD_BODY_GLB`로 지정한다. 이 도구는 현재 Human 자산용이며 다른 몸체는 별도 검수가 필요하다.
+
+2026-10-12 로컬 `Human.fbx`에는 사용자가 확인한 남성 양손을 반영했다.
+`Natural_Hand_Male`에는 `tex/Hands`의 색·노멀·거칠기를 사용하고 `Cuff_Inner_Black`은 검은 안감으로 유지한다.
+이 재질들에 의상 atlas를 덮어쓰지 않는다. `body_prep.py`와 `head_body_merge.py`는 지원하는 Blender에서
+공유 accessor로 출력해 glTFast 6.14.1의 다중 재질 스킨 가중치 job 충돌을 피한다.
+Blender 4.5.10 LTS의 실제 출력과 Unity 로딩·동작을 확인했다. 변경한 FBX의 GUID와 본 이름·부모60개는 유지했다.
+Unity Edit Mode의 `Tools > Persona > 기본 몸체 재질·기준 자세 적용`으로 재질 연결과
+`HumanHumanoidReferencePose.asset`을 다시 준비한다. 이 메뉴는 Scene_2 도착 연출 설정을 다시 적용하지 않는다.
+수정한 손의 제작 원본·명령은 [몸체 원본 안내](../tools/model_sources/README.md)를 따른다.
+2026-10-13 사용자 요청으로 서버 `HEAD_BODY_GLB`의 기존 경로에 새 몸체 파일을 원자적으로 교체하고
+공유 accessor를 유지하는 결합 스크립트를 반영했다. 설정값·서비스 실행 프로필을 바꾸거나 재시작하지 않았다.
+현재 등록 인물의 `head_trim.glb`를 재사용해 기존 비율·회전·출력 배율로 재결합하고 등록 API에 전달했다.
+작업자 모델 파일과 작업 DB의 artifact 해시도 함께 갱신했다. 얼굴 실제 스킨 위치 차이는 최대 약1.05μm,
+얼굴 텍스처 픽셀·UV·면 수는 유지됐다. 설문·사진·음성·현재 선택과 인물 revision은 보존했다.
+유료 생성은 호출하지 않았다. 현재 인물은 새 몸체를 사용하며 이후 새 제작도 새 기본 몸체로 결합한다.
+다른 기존 등록 인물의 완성 GLB는 자동 갱신하지 않는다. 다시 결합하지 않으면 이전 몸체가 유지된다.
+Unity Scene_2의 실제 Play에서 다운로드·새 손/검은 안감·유효 Avatar·등장 후 착석을 확인했다.
+마이크·대화 시작 없이 시작 버튼과 같은 `PersonaSpawner.BeginPresentation()` 경로를 실행했다.
+HMD와 실제 음성 대화 검증을 이 모델 적용 검사로 대신하지 않는다.
 
 **`auto` 구현 주의:** 워커는 이 값에서 `face_limit` 인수를 생략하지만,
 `TripoClient.submit_image_to_3d()`의 기본값이 `50000`이어서 API 요청에는 5만 면이 들어간다.

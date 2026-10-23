@@ -55,6 +55,10 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("최종 스케일에 곱하는 추가 배수. 예: 0.1 = 10%.")]
     public float scaleMultiplier = 1.0f;
 
+    [Header("체형")]
+    [Tooltip("6개 체형 Blend Shape 설정. 비워두면 Tools > 다시봄 > 캐릭터 > 체형 조절 열기의 기본 설정을 쓴다.")]
+    public PersonaBodyShapeProfile bodyShapeProfile;
+
     [Tooltip("spawnPoint 의 회전을 그대로 사용할지 여부.")]
     public bool useSpawnRotation = true;
 
@@ -862,6 +866,10 @@ public class PersonaSpawner : MonoBehaviour
         if (targetHeightMeters > 0f) NormalizeHeight(_spawnedInstance, targetHeightMeters);
         if (scaleMultiplier > 0f && Mathf.Abs(scaleMultiplier - 1f) > 0.0001f)
             _spawnedInstance.transform.localScale *= scaleMultiplier;
+
+        // 정점 변형만 적용하며 키 정규화·Humanoid 기준 자세·관절 배치는 유지한다.
+        var shapeController = _spawnedInstance.AddComponent<PersonaBodyShapeController>();
+        shapeController.Bind(bodyShapeProfile != null ? bodyShapeProfile : PersonaBodyShapeProfile.LoadDefault());
 
         _loadedSession = sid;
         if (verboseLog)

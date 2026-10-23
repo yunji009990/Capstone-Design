@@ -1,6 +1,6 @@
 # 등록 캐릭터 로딩·이동·애니메이션 설정
 
-기준일: 2026-10-01. 현재 등록 체험 씬은 `Assets/Scenes/Scene_2.unity`다.
+기준일: 2026-10-22. 현재 등록 체험 씬은 `Assets/Scenes/Scene_2.unity`다.
 등록 서버의 GLB를 glTFast로 불러오고 고정 몸체의 뼈대에 Unity Humanoid·Mixamo 동작을 연결한다.
 등록 순서는 [Scene_2 체험](../../../docs/Scene_2_웹설문_테스트.md), 본 매핑·검사 이력은
 [머리 파이프라인](../../../docs/Tripo_머리_생성_파이프라인.md)을 따른다.
@@ -29,6 +29,7 @@ Scene_2에 있는 캐릭터 로더와 입장 동선을 사용한다. glTFast 6.1
 | `PersonaSpawner.spawnPoint` | 모델 배치 기준 위치·회전 |
 | `targetHeightMeters` | 키 자동 보정. Scene_2는 `0`으로 원본 크기 유지 |
 | `scaleMultiplier` | 얼굴·머리·몸체 전체의 추가 배율. Scene_2는 `1.2` |
+| `bodyShapeProfile` |6개 체형 키 설정. 비워두면 `Assets/Resources/PersonaBodyShape.asset` 사용 |
 | `seatedHeadLiftDeg` | 착석 후 고개 높이 보정. Scene_2는 `15`도 |
 | `arrival` | 이동·인사·착석을 제어하는 `PersonaArrival` |
 | `waitForExperienceStart` | Scene_2는 켬. 로드를 마쳐도 체험 시작 전에는 숨김 |
@@ -40,6 +41,15 @@ Scene_2에 있는 캐릭터 로더와 입장 동선을 사용한다. glTFast 6.1
 `scaleMultiplier`는 몸체와 얼굴에 함께 적용한다. 값을 저장하려면 Edit Mode에서 수정한다.
 Play 중 수정은 확인용이며 종료하면 되돌아갈 수 있다. AI_Response_Test·Tripo_Model_Test는
 목적과 접속 설정이 다른 씬이므로 설정을 서로 복사하지 않는다.
+
+### 체형 조절
+
+10월13일부터 기본 몸체는 상체 폭·두께, 허리 폭, 배 볼륨, 팔·다리 굵기의6개 Blend Shape를 포함한다.
+`Tools > 다시봄 > 캐릭터 > 체형 조절 열기`에서−1~1로 조절하며0은 원래 체형이다.
+설정 자산을 저장하면 Play 종료 후에도 유지되고, 로더는 모델을 표시하기 전에 해당 설정을 연결한다.
+컨트롤러는 각 렌더러의 가중치만 바꾸며 본·바인드 행렬·공유 메시·머리·손을 수정하지 않는다.
+키가 없는 이전 GLB에는 체형 변형이 적용되지 않으며, 기존 등록 모델을 자동 재제작하지 않는다.
+제작 원본과 검사는 [몸체 제작 안내](../../../tools/model_sources/README.md)를 따른다.
 
 ## 3. 경로와 애니메이션
 

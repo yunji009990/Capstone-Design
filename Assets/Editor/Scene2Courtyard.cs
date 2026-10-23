@@ -15,7 +15,6 @@ public static class Scene2Courtyard
     const string UndoName = "Scene_2 창밖 마당 구성";
     const float FloorY = .0004f;
 
-    [MenuItem("Tools/다시봄/그래픽/창밖 마당 적용")]
     public static void Apply()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -34,7 +33,6 @@ public static class Scene2Courtyard
         Debug.Log("[Scene2Graphics] 창밖 마당 적용 완료. 변경된 하늘·마당을 조명과 반사에 다시 베이크하세요.");
     }
 
-    [MenuItem("Tools/다시봄/그래픽/먼 수목 둘레 적용")]
     public static void ApplyDistantTrees()
     {
         var scene = Scene2GraphicsCapture.RequireScene();

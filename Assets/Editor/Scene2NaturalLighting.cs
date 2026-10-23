@@ -14,7 +14,6 @@ public static class Scene2NaturalLighting
     const string GroupName = "자연광과 실내 반사";
     const string UndoName = "Scene_2 자연광 구성";
 
-    [MenuItem("Tools/다시봄/그래픽/자연광·재질 적용")]
     public static void Apply()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -246,7 +245,6 @@ public static class Scene2NaturalLighting
             UnityEditor.Rendering.Universal.ShaderGUI.LitGUI.SetMaterialKeywords);
     }
 
-    [MenuItem("Tools/다시봄/그래픽/창 유리 반사 수정")]
     public static void ApplyWindowGlass()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -279,7 +277,6 @@ public static class Scene2NaturalLighting
         }
     }
 
-    [MenuItem("Tools/다시봄/그래픽/재질 검증·반사 해상도 정리")]
     public static void RefineMaterials()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -382,20 +379,18 @@ public static class Scene2NaturalLighting
         EditorUtility.SetDirty(settings);
     }
 
-    [MenuItem("Tools/다시봄/그래픽/실내 조명 베이크 시작")]
     public static void Bake()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
         if (Lightmapping.isRunning) throw new InvalidOperationException("이미 조명을 베이크하고 있습니다.");
         if (Scene2GraphicsCapture.SceneObject(GroupName) == null)
-            throw new InvalidOperationException("먼저 자연광·재질을 적용하세요.");
+            throw new InvalidOperationException("Scene_2의 실내 조명 구성을 찾지 못했습니다.");
         AssetDatabase.SaveAssets();
         EditorSceneManager.SaveScene(scene);
         if (!Lightmapping.BakeAsync()) throw new InvalidOperationException("조명 베이크를 시작하지 못했습니다.");
         Debug.Log("[Scene2Graphics] 실내 조명 비동기 베이크 시작.");
     }
 
-    [MenuItem("Tools/다시봄/그래픽/실내 반사 베이크·저장")]
     public static void BakeReflection()
     {
         var scene = Scene2GraphicsCapture.RequireScene();

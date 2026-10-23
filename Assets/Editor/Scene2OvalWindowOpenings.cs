@@ -39,7 +39,6 @@ public static class Scene2OvalWindowOpenings
         };
     }
 
-    [MenuItem("Tools/다시봄/그래픽/타원 창 개구부 적용")]
     public static void Apply()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -319,7 +318,6 @@ public static class Scene2OvalWindowOpenings
 
     static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
 
-    [MenuItem("Tools/다시봄/그래픽/타원 창 외부 가시성 검사")]
     public static void ValidateVisibility()
     {
         Scene2GraphicsCapture.RequireScene();

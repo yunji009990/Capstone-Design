@@ -13,7 +13,6 @@ public static class Scene2PlanarReflectionSetup
     const string AssetsRoot = "Assets/Graphics/Scene2";
     const string UndoName = "카페 평면 반사 구성";
 
-    [MenuItem("Tools/다시봄/그래픽/평면 반사 적용")]
     public static void Apply()
     {
         var scene = Scene2GraphicsCapture.RequireScene();
@@ -147,7 +146,6 @@ public static class Scene2PlanarReflectionSetup
         return go;
     }
 
-    [MenuItem("Tools/다시봄/그래픽/평면 반사 기하 검사")]
     public static void ValidateGeometry()
     {
         Scene2GraphicsCapture.RequireScene();
