@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efc05e4d7d914af4fa83a73b270441c0, type: 3}
+  m_Name: CafeBackgroundSet
+  m_EditorClassIdentifier: 
+  materials:
+  - moonlit: {fileID: 2100000, guid: b06f2896d6edbf444a417977e8b680b7, type: 2}
+    pastel: {fileID: 2100000, guid: 608a1404d0068764f94b2884bfff3e20, type: 2}
+  - moonlit: {fileID: 2100000, guid: 65ac980fcc738b94497a9561be7e79c9, type: 2}
+    pastel: {fileID: 2100000, guid: 028d485eeeec2064087088240a7dd05d, type: 2}
+  - moonlit: {fileID: 2100000, guid: fd7e67dd7b1e64c47b6fc8a1706ac352, type: 2}
+    pastel: {fileID: 2100000, guid: 07dedd173ee59a54d8a48afb25bbd119, type: 2}
+  - moonlit: {fileID: 2100000, guid: 3ead892ce06aa0a42a4cb99a2ebb63b2, type: 2}
+    pastel: {fileID: 2100000, guid: 5cdf0b83556612641aac09accdb7b830, type: 2}
+  - moonlit: {fileID: 2100000, guid: a2e1b7a81e39c114b96cfe0f2a008eac, type: 2}
+    pastel: {fileID: 2100000, guid: 67b6ed2b5a480624c8896ef907aa97d2, type: 2}
+  moonlitSky: {fileID: 2100000, guid: 1b6b0380c3f9988409a14659dfc1d28d, type: 2}
+  pastelSky: {fileID: 2100000, guid: c18a7829dccf95c46b3fd2f96ace8e1e, type: 2}

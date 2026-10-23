@@ -9,7 +9,7 @@ using UnityEngine.Rendering;
 
 public static partial class Scene2SkyCafe
 {
-    static readonly string[] AppearanceMaterials =
+    internal static readonly string[] AppearanceMaterials =
         { "VolumeCloud0", "VolumeCloud1", "VolumeCloudSea", "TerraceStone", "FloatingStone" };
 
     public static void MoonlitAppearance() => SelectAppearance(CafeSkyThemeState.Appearance.Moonlit);
