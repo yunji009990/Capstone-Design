@@ -40,7 +40,7 @@ public static class Scene2NaturalLighting
         RenderSettings.fog = false;
         RenderSettings.ambientMode = AmbientMode.Skybox;
         RenderSettings.ambientIntensity = .85f;
-        RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
+        ConfigureInteriorReflectionFallback();
         RenderSettings.defaultReflectionResolution = 256;
         RenderSettings.reflectionIntensity = .8f;
         RenderSettings.reflectionBounces = 2;
@@ -266,6 +266,20 @@ public static class Scene2NaturalLighting
     static ReflectionProbe[] SceneProbes() => Scene2GraphicsCapture.RequireScene().GetRootGameObjects()
         .SelectMany(root => root.GetComponentsInChildren<ReflectionProbe>(true)).ToArray();
 
+    static void ConfigureInteriorReflectionFallback()
+    {
+        // URP는 로컬 프로브가 채우지 못하는 반사를 기본 환경에서 가져온다.
+        // 실내 금속이 창밖 하늘색으로 물들지 않도록 기존 실내 베이크를 기본값으로 쓴다.
+        var cubemap = AssetDatabase.LoadAssetAtPath<Texture>(AssetsRoot + "/CafeInteriorReflection.exr");
+        if (cubemap == null || cubemap.dimension != TextureDimension.Cube)
+        {
+            RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
+            return; // 최초 구성에서 실내 반사 베이크를 아직 만들지 않은 경우.
+        }
+        RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
+        RenderSettings.customReflectionTexture = cubemap;
+    }
+
     static void ConfigureReflectionResolution()
     {
         foreach (var probe in SceneProbes())
@@ -422,6 +436,7 @@ public static class Scene2NaturalLighting
         {
             foreach (var surface in planar) if (surface != null) surface.enabled = true;
         }
+        ConfigureInteriorReflectionFallback();
         AssetDatabase.SaveAssets();
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);

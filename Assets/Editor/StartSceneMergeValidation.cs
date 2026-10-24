@@ -148,6 +148,8 @@ public static class StartSceneMergeValidation
                 await Wait(() => voice.serverReady && control.spawner.Preparation == PersonaSpawner.PreparationPhase.모델대기);
                 Require(!control.Started && !control.CanStart && StartSelection.startRequested, "모델 대기 중 자동 시작됨");
                 Require(!voice.ConversationInputAllowed || !voice.ExperienceActive, "준비 중 대화 시작됨");
+                await Task.Delay(100);
+                Require(control.startButton.interactable && control.StartWarning.Contains("캐릭터 모델 준비 중"), "시작 화면 요청의 미완료 안내 누락");
 
                 var state = Object.FindObjectOfType<CafeSkyThemeState>(true);
                 var set = Resources.Load<CafeBackgroundSet>(CafeBackgroundSet.ResourceName);
@@ -164,6 +166,9 @@ public static class StartSceneMergeValidation
                 var hud = Object.FindObjectOfType<OperatorHUD>(true);
                 Require(hud != null && hud.transform.Find("Backdrop/StatusCard/_Face") != null, "씬 전환 뒤 운영자 테마 미적용");
                 Require(hud.transform.Find("Backdrop/SettingsCard/PreparationMessage") != null, "준비 안내 UI 유실");
+                var warning = hud.transform.Find("Backdrop/SettingsCard/PreparationMessage").GetComponent<TMP_Text>();
+                Require(warning.text.Contains("캐릭터 모델 준비 중") && warning.color.r > .9f && warning.color.g < .4f, "실제 운영자 UI의 빨간 안내 오류");
+                Require(hud.transform.Find("Backdrop/SettingsCard/PreparationRetryButton") == null, "별도 확인 버튼이 남음");
 
                 // 자동 시작 요청이 있어도 마이크·모델 조건을 함께 통과해야 한다.
                 voice.captureRealtimeMicrophone = true;

@@ -68,11 +68,14 @@ public static class ExperiencePreparationValidation
         if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
         var ui = Object.FindObjectOfType<DialogueVoiceUI>();
         var serializedUI = ui != null ? new SerializedObject(ui) : null;
-        string[] fields = { "client", "statusLabel", "messageLabel", "healthButton", "micDropdown" };
+        string[] fields = { "client", "statusLabel", "messageLabel", "micDropdown" };
         var wiring = fields.Select(field => new Wiring { field = field,
             assigned = serializedUI != null && serializedUI.FindProperty(field).objectReferenceValue != null }).ToArray();
         Directory.CreateDirectory(Folder);
         File.WriteAllText(Folder + "/scene_wiring.json", JsonUtility.ToJson(new WiringReport { fields = wiring }, true));
+        Require(wiring.All(field => field.assigned), "준비 안내 UI 연결 누락");
+        Require(serializedUI.FindProperty("healthButton").objectReferenceValue == null, "별도 준비 확인 버튼이 남아 있습니다.");
+        Require(ui.transform.root.GetComponentsInChildren<Transform>(true).All(item => item.name != "PreparationRetryButton"), "별도 준비 확인 오브젝트가 남아 있습니다.");
         CaptureUI(ui);
         var original = source.arrival;
         var idle = original.idleClip; var walk = original.walkClip; var seated = original.seatedClip;
@@ -136,9 +139,9 @@ public static class ExperiencePreparationValidation
             canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.worldCamera = camera; canvas.planeDistance = 1f;
             clone.transform.Find("Backdrop/StatusCard/InfoText").GetComponent<TMP_Text>().text = "체험 준비 검사\n실제 인물 정보 없음";
             var message = clone.transform.Find("Backdrop/SettingsCard/PreparationMessage").GetComponent<TMP_Text>();
-            message.text = "캐릭터 다운로드에 실패했습니다. 연결을 확인하고 ‘준비 다시 확인’을 눌러주세요.";
+            message.text = "대화 서버 연결 필요\n마이크 연결·선택 필요\n캐릭터 모델 준비 중";
             clone.transform.Find("Backdrop/StatusCard/StateRow/StatusLabel").GetComponent<TMP_Text>().text = "캐릭터 모델 확인 필요";
-            clone.transform.Find("Backdrop/SettingsCard/StartButton").GetComponentInChildren<TMP_Text>().text = "모델 확인 필요";
+            clone.transform.Find("Backdrop/SettingsCard/StartButton").GetComponentInChildren<TMP_Text>().text = "체험 시작";
             Canvas.ForceUpdateCanvases();
             camera.Render(); RenderTexture.active = target;
             image.ReadPixels(new Rect(0, 0, 1280, 720), 0, 0); image.Apply();
@@ -164,12 +167,17 @@ public static class ExperiencePreparationValidation
             var spawner = control.spawner;
             string url = voice.DialogueServerUrl;
             await Wait(() => voice.serverReady && spawner.Preparation == PersonaSpawner.PreparationPhase.모델대기);
-            Require(!control.CanStart && !control.startButton.interactable, "모델 없는 상태의 시작 차단 실패");
-            report.passed.Add("모델 대기·시작 버튼 비활성");
+            Require(!control.CanStart && control.startButton.interactable && string.IsNullOrEmpty(control.StartWarning), "시작 전 안내·버튼 상태 오류");
+            control.startButton.onClick.Invoke();
+            Require(!control.Started && !voice.ExperienceActive && control.StartWarning.Contains("캐릭터 모델 준비 중"), "시작 클릭 시 모델 미완료 안내 실패");
+            await Wait(() => !control.CheckingPreparation);
+            Require(!control.Started && control.startButton.interactable, "미완료 확인 후 재시도 버튼 복구 실패");
+            report.passed.Add("시작 전 안내 숨김·미준비 클릭 허용·미완료 표시·실제 시작 차단");
             await Configure(url, "{\"model_status\":503}");
             spawner.RetryPreparation();
             await Wait(() => spawner.Preparation == PersonaSpawner.PreparationPhase.실패);
-            Require(!control.CanStart, "모델 다운로드 실패의 시작 차단 실패");
+            await Task.Delay(50);
+            Require(!control.CanStart && control.StartWarning.Contains("캐릭터 불러오기 실패"), "모델 다운로드 실패의 안내·시작 차단 실패");
             report.passed.Add("다운로드 실패 안내");
             await Configure(url, "{\"model_status\":200,\"model_delay\":1}");
             spawner.RetryPreparation();
@@ -177,6 +185,7 @@ public static class ExperiencePreparationValidation
             control.Begin();
             Require(!control.Started && !voice.ExperienceActive, "다운로드 중 시작 허용");
             await Wait(() => control.CanStart, 35f);
+            Require(string.IsNullOrEmpty(control.StartWarning), "모델 복구 후 안내 제거 실패");
             report.passed.Add("지연 다운로드·수동 재시도·모델 및 리깅 준비");
 
             voice.captureRealtimeMicrophone = true;
@@ -185,11 +194,13 @@ public static class ExperiencePreparationValidation
             await Task.Delay(100);
             Require(control.Preparation == ExperienceControl.PreparationState.마이크필요 && !control.CanStart, "마이크 없음 안내 실패");
             control.Begin(); Require(!control.Started, "마이크 없는 시작 허용");
+            Require(control.StartWarning.Contains("마이크 연결·선택 필요"), "마이크 미완료 항목 누락");
             voice.captureRealtimeMicrophone = false; voice.RefreshMicrophones();
             await Wait(() => control.CanStart);
             report.passed.Add("마이크 없음·준비 복구");
 
             control.Begin();
+            Require(string.IsNullOrEmpty(control.StartWarning), "정상 시작 뒤 미완료 안내가 남음");
             await Wait(() => voice.DialogueConnected);
             Require(!voice.ConversationInputAllowed && !voice.SendTestAudio(new byte[2560]) && !voice.SendTestText("blocked"), "입장 중 입력 허용");
             await FinishAndCheck(control, report);

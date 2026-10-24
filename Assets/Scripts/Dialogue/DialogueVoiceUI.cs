@@ -48,14 +48,12 @@ public class DialogueVoiceUI : MonoBehaviour
     float _waitStart;
     bool _wasWaiting;
     ExperienceControl _experience;
-    TMP_Text _healthLabel;
     string[] _shownDevices;
     bool _showingPreparation;
 
     void Awake()
     {
         _experience = FindObjectOfType<ExperienceControl>();
-        if (healthButton != null) _healthLabel = healthButton.GetComponentInChildren<TMP_Text>();
     }
 
     void OnEnable()
@@ -82,12 +80,15 @@ public class DialogueVoiceUI : MonoBehaviour
 
         if (talkButton) talkButton.onClick.AddListener(ToggleTalk);
         if (resetButton) resetButton.onClick.AddListener(ResetConversation);
-        if (healthButton) healthButton.onClick.AddListener(CheckPreparation);
-        if (_experience != null && _healthLabel != null) _healthLabel.text = "준비 다시 확인";
+        if (healthButton)
+        {
+            if (_experience != null) healthButton.gameObject.SetActive(false);
+            else healthButton.onClick.AddListener(CheckPreparation);
+        }
 
         SetText(heardLabel, "");
         SetText(answerLabel, "");
-        SetText(messageLabel, "서버 확인 중…");
+        SetText(messageLabel, _experience != null ? "" : "서버 확인 중…");
     }
 
     /// <summary>
@@ -167,7 +168,7 @@ public class DialogueVoiceUI : MonoBehaviour
 
     void HandleHealth(bool ready, string info)
     {
-        if (messageLabel != null) SetText(messageLabel, info);
+        if (_experience == null && messageLabel != null) SetText(messageLabel, info);
     }
 
     string _lastError = "";
@@ -186,9 +187,6 @@ public class DialogueVoiceUI : MonoBehaviour
         {
             state = _experience.PreparationSummary;
             color = _experience.CanStart ? Idle : Waiting;
-            string detail = _experience.PreparationMessage;
-            if (!_experience.Started && !string.IsNullOrEmpty(client.LastError)) detail = "중단됨 · " + client.LastError + " · " + detail;
-            SetText(messageLabel, detail);
         }
         else if (!client.ExperienceActive && client.serverReady && client.HasSession)
         {
@@ -216,6 +214,15 @@ public class DialogueVoiceUI : MonoBehaviour
         SetText(statusLabel, state);
         if (!showPreparation && _showingPreparation) SetText(messageLabel, "");
         _showingPreparation = showPreparation;
+
+        if (_experience != null && showPreparation)
+        {
+            string warning = _experience.StartWarning;
+            if (string.IsNullOrEmpty(warning) && !_experience.Started && !_experience.IsFinishing && !string.IsNullOrEmpty(client.LastError))
+                warning = client.LastError;
+            if (messageLabel) messageLabel.color = new Color(1f, .3f, .3f, 1f);
+            SetText(messageLabel, warning);
+        }
 
         if (talkButtonLabel) talkButtonLabel.text = client.isRecording ? "전송" : "말하기";
         if (talkButton) talkButton.interactable = !!client.isWaiting && client.HasSession;
