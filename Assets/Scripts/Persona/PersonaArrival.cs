@@ -163,8 +163,11 @@ public class PersonaArrival : MonoBehaviour
 
     // Mixamo 클립마다 루트 기준 골반 높이가 다르다. 실측: Sitting Clap 은 spawnPoint 그대로가
     // 맞고, Sitting(앉는 동작)은 0.3 높게 잡혀 있어 그만큼 내려야 한다.
-    [Tooltip("앉은 자세에서 의자 지점에 더할 보정(m).")]
+    [Tooltip("착석할 때만 의자 기준점에 더하는 월드 좌표 보정(m). X/Z는 위치, Y는 높이. 바닥 이동 경로에는 적용하지 않는다.")]
     public Vector3 seatOffset;
+
+    /// <summary>로드한 몸체의 원점 차이. 씬에 저장하지 않고 몸체를 바꿀 때 스포너가 갱신한다.</summary>
+    public float ModelSeatHeightOffset { get; set; }
 
     [Tooltip("앉는 동작 동안에만 더할 보정(m).")]
     public Vector3 sitDownOffset = new Vector3(0f, -0.3f, 0f);
@@ -194,6 +197,8 @@ public class PersonaArrival : MonoBehaviour
 
     /// <summary>앉아서 대화할 준비가 됐는지. 대화 쪽에서 연출을 걸 때 본다.</summary>
     public bool IsSeated => phase == Phase.앉음;
+    public float SeatedPoseWeight => IsSeated ? 1f : phase == Phase.앉는중
+        ? Mathf.SmoothStep(0f, 1f, _sitElapsed / Mathf.Max(.2f, _sitDuration)) : 0f;
 
     /// <summary>도착 연출을 돌릴 수 있는 상태인지. 걷기 클립이 없으면 스포너가 건너뛴다.</summary>
     public bool CanRun => isActiveAndEnabled && walkClip != null;
@@ -722,7 +727,8 @@ public class PersonaArrival : MonoBehaviour
     }
 
     Vector3 SeatPosition() =>
-        (seat != null ? seat.position : (_persona != null ? _persona.position : transform.position)) + seatOffset;
+        (seat != null ? seat.position : (_persona != null ? _persona.position : transform.position)) + seatOffset +
+        Vector3.up * ModelSeatHeightOffset;
 
     int GoalCount => waypoints != null && waypoints.Length > 0 ? waypoints.Length : 1;
 

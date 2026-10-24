@@ -892,6 +892,21 @@ public class PersonaSpawner : MonoBehaviour
 
     async Task SpawnAsync(string sid, byte[] glb)
     {
+        float modelHeight = targetHeightMeters;
+        float modelSeatHeightOffset = 0f;
+        bool measureSkinHeight = false;
+#if UNITY_EDITOR
+        // 서버 세션·음성 연결을 유지한 채 같은 원본에 대응하는 로컬 시험본만 교체한다.
+        if (PersonaLocalBodyPreview.TryResolve(glb, out var preview, out float previewHeight, out float previewSeatOffset))
+        {
+            glb = preview;
+            // 기존 모델용 추가 배율까지 반영한 최종 키를 기준으로 새 몸체 크기를 맞춘다.
+            modelHeight = previewHeight / (scaleMultiplier > 0f ? scaleMultiplier : 1f);
+            measureSkinHeight = true;
+            modelSeatHeightOffset = previewSeatOffset;
+            Debug.Log("[PersonaSpawner] 현재 등록 인물의 새 몸체 로컬 시험본을 사용합니다.");
+        }
+#endif
         var gltf = new GltfImport();
 
         // 밉맵과 필터링은 임포트 시점에만 정할 수 있다. 텍스처가 만들어진
@@ -943,7 +958,7 @@ public class PersonaSpawner : MonoBehaviour
 
         // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
         // 달라서, 순서가 뒤바뀌면 앉은 인물을 선 키에 맞춰 키워버린다.
-        if (targetHeightMeters > 0f) NormalizeHeight(_spawnedInstance, targetHeightMeters);
+        if (modelHeight > 0f) NormalizeHeight(_spawnedInstance, modelHeight, measureSkinHeight);
         if (scaleMultiplier > 0f && Mathf.Abs(scaleMultiplier - 1f) > 0.0001f)
             _spawnedInstance.transform.localScale *= scaleMultiplier;
 
@@ -951,6 +966,12 @@ public class PersonaSpawner : MonoBehaviour
         var shapeController = _spawnedInstance.AddComponent<PersonaBodyShapeController>();
         shapeController.Bind(bodyShapeProfile != null ? bodyShapeProfile : PersonaBodyShapeProfile.LoadDefault());
 
+        // 몸체별 원점 차이는 사용자 의자·착석 기준점·수동 Seat Offset과 별도로 보정한다.
+        if (arrival != null) arrival.ModelSeatHeightOffset = modelSeatHeightOffset;
+#if UNITY_EDITOR
+        if (measureSkinHeight && arrival != null)
+            _spawnedInstance.AddComponent<PersonaSeatedFootPlacement>().Bind(arrival);
+#endif
         if (!CheckArrivalPreparation(_spawnedInstance.transform)) return;
 
         _loadedSession = sid;
@@ -1159,8 +1180,31 @@ public class PersonaSpawner : MonoBehaviour
         }
     }
 
-    static void NormalizeHeight(GameObject root, float targetHeight)
+    static void NormalizeHeight(GameObject root, float targetHeight, bool measureSkinHeight = false)
     {
+        if (measureSkinHeight)
+        {
+            // glTF 스킨의 표시 바운드는 여유 공간을 포함한다. 로컬 시험본의 실제 키를 한 번만 잰다.
+            float min = float.PositiveInfinity, max = float.NegativeInfinity;
+            var mesh = new Mesh();
+            try
+            {
+                foreach (var skin in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                {
+                    mesh.Clear();
+                    skin.BakeMesh(mesh);
+                    foreach (var point in mesh.vertices)
+                    {
+                        float y = skin.transform.TransformPoint(point).y;
+                        min = Mathf.Min(min, y); max = Mathf.Max(max, y);
+                    }
+                }
+            }
+            finally { Destroy(mesh); }
+            if (max - min > .0001f && !float.IsInfinity(max - min))
+                root.transform.localScale *= targetHeight / (max - min);
+            return;
+        }
         var renderers = root.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0) return;
 

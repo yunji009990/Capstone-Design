@@ -50,7 +50,41 @@ public static class PersonaHumanoid
         ("RightLittleProximal", "c_pinky1.r"), ("RightLittleIntermediate", "c_pinky2.r"), ("RightLittleDistal", "c_pinky3.r"),
     };
 
+    // Rocketbox의 머리 없는 니트 몸체. 원본 얼굴 본은 표정 기능으로 매핑하지 않는다.
+    public static readonly (string human, string tripo)[] RocketboxMap = CreateRocketboxMap();
+
+    static (string human, string tripo)[] CreateRocketboxMap()
+    {
+        var result = new List<(string human, string tripo)>
+        {
+            ("Hips", "Bip01 Pelvis"), ("Spine", "Bip01 Spine"), ("Chest", "Bip01 Spine1"),
+            ("UpperChest", "Bip01 Spine2"), ("Neck", "Bip01 Neck"), ("Head", "Bip01 Head"),
+        };
+        foreach (var side in new[] { (human: "Left", source: "L"), (human: "Right", source: "R") })
+        {
+            string prefix = "Bip01 " + side.source + " ";
+            result.Add((side.human + "Shoulder", prefix + "Clavicle"));
+            result.Add((side.human + "UpperArm", prefix + "UpperArm"));
+            result.Add((side.human + "LowerArm", prefix + "Forearm"));
+            result.Add((side.human + "Hand", prefix + "Hand"));
+            result.Add((side.human + "UpperLeg", prefix + "Thigh"));
+            result.Add((side.human + "LowerLeg", prefix + "Calf"));
+            result.Add((side.human + "Foot", prefix + "Foot"));
+            result.Add((side.human + "Toes", prefix + "Toe0"));
+            string[] fingers = { "Thumb", "Index", "Middle", "Ring", "Little" };
+            for (int i = 0; i < fingers.Length; i++)
+            {
+                string finger = prefix + "Finger" + i;
+                result.Add((side.human + fingers[i] + "Proximal", finger));
+                result.Add((side.human + fingers[i] + "Intermediate", finger + "1"));
+                result.Add((side.human + fingers[i] + "Distal", finger + "2"));
+            }
+        }
+        return result.ToArray();
+    }
+
     public static (string human, string tripo)[] Mapping(Transform root) =>
+        Find(root, "Bip01 Pelvis") != null ? RocketboxMap :
         Find(root, "root.x") != null ? FixedBodyMap : Map;
 
     /// <summary>초기화 때 찾고, 재생 중에는 호출 쪽에서 참조를 보관한다.</summary>
@@ -154,6 +188,8 @@ public static class PersonaHumanoid
                 skeletonRoot.localRotation = fix * skeletonRoot.localRotation;
                 personaRoot.localRotation *= Quaternion.Inverse(fix);
             }
+            // Rocketbox는 A포즈가 원본이다. 본 길이는 유지하고 양팔을 T포즈로 맞춘다.
+            if (Mapping(personaRoot) == RocketboxMap) AlignRocketboxArms(personaRoot);
             // 바인드 자세와 Humanoid 기준 자세는 다르다. 같은 몸체로 만든 Mixamo 기준을 먼저 맞춘다.
             if (referencePose == null || Mapping(personaRoot) != FixedBodyMap || referencePose.TryApply(personaRoot, out error))
             {
@@ -167,6 +203,22 @@ public static class PersonaHumanoid
             transforms[i].localRotation = rotations[i];
         }
         return false;
+    }
+
+    static void AlignRocketboxArms(Transform root)
+    {
+        Vector3 right = Vector3.Cross(Vector3.up, MeasureFacing(root)).normalized;
+        foreach (bool left in new[] { true, false })
+        {
+            var upper = FindBone(root, left ? HumanBodyBones.LeftUpperArm : HumanBodyBones.RightUpperArm);
+            var lower = FindBone(root, left ? HumanBodyBones.LeftLowerArm : HumanBodyBones.RightLowerArm);
+            var hand = FindBone(root, left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+            Vector3 direction = left ? -right : right;
+            if (upper != null && lower != null)
+                upper.rotation = Quaternion.FromToRotation(lower.position - upper.position, direction) * upper.rotation;
+            if (lower != null && hand != null)
+                lower.rotation = Quaternion.FromToRotation(hand.position - lower.position, direction) * lower.rotation;
+        }
     }
 
     /// <summary>

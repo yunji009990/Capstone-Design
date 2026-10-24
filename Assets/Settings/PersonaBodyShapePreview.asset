@@ -15,7 +15,7 @@ MonoBehaviour:
   upperBodyWidth: -0.413
   upperBodyDepth: -0.22
   waistWidth: 0.502
-  bellyVolume: 0.018
+  bellyVolume: -0.688
   armThickness: -0.651
   legThickness: 0
   bodyScale: 1
