@@ -20,7 +20,7 @@ public static class PersonaArrivalSetup
     const string ReferenceAnimationPath = AnimationFolder + "/Walking.fbx";
     const string EntranceName = "Persona 입구(시험용)";
 
-    [MenuItem("Tools/Persona/도착 연출 준비", priority = 10)]
+    [MenuItem("Tools/다시봄/개발 도구/초기 설정·복구/입장 연출 초기 설정", priority = 10)]
     public static void Prepare()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)

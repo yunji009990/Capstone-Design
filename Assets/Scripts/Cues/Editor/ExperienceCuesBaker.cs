@@ -16,7 +16,7 @@ using UnityEngine;
 
 static class ExperienceCuesBaker
 {
-    const string Menu = "다시봄/Feel 연출을 씬에 굽기";
+    const string Menu = "Tools/다시봄/개발 도구/초기 설정·복구/체험 연출 오브젝트 만들기";
 
     [MenuItem(Menu)]
     static void Bake()

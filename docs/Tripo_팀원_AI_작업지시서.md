@@ -64,7 +64,7 @@ Scene_2 입장·경로·Mixamo 애니메이션은 현재 기능으로 보존하�
 |---|---|---|
 | Tripo 담당 | `Web/`, `Survey/core/model_*`, `Survey/core/tripo.py`, `Survey/model_worker.py`, `Survey/tests/` | 제작 웹·작업·파일·외부 API |
 | Tripo 담당 | `Survey/core/head_cutout.py`, `Survey/blender/`, `tools/head_*`, `tools/tripo_*` | 머리 생성·결합과 기존 전신 실험 도구 |
-| Tripo 담당 | `Assets/Editor/HeadPreviewWindow.cs`, `TripoModelTestScene.cs`, `TripoRigInspector.cs`, `TripoAnimationTrial.cs` | 로컬 모델 미리보기·검사; 다운로드 연결은 후속 범위 |
+| Tripo 담당 | `Assets/Editor/HeadPreviewWindow.cs`, `TripoModelTestScene.cs`, `TripoRigInspector.cs` | 로컬 모델 미리보기·검사; 다운로드 연결은 후속 범위 |
 | Tripo 담당 | `Assets/Scenes/Tripo_Model_Test.unity`와 전용 재질 | 테스트 씬만 편집 |
 | 공동 계약 | `Server/registration/`, `Server/service.sh`, `tools/service_bundle.py` | 기존 등록·인물 조회 규격과 배포 목록을 보존 |
 | 공동 코드 | `Assets/Scripts/Persona/PersonaSpawner.cs`, `Packages/`, `ProjectSettings/` | 우선 재사용. 변경이 필요하면 양쪽 영향을 설명 |
@@ -73,7 +73,8 @@ Scene_2 입장·경로·Mixamo 애니메이션은 현재 기능으로 보존하�
 
 Unity는 아직 같은 기본 어셈블리를 사용한다. 한 프로젝트 안에서 컴파일·Play 상태까지 독립된 것은 아니다.
 별도 clone에서는 서로의 편집·컴파일에 영향을 주지 않는다. 합칠 때 양쪽 씬의 회귀 검사를 한다.
-`TripoAnimationTrial`은 `PersonaSpawner`를 재사용하고, `PersonaSpawner`는 대화 클라이언트 타입을 참조한다.
+`PersonaSpawner`는 대화 클라이언트 타입을 참조한다. 구형 `TripoAnimationTrial`은2026-10-23 정리에서 제거했고,
+현재 검사 도구의 위치는 [Unity 도구 사용법](Unity_도구_사용법.md)을 따른다.
 이 공통 부분을 무작정 분리하거나 대화 코드를 삭제해 컴파일 문제를 해결하지 않는다.
 
 ## 5. 서버 경계

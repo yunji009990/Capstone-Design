@@ -8,7 +8,7 @@
 [캐릭터 대기 리액션](캐릭터_대기_리액션.md)을 따른다.
 텍스트를 직접 넣는 자동 검사와 분류 결과는 [판정기 텍스트 검사](판정기_텍스트_검사.md)를 참고한다.
 
-1. Unity에서 `Tools > Dialogue > Open AI test scene`을 연다.
+1. Unity에서 `Tools > 다시봄 > 개발 도구 > 대화 검사 > AI 테스트 씬 열기`을 연다.
 2. Play 후 처음 사용하는 PC라면 아래 접속 설정을 입력한다. 서버 준비 완료 표시와 실제 TTS 모델·`reference_audio` 상태를 확인한다.
 3. `참조 목소리 · 억양 설정`에서 WAV를 선택하고 미리 듣기·전사를 확인한다. 생략하면 현재 등록 음성을 사용한다.
 4. 마이크를 선택하고 `테스트 시작`을 누른다. 연결이 준비되면 마이크가 열리며, `종료`로 닫는다.
@@ -133,11 +133,11 @@ AI가 모르는 내용을 되물었을 때 알려 준 답도 기억 정리 대�
 샘플 파일은 개인정보가 없는 모델 제공 예제이며 자동 검사에서는 실제 마이크를 열지 않는다.
 16kHz PCM을 실제 마이크와 같은 WebSocket 경로로 보내고 생성한 답변 음성을 재생한다.
 
-- Play 중 `Tools > Dialogue > Run AI test scene check`: STT 최종 결과·발화 길이·답변 검사, TTS 사용 시 AudioSource 출력까지 검사.
-- Play 중 `Tools > Dialogue > Run text response check`: 텍스트 질문·Unity 행동 전달·답변 검사.
-- Play 중 `Tools > Dialogue > Run voice interruption check`: TTS를 켠 상태에서 재개·수정·주제 전환·대기 후 재개를 검사.
-- Play 중 `Tools > Dialogue > Run reference upload voice check`: 공개 WAV 업로드 후 그 참조로 합성·재생 검사.
-- Play 중 `Tools > Dialogue > Run reference preview check`: WAV 업로드·미리 듣기·설정 화면 검사.
+- Play 중 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 음성 응답`: STT 최종 결과·발화 길이·답변 검사, TTS 사용 시 AudioSource 출력까지 검사.
+- Play 중 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 텍스트 응답·행동 전달`: 텍스트 질문·Unity 행동 전달·답변 검사.
+- Play 중 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 끼어들기·재개`: TTS를 켠 상태에서 재개·수정·주제 전환·대기 후 재개를 검사.
+- Play 중 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 참조 음성 업로드·응답`: 공개 WAV 업로드 후 그 참조로 합성·재생 검사.
+- Play 중 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 참조 음성 미리 듣기`: WAV 업로드·미리 듣기·설정 화면 검사.
 - 기본 결과: `.dialogue-work/ai-voice-scene-smoke.json`.
 - 텍스트 입력 결과: `.dialogue-work/ai-text-scene-smoke.json`, `ai-text-scene-tested.png`.
 - 끼어들기 결과: `.dialogue-work/semantic-interruption-check.json`, 각 경우의 `semantic-*.png`.

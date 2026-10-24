@@ -75,9 +75,9 @@ v2에서 더한 말버릇 반복 억제와 잡음 전사 거절(`weak_text`)은
 | 고인 전제와 사망 경위 | `tools/eval_deceased_dialogue.py`와 [설문 v2 문서](웹_설문_v2_사용법.md) 8-1장 | 등록 체험의 [재회] 규칙, 사망 인식·원인 정정·날조 방지. Unity 불필요 |
 | 긴 대화의 기억 | `tools/eval_dialogue_memory.py`와 [메모리 문서](대화_메모리.md) | 실제 60턴에서 최근 원문 밖의 회상·정정·삭제·초기화. Unity 불필요 |
 | 되물음 뒤 단답의 기억 | `tools/eval_dialogue_clarifications.py`와 같은 메모리 문서 | 실제 WebSocket에서 자동 저장·요일 정정·주제 구분·34턴 뒤 회상. Unity 불필요 |
-| Unity 텍스트 연결 | AI 씬 Play 후 `Tools > Dialogue > Run text response check` | 실제 서버 응답·Unity 상황 전달·연결 설정 |
-| 공개 WAV 경로 | `Tools > Dialogue > Run reference upload voice check` | 공개 참조 업로드→STT→LLM→TTS→Unity AudioSource 재생 |
-| 음성 끼어들기 | `Tools > Dialogue > Run voice interruption check` | 실제 PCM 입력, 재개·수정·전환·대기 후 재개 |
+| Unity 텍스트 연결 | AI 씬 Play 후 `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 텍스트 응답·행동 전달` | 실제 서버 응답·Unity 상황 전달·연결 설정 |
+| 공개 WAV 경로 | `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 참조 음성 업로드·응답` | 공개 참조 업로드→STT→LLM→TTS→Unity AudioSource 재생 |
+| 음성 끼어들기 | `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 끼어들기·재개` | 실제 PCM 입력, 재개·수정·전환·대기 후 재개 |
 | 실제 여러 턴 대화 | AI 씬에서 같은 임시 인물로 대화 | 자연스러움·기억·지식 근거·수정 반영 |
 | 실제 마이크·VR | 실제 입력 장치에서 같은 대본 비교 | 소음·발화 종료·인식·중단·장치 지연 |
 

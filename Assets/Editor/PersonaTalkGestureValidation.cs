@@ -15,7 +15,7 @@ public static class PersonaTalkGestureValidation
         public float observedRate;
     }
 
-    [MenuItem("Tools/Persona/대화 제스처 선택 검사", priority = 25)]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/대화 동작 선택", priority = 25)]
     public static void Run()
     {
         var r = new Report { utc = DateTime.UtcNow.ToString("o"), responses = 100000 };

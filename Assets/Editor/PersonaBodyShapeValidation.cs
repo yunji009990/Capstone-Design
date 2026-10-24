@@ -35,7 +35,7 @@ public static class PersonaBodyShapeValidation
         public bool[] protectedVertices;
     }
 
-    [MenuItem("Tools/Persona/체형 Blend Shape 검사")]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/체형 변형·리깅 보존")]
     public static async void Run()
     {
         if (running || EditorApplication.isPlayingOrWillChangePlaymode) return;

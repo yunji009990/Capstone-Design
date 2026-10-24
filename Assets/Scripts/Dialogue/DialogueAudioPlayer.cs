@@ -121,7 +121,7 @@ public sealed class DialogueAudioPlayer : IDisposable
     {
         _source = source;
         _source.playOnAwake = false;
-        _source.spatialBlend = 0;
+        // 2D/3D는 씬 또는 인물의 공간 음향 컴포넌트가 정한다. 스트리밍 시작 시 덮어쓰지 않는다.
         _source.loop = false;
         // 클립을 쓰지 않는다. 필터가 직접 출력을 만든다.
         _source.clip = null;

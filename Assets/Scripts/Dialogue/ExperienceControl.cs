@@ -9,6 +9,7 @@
 // 그래서 단추 하나가 시작과 종료를 번갈아 맡는다.
 
 using TMPro;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -20,6 +21,36 @@ public class ExperienceControl : MonoBehaviour
     public ConversationLog log;
     [Tooltip("체험 시작을 기다리도록 설정한 인물. 비워두면 씬에서 찾는다.")]
     public PersonaSpawner spawner;
+    [Tooltip("캐릭터 모델 없이 음성만 사용하는 체험. AI 테스트 씬처럼 스포너가 없으면 자동으로 음성 전용으로 동작한다.")]
+    public bool voiceOnlyExperience;
+    public bool UsesCharacter => !voiceOnlyExperience && spawner != null && spawner.waitForExperienceStart;
+    public enum PreparationState { 등록필요, 서버대기, 마이크필요, 모델대기, 모델로딩, 모델실패, 준비완료, 입장중, 음성연결중, 대화가능, 종료중 }
+    public bool IsFinishing { get; private set; }
+    ExperienceCues _cues;
+    public PreparationState Preparation { get; private set; }
+    public string PreparationMessage { get; private set; } = "체험 준비 상태를 확인하는 중입니다.";
+    public bool CanStart { get; private set; }
+    public bool CheckingPreparation { get; private set; }
+    public string PreparationSummary
+    {
+        get
+        {
+            switch (Preparation)
+            {
+                case PreparationState.등록필요: return "인물 등록 필요";
+                case PreparationState.서버대기: return "대화 서버 확인 필요";
+                case PreparationState.마이크필요: return "마이크 확인 필요";
+                case PreparationState.모델대기: return "캐릭터 모델 대기 중";
+                case PreparationState.모델로딩: return "캐릭터 불러오는 중";
+                case PreparationState.모델실패: return "캐릭터 모델 확인 필요";
+                case PreparationState.준비완료: return "준비 완료 · 체험 시작 가능";
+                case PreparationState.입장중: return "캐릭터 입장 중 · 마이크 대기";
+                case PreparationState.음성연결중: return "음성 연결 준비 중";
+                case PreparationState.종료중: return "페이드아웃 · 종료 중";
+                default: return "대화 가능 · 말을 걸어주세요";
+            }
+        }
+    }
 
     [Header("단추")]
     public Button startButton;
@@ -39,6 +70,7 @@ public class ExperienceControl : MonoBehaviour
         if (voice == null) voice = FindObjectOfType<DialogueVoiceClient>();
         if (log == null) log = FindObjectOfType<ConversationLog>();
         if (spawner == null) spawner = FindObjectOfType<PersonaSpawner>();
+        _cues = FindObjectOfType<ExperienceCues>();
         if (buttonImage == null && startButton != null)
             buttonImage = startButton.GetComponent<Image>();
     }
@@ -54,6 +86,7 @@ public class ExperienceControl : MonoBehaviour
 
     public void Toggle()
     {
+        if (IsFinishing) return;
         // 어떤 입력이 단추를 눌렀는지 확정할 수는 없다. 이 시점에 눌려 있던 키만 관측으로 남긴다.
         // EventSystem 의 Submit 바인딩(Space/Enter)으로도 onClick 이 불릴 수 있어 함께 본다.
         _lastToggleKeys =
@@ -62,7 +95,7 @@ public class ExperienceControl : MonoBehaviour
         if (Started)
         {
             // 이 Toggle 에서 바로 끝내는 경우에만 지금 관측한 키를 원인에 붙인다.
-            FinishWith("ui_finish" + (string.IsNullOrEmpty(_lastToggleKeys) ? "" : "_" + _lastToggleKeys));
+            FinishWith("ui_finish" + (string.IsNullOrEmpty(_lastToggleKeys) ? "" : "_" + _lastToggleKeys), true);
         }
         else Begin();
     }
@@ -75,12 +108,14 @@ public class ExperienceControl : MonoBehaviour
     /// <summary>대화 맥락과 기록을 비우고 듣기 시작한다. 앞사람 이야기를 이어받으면 안 된다.</summary>
     public void Begin()
     {
-        if (!isActiveAndEnabled || Started) return;
-        if (voice == null || !voice.HasSession) return;
-        if (!voice.BeginExperience()) return;
+        if (!isActiveAndEnabled || Started || IsFinishing) return;
+        Refresh();
+        if (!CanStart) return;
+        voice.SetConversationInputAllowed(!UsesCharacter);
+        if (!voice.BeginExperience()) { voice.SetConversationInputAllowed(true); Refresh(); return; }
         if (log != null) log.Clear();
         Started = true;
-        if (spawner != null && spawner.waitForExperienceStart) spawner.BeginPresentation();
+        if (UsesCharacter) spawner.BeginPresentation();
         Refresh();
     }
 
@@ -88,31 +123,68 @@ public class ExperienceControl : MonoBehaviour
     /// 듣기를 닫는다. 기록은 지우지 않는다 — 끝난 뒤에 무슨 이야기가 오갔는지
     /// 확인할 일이 있다. 다음 사람을 위해 비우는 것은 다시 시작할 때 한다.
     /// </summary>
-    public void Finish() => FinishWith("ui_finish");
+    public void Finish() => FinishWith("ui_finish", true);
 
     /// <summary>종료 원인을 코드로 넘겨 끝낸다. 지난 Toggle 의 키를 다시 붙이지 않는다.</summary>
-    void FinishWith(string reason)
+    void FinishWith(string reason, bool fade = false)
     {
+        if (fade && (!Started || IsFinishing)) return;
+        bool fadeOut = fade && Started && isActiveAndEnabled && _cues != null && _cues.isActiveAndEnabled;
+        IsFinishing = fadeOut;
         // 이미 실패 등으로 끝난 뒤라면 그때 잡힌 실제 원인을 덮어쓰지 않는다.
         if (voice != null && (voice.ExperienceActive || string.IsNullOrEmpty(voice.LastEndReason)))
             voice.EndExperience(reason);
-        if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
         Started = false;
+        if (fadeOut && _cues.TryFadeOutForFinish(CompleteFinish)) { Refresh(); return; }
+        if (_cues != null) _cues.CancelScreenFade();
+        CompleteFinish();
+    }
+
+    void CompleteFinish()
+    {
+        if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
+        IsFinishing = false;
         Refresh();
     }
 
     void Update()
     {
+        if (IsFinishing)
+        {
+            if (_cues == null || !_cues.isActiveAndEnabled) CompleteFinish();
+            Refresh();
+            return;
+        }
         if (Started && (voice == null || !voice.ExperienceActive))
         {
             if (spawner != null && spawner.waitForExperienceStart) spawner.EndPresentation();
             Started = false;
         }
+        if (Started && UsesCharacter && (!spawner.ModelReady || !spawner.isActiveAndEnabled))
+            FinishWith("character_preparation_failed");
+        if (Started && voice != null)
+            voice.SetConversationInputAllowed(!UsesCharacter || spawner.ReadyForConversation);
         Refresh();
     }
 
+    /// <summary>기존 서버 확인 버튼에서 모델 재시도·마이크 목록 확인도 함께 수행한다.</summary>
+    public void RetryPreparation()
+    {
+        if (!isActiveAndEnabled || Started || IsFinishing || CheckingPreparation || voice == null) return;
+        voice.RefreshMicrophones();
+        if (UsesCharacter) spawner.RetryPreparation();
+        StartCoroutine(CheckPreparation());
+    }
+
+    IEnumerator CheckPreparation()
+    {
+        CheckingPreparation = true;
+        try { yield return voice.CheckHealth(); }
+        finally { CheckingPreparation = false; Refresh(); }
+    }
+
     // 사용자가 단추를 누른 것이 아니다. ui_finish 로 위장하지 않는다.
-    void OnDisable() => FinishWith("control_disabled");
+    void OnDisable() { FinishWith("control_disabled"); CheckingPreparation = false; }
 
     void OnDestroy()
     {
@@ -121,23 +193,57 @@ public class ExperienceControl : MonoBehaviour
 
     void Refresh()
     {
-        bool registered = voice != null && voice.HasSession;
-        bool ready = registered && voice.serverReady;
+        bool registered = voice != null && (voice.HasSession || voice.useTestProfile);
+        CanStart = false;
+        if (IsFinishing) SetPreparation(PreparationState.종료중, "화면이 어두워지며 체험을 마칩니다.");
+        else if (!registered) SetPreparation(PreparationState.등록필요, "웹에서 인물을 등록한 뒤 준비를 다시 확인해주세요.");
+        else if (Started)
+        {
+            if (UsesCharacter && !spawner.ReadyForConversation)
+                SetPreparation(PreparationState.입장중, "캐릭터가 입장하고 있습니다. 착석 후 대화가 시작됩니다.");
+            else if (!voice.DialogueConnected)
+                SetPreparation(PreparationState.음성연결중, "음성을 준비하는 중입니다. 연결이 끝나면 대화를 시작합니다.");
+            else SetPreparation(PreparationState.대화가능, "대화 준비 완료 · 편하게 말을 걸어주세요.");
+        }
+        else if (!voice.serverReady) SetPreparation(PreparationState.서버대기, "대화 서버 연결을 확인하고 ‘준비 다시 확인’을 눌러주세요.");
+        else if (!voice.MicrophoneAvailable) SetPreparation(PreparationState.마이크필요, "사용할 마이크가 없습니다. 장치·권한을 확인하고 ‘준비 다시 확인’을 눌러주세요.");
+        else if (UsesCharacter && !spawner.ModelReady)
+        {
+            var phase = spawner.Preparation;
+            if (phase == PersonaSpawner.PreparationPhase.실패)
+                SetPreparation(PreparationState.모델실패, spawner.PreparationMessage);
+            else if (phase == PersonaSpawner.PreparationPhase.다운로드 || phase == PersonaSpawner.PreparationPhase.표시준비)
+                SetPreparation(PreparationState.모델로딩, spawner.PreparationMessage);
+            else SetPreparation(PreparationState.모델대기, spawner.PreparationMessage);
+        }
+        else
+        {
+            CanStart = !voice.isWaiting && !CheckingPreparation;
+            SetPreparation(PreparationState.준비완료, "준비 완료 · 체험 시작을 눌러주세요.");
+        }
 
         if (startLabel)
-            startLabel.text = Started ? "체험 종료"
-                            : !registered ? "인물 등록 필요"
-                            : !ready ? "서버 연결 필요"
-                            : "체험 시작";
+            startLabel.text = IsFinishing ? "종료 중…" : Started ? "체험 종료"
+                            : Preparation == PreparationState.등록필요 ? "인물 등록 필요"
+                            : Preparation == PreparationState.서버대기 ? "서버 연결 필요"
+                            : Preparation == PreparationState.마이크필요 ? "마이크 확인 필요"
+                            : Preparation == PreparationState.모델실패 ? "모델 확인 필요"
+                            : CanStart ? "체험 시작" : "체험 준비 중";
 
         // 진행 중일 때만 색이 달라야 지금 어느 쪽인지 한눈에 보인다.
         if (buttonImage)
             buttonImage.color = Started ? stopColor
-                              : ready ? readyColor
+                              : CanStart ? readyColor
                               : new Color(readyColor.r, readyColor.g, readyColor.b, 0.35f);
 
         // 끝내는 것은 언제든 되어야 한다. 시작만 조건을 본다.
         if (startButton)
-            startButton.interactable = Started || (ready && !voice.isWaiting);
+            startButton.interactable = !IsFinishing && (Started || CanStart);
+    }
+
+    void SetPreparation(PreparationState state, string message)
+    {
+        Preparation = state;
+        PreparationMessage = message;
     }
 }

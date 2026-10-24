@@ -41,7 +41,7 @@ public static class PersonaGroundPathValidation
         if (SessionState.GetBool(ObserveKey, false)) EditorApplication.update += Observe;
     }
 
-    [MenuItem("Tools/Persona/바닥 경로 검사", priority = 24)]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/이동 경로·인사", priority = 24)]
     public static void Run()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode) return;
@@ -162,7 +162,7 @@ public static class PersonaGroundPathValidation
         }
     }
 
-    [MenuItem("Tools/Persona/다음 Play 경로 관측", priority = 25)]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/다음 Play의 이동 경로 기록", priority = 25)]
     public static void ArmObservation()
     {
         playReport = null;

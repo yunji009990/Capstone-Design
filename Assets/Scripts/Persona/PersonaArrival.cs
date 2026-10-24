@@ -101,12 +101,18 @@ public class PersonaArrival : MonoBehaviour
     [Tooltip("체험자가 말하는 동안 이따금 끄덕인다. 듣고 있다는 신호다.")]
     public bool autoNodWhileListening = true;
 
-    [Tooltip("체험자가 이만큼 말한 뒤부터 끄덕이기 시작한다(초). 기침 한 번에 끄덕이지 않게.")]
+    [Tooltip("반응할 확정 발화의 최소 길이(초). 잡음·짧은 감탄에 매번 반응하지 않게 한다.")]
     public float nodAfterListeningSec = 1.2f;
 
     [Tooltip("끄덕임 사이 간격(초). 이 범위에서 무작위로 흩뜨린다.")]
     public float nodMinGapSec = 3f;
     public float nodMaxGapSec = 6.5f;
+
+    [Tooltip("끄덕임 클립이 없을 때 목·머리에 얹는 작은 각도. 시선·호흡 뒤에 적용한다.")]
+    [Range(0f, 10f)] public float listeningNodDegrees = 4.5f;
+
+    [Tooltip("고개를 내렸다 원래 자세로 돌아오는 시간(초).")]
+    [Range(.4f, 1.8f)] public float listeningNodSeconds = .9f;
 
     [Header("경로")]
     [Tooltip("Scene 창에서 그린 바닥 경로. 첫 점에서 시작해 마지막 점까지 걷는다. 비우면 기존 경유지를 쓴다.")]
@@ -211,7 +217,11 @@ public class PersonaArrival : MonoBehaviour
     string _talkResponseId;
     bool _talkPending, _automaticTalkActive;
     public bool IsTalkGesturePlaying => _automaticTalkActive && _gesture.IsValid() && !_gestureFading;
-    float _heardFor, _sinceNod, _quietFor, _nextNodAt;
+    readonly PersonaListeningNod _listeningNod = new PersonaListeningNod();
+    int _lastNodInputTurn;
+    public float ListeningNodAngle => autoNodWhileListening && nodClip == null && IsSeated
+        ? _listeningNod.Weight * listeningNodDegrees : 0f;
+    public int ListeningNodCount => _listeningNod.Count;
     int _active = -1;                      // 지금 무게를 올리고 있는 입력
     AnimationClip _current;
     float _clipTime, _blend, _holdAt = -1f;
@@ -488,34 +498,21 @@ public class PersonaArrival : MonoBehaviour
     /// </summary>
     void DriveNodGesture()
     {
-        if (!autoNodWhileListening || nodClip == null) return;
         var voice = _spawner != null ? _spawner.voiceClient : null;
-        if (voice == null) return;
+        if (!IsSeated || !autoNodWhileListening || voice == null || !voice.ExperienceActive || !voice.DialogueConnected)
+        { _listeningNod.Reset(); return; }
 
-        if (voice.IsSpeaking) { ResetNod(); return; }
-
-        bool loud = voice.IsListening && voice.MicLevel > Mathf.Max(0.0001f, voice.VadThreshold);
-        _quietFor = loud ? 0f : _quietFor + Time.deltaTime;
-
-        // 음절 사이가 끊기는 건 말이 끝난 게 아니다. 짧은 공백은 이어서 센다.
-        if (!loud && _quietFor >= 0.4f) { ResetNod(); return; }
-
-        _heardFor += Time.deltaTime;
-        _sinceNod += Time.deltaTime;
-
-        if (_gestureClip != null) return;            // 뭔가 이미 얹혀 있다
-        if (_heardFor < nodAfterListeningSec) return;
-        if (_sinceNod < _nextNodAt) return;
-
-        Nod();
-        _sinceNod = 0f;
-        _nextNodAt = UnityEngine.Random.Range(nodMinGapSec, Mathf.Max(nodMinGapSec, nodMaxGapSec));
-    }
-
-    void ResetNod()
-    {
-        _heardFor = _sinceNod = 0f;
-        _nextNodAt = UnityEngine.Random.Range(nodMinGapSec, Mathf.Max(nodMinGapSec, nodMaxGapSec));
+        // 서버는 검증 뒤 started/stopped를 연달아 보낸다. 확정 전사와 실제 발화 길이로 예약한다.
+        // showHeardSubtitle이 꺼져 있어도 내부 전사 상태를 사용하므로 반응은 유지된다.
+        if (voice.TranscriptIsFinal && voice.CurrentInputTurn != _lastNodInputTurn)
+        {
+            _lastNodInputTurn = voice.CurrentInputTurn;
+            if (!string.IsNullOrWhiteSpace(voice.lastHeard)) _listeningNod.ConfirmSpeech(voice.VoiceDuration);
+        }
+        bool blocked = voice.IsSpeaking || _gestureClip != null;
+        _listeningNod.Tick(Time.deltaTime, voice.isRecording, blocked, nodAfterListeningSec,
+            nodMinGapSec, nodMaxGapSec, listeningNodSeconds);
+        if (nodClip != null && _listeningNod.StartedThisFrame) Nod();
     }
 
     /// <summary>앉은 상태로 들어간다. 시선을 되돌리고 앉은 자세를 잡는다.</summary>
@@ -971,7 +968,8 @@ public class PersonaArrival : MonoBehaviour
         _talkSelector.Reset();
         _talkResponseId = null;
         _talkPending = _automaticTalkActive = false;
-        _heardFor = _sinceNod = _quietFor = _nextNodAt = 0f;
+        _listeningNod.Reset();
+        _lastNodInputTurn = 0;
         waypointIndex = 0;
         _groundRoute = null;
         _pathDistance = _rootHeightAboveFloor = distanceLeft = 0f;

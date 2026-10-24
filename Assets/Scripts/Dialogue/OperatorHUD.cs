@@ -148,8 +148,9 @@ public class OperatorHUD : MonoBehaviour
         {
             s.AppendLine();
             s.AppendLine("<b>체험</b>");
-            s.AppendLine(experience.Started ? "  <color=#7ED9A5>진행 중</color>"
-                                            : "  <color=#E0B36A>시작 전 — 말을 걸어도 받지 않습니다</color>");
+            s.AppendLine("  " + experience.PreparationSummary);
+            if (experience.Started && voice != null && !voice.DialogueConnected)
+                s.AppendLine("  음성 연결 준비 중");
         }
 
         // 상태 한 줄은 위 점이, 마이크 세기는 아래 막대가, 오간 말은 기록 창이 맡는다.

@@ -39,7 +39,7 @@ public static class PersonaFixedBodyValidation
         public string error;
     }
 
-    [MenuItem("Tools/Persona/고정 몸체 애니메이션 검사", priority = 3)]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/고정 몸체 애니메이션", priority = 3)]
     public static async void Run()
     {
         if (running || EditorApplication.isPlayingOrWillChangePlaymode) return;

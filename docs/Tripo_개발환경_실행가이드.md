@@ -62,12 +62,12 @@ worker 검사에는 가짜 이미지·Tripo 응답·등록 전달과 임시 DB�
 
 ## 3. Unity에서 기존 결과 확인
 
-머리·몸체·결합 GLB는 `Tools > 다시봄 > 모델 미리보기`를 쓴다. `tools/_work/`의 로컬 GLB를 선택하며
+머리·몸체·결합 GLB는 `Tools > 다시봄 > 캐릭터 > 모델 미리보기 열기`를 쓴다. `tools/_work/`의 로컬 GLB를 선택하며
 API를 자동 호출하지 않는다. 결합 전신은 원본 크기·발바닥 기준 배치를 사용한다.
 아래 `Tripo_Model_Test` 절차는 기존 전신·리깅·동작 팩 실험용이다.
 
 1. 수신 프로젝트를 Unity Hub에 추가하고 2022.3.62f2로 연다.
-2. `Assets/Scenes/Tripo_Model_Test.unity` 또는 `Tools > Tripo > Open model test scene`을 연다.
+2. `Assets/Scenes/Tripo_Model_Test.unity` 또는 `Tools > 다시봄 > 개발 도구 > 모델 검사 > 로컬 GLB 검사 씬 열기`을 연다.
 3. 전달받은 모델 폴더가 있으면 `모델 폴더 선택`으로 선택한다.
 4. `생성 원본 / 리깅 원본 / 애니메이션` 단계와 원하는 동작을 선택한다.
 5. Play 버튼 없이도 검사 창의 `재생`으로 동작을 확인한다. `뼈대 겹쳐 보기`로 관절을 본다.

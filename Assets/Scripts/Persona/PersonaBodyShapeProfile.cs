@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-/// <summary>모델 파일의 단위와 관계없이 -1~1로 저장하는 체형 설정. 0은 제작 원본이다.</summary>
+/// <summary>체형 Blend Shape와 결합 머리·전체 크기의 공용 설정.</summary>
 [CreateAssetMenu(fileName = "PersonaBodyShape", menuName = "다시봄/체형 설정")]
 public sealed class PersonaBodyShapeProfile : ScriptableObject
 {
@@ -20,6 +20,23 @@ public sealed class PersonaBodyShapeProfile : ScriptableObject
     float armThickness;
     [SerializeField, Range(-1f, 1f), Tooltip("양쪽 다리와 바지의 굵기. 신발은 유지한다.")]
     float legThickness;
+
+    [Header("전체 크기 · 머리 결합")]
+    [SerializeField, Range(.7f, 1.3f), Tooltip("캐릭터 전체 배율. 1은 현재 키, 0.9는 90%. 리깅도 함께 같은 비율로 바뀐다.")]
+    float bodyScale = 1f;
+    [SerializeField, Range(.75f, 1.35f), Tooltip("몸에 대한 머리·얼굴·머리카락 크기. 목 연결부를 기준으로 조절한다.")]
+    float headScale = 1f;
+    [SerializeField, Range(-.03f, .05f), Tooltip("자동 목 연결 보정에 더하는 머리 높이. 몸체 원본 높이의 비율로, 0.01은 1% 위로.")]
+    float headHeight;
+    [SerializeField, Range(-.04f, .04f), Tooltip("머리의 앞뒤 위치. 몸체 원본 높이의 비율. 양수는 얼굴 방향, 음수는 뒤쪽.")]
+    float headForward;
+
+    public float BodyScale => Finite(bodyScale, 1f, .7f, 1.3f);
+    public float HeadScale => Finite(headScale, 1f, .75f, 1.35f);
+    public float HeadHeight => Finite(headHeight, 0f, -.03f, .05f);
+    public float HeadForward => Finite(headForward, 0f, -.04f, .04f);
+    static float Finite(float value, float fallback, float min, float max) =>
+        float.IsNaN(value) || float.IsInfinity(value) ? fallback : Mathf.Clamp(value, min, max);
 
     public static PersonaBodyShapeProfile LoadDefault() =>
         Resources.Load<PersonaBodyShapeProfile>(DefaultResourceName);

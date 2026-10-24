@@ -26,10 +26,10 @@ public static class TouchGrabFix
 {
     const string TypeName = "TouchHandGrabInteractable";
 
-    [MenuItem("Tools/Persona/Touch_grab 진단하기", priority = 20)]
+    [MenuItem("Tools/다시봄/개발 도구/초기 설정·복구/VR 잡기 참조 검사", priority = 20)]
     public static void Diagnose() { Run(false); }
 
-    [MenuItem("Tools/Persona/Touch_grab 고치기", priority = 21)]
+    [MenuItem("Tools/다시봄/개발 도구/초기 설정·복구/VR 잡기 참조 복구", priority = 21)]
     public static void Fix() { Run(true); }
 
     static void Run(bool repair)

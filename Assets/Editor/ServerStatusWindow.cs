@@ -17,7 +17,7 @@ public class ServerStatusWindow : EditorWindow
     static readonly Color Red = new Color(0.80f, 0.35f, 0.32f);
     static readonly Color Grey = new Color(0.45f, 0.47f, 0.50f);
 
-    [MenuItem("Tools/서버 연결 상태 확인", false, 100)]
+    [MenuItem("Tools/다시봄/대화·서버/서버 연결 상태 열기", false, 100)]
     static void ShowWindow()
     {
         var w = GetWindow<ServerStatusWindow>(false, "서버 상태", true);

@@ -1,10 +1,10 @@
 // DialogueReplayMenu.cs
 // 개발용. 마지막으로 끝까지 재생된 답변의 원본 PCM 을 두 경로로 다시 들어 본다.
 //
-//   Tools/Dialogue/Compare last reply/Stream renderer  : 실제 대화와 같은 경로
+//   Tools/다시봄/개발 도구/대화 검사/최근 답변 비교/스트리밍으로 다시 듣기  : 실제 대화와 같은 경로
 //     (DialogueAudioPlayer 에 24 kHz PCM 을 9600바이트 이하로 흘려 넣고 MarkComplete →
 //      전량 소비 → TailSeconds 뒤 정지)
-//   Tools/Dialogue/Compare last reply/AudioClip        : 비교용 경로
+//   Tools/다시봄/개발 도구/대화 검사/최근 답변 비교/AudioClip으로 다시 듣기        : 비교용 경로
 //     (stream:false 인 AudioClip 에 전체 PCM 을 SetData 하고 한 번에 재생)
 //
 // 두 메뉴는 같은 캐시 사본을 쓴다. 둘 다 잘리면 원본 PCM·공유 출력 경로·장치를 더 조사하고,
@@ -40,13 +40,13 @@ public static class DialogueReplayMenu
         EditorApplication.update += DialogueReplayCache.Expire;
     }
 
-    [MenuItem("Tools/Dialogue/Compare last reply/Stream renderer", priority = 24)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/최근 답변 비교/스트리밍으로 다시 듣기", priority = 24)]
     public static void ReplayStream() => Replay(true);
 
-    [MenuItem("Tools/Dialogue/Compare last reply/AudioClip", priority = 25)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/최근 답변 비교/AudioClip으로 다시 듣기", priority = 25)]
     public static void ReplayClip() => Replay(false);
 
-    [MenuItem("Tools/Dialogue/Compare last reply/Stop replay", priority = 26)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/최근 답변 비교/다시 듣기 중지", priority = 26)]
     public static void StopReplay()
     {
         if (!_running) { Debug.LogWarning("[Replay] 재생 중이 아닙니다."); return; }

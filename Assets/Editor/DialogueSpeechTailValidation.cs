@@ -91,7 +91,7 @@ public static class DialogueSpeechTailValidation
         public string outputPath = "";
     }
 
-    [MenuItem("Tools/Dialogue/Run speech tail output check", priority = 23)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/말끝 출력 파형 (Play)", priority = 23)]
     public static async void Run()
     {
         if (_running) { Debug.LogWarning("[SpeechTail] 이미 실행 중입니다."); return; }

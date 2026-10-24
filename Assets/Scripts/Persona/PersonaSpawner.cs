@@ -56,7 +56,7 @@ public class PersonaSpawner : MonoBehaviour
     public float scaleMultiplier = 1.0f;
 
     [Header("체형")]
-    [Tooltip("6개 체형 Blend Shape 설정. 비워두면 Tools > 다시봄 > 캐릭터 > 체형 조절 열기의 기본 설정을 쓴다.")]
+    [Tooltip("체형 Blend Shape·전체 크기·머리 결합 설정. 비워두면 Tools > 다시봄 > 캐릭터 > 체형 조절 열기의 기본 설정을 쓴다.")]
     public PersonaBodyShapeProfile bodyShapeProfile;
 
     [Tooltip("spawnPoint 의 회전을 그대로 사용할지 여부.")]
@@ -241,10 +241,37 @@ public class PersonaSpawner : MonoBehaviour
     GameObject _spawnedInstance;
     /// <summary>지금 서 있는 인물. 아직 안 받았으면 null. 연출이 얼굴 위치를 재는 데 쓴다.</summary>
     public GameObject Spawned => _spawnedInstance;
+    public Transform HeadTransform => _head;
     string _loadedSession = "";      // 이미 띄운 세션. 인물이 바뀔 때만 다시 받는다.
     bool _isLoading;
     bool _modelReady, _presentationRequested, _presentationStarted;
     public bool PresentationStarted => _presentationStarted;
+    public enum PreparationPhase { 인물확인, 모델대기, 다운로드, 표시준비, 준비완료, 실패 }
+    public PreparationPhase Preparation { get; private set; }
+    public string PreparationMessage { get; private set; } = "등록 인물을 확인하는 중입니다.";
+    bool _arrivalStarted;
+    string _failedSession = "";
+    Coroutine _watchRoutine;
+    public bool ModelReady => isActiveAndEnabled && _modelReady && _spawnedInstance != null &&
+        (voiceClient == null || !string.IsNullOrWhiteSpace(localGlbPath) || !string.IsNullOrWhiteSpace(sessionIdOverride) ||
+         (voiceClient.HasSession && _loadedSession == voiceClient.sessionId));
+    public bool ReadyForConversation => PresentationStarted && _spawnedInstance != null && _spawnedInstance.activeInHierarchy &&
+        (!_arrivalStarted || (arrival != null && arrival.IsSeated));
+
+    void SetPreparation(PreparationPhase phase, string message)
+    {
+        Preparation = phase;
+        PreparationMessage = message;
+    }
+
+    public void RetryPreparation()
+    {
+        if (!isActiveAndEnabled || _isLoading || _presentationRequested || _presentationStarted || ModelReady) return;
+        if (_watchRoutine != null) StopCoroutine(_watchRoutine);
+        _failedSession = "";
+        _loadedSession = "";
+        _watchRoutine = StartCoroutine(!string.IsNullOrWhiteSpace(localGlbPath) ? LoadLocal() : WatchSession());
+    }
 
     // 앉아서 숨쉬기. 클립을 왕복시키는 Animation 과, 호흡을 얹을 뼈들.
     Animation _poseAnim;
@@ -260,6 +287,7 @@ public class PersonaSpawner : MonoBehaviour
     Camera _gazeCamera;
     float _gazeBreakAt, _gazeBreakUntil;
     float _seatedHeadLift;
+    float _appliedListeningNod;
 
     string Url => voiceClient != null ? voiceClient.serverUrl : serverUrl;
     string Tok => voiceClient != null ? voiceClient.token : token;
@@ -319,8 +347,7 @@ public class PersonaSpawner : MonoBehaviour
     void Start()
     {
         if (voiceClient == null) voiceClient = FindObjectOfType<DialogueVoiceClient>();
-        if (!string.IsNullOrWhiteSpace(localGlbPath)) StartCoroutine(LoadLocal());
-        else StartCoroutine(WatchSession());
+        _watchRoutine = StartCoroutine(!string.IsNullOrWhiteSpace(localGlbPath) ? LoadLocal() : WatchSession());
     }
 
     /// <summary>로드 중이면 요청을 보관하고, 준비된 뒤 입구에서 한 번만 시작한다.</summary>
@@ -343,6 +370,7 @@ public class PersonaSpawner : MonoBehaviour
         if (_poseAnim != null) _poseAnim.Stop();
         _poseAnim = null;
         _presentationStarted = false;
+        _arrivalStarted = false;
         _seatedHeadLift = 0f;
         if (_spawnedInstance != null) _spawnedInstance.SetActive(false);
     }
@@ -363,6 +391,15 @@ public class PersonaSpawner : MonoBehaviour
         _presentationStarted = true;
         bool started = arrival != null && arrival.CanRun &&
             arrival.TryBegin(_spawnedInstance.transform, this, _spawnedInstance.transform);
+        _arrivalStarted = started;
+        if (arrival != null && arrival.isActiveAndEnabled && !started)
+        {
+            _modelReady = false;
+            _failedSession = _loadedSession;
+            StopPresentation();
+            SetPreparation(PreparationPhase.실패, "캐릭터 입장 준비에 실패했습니다. 리깅·동작 설정을 확인한 뒤 준비를 다시 확인해주세요.");
+            return;
+        }
         if (!started && applyPoseAnimation) ApplyPose(_spawnedInstance);
         FindFacing(_spawnedInstance);
         if (breathe || gaze) FindBreathBones(_spawnedInstance);
@@ -394,10 +431,16 @@ public class PersonaSpawner : MonoBehaviour
             yield break;
         }
         _isLoading = true;
+        SetPreparation(PreparationPhase.표시준비, "로컬 캐릭터 모델을 준비하는 중입니다.");
         if (verboseLog) Debug.Log($"[PersonaSpawner] 로컬 GLB 로드: {path}");
         var task = SpawnAsync("local", System.IO.File.ReadAllBytes(path));
         while (!task.IsCompleted) yield return null;
-        if (task.IsFaulted) Debug.LogError($"[PersonaSpawner] 스폰 실패: {task.Exception}");
+        if (task.IsFaulted || !_modelReady || _loadedSession != "local")
+        {
+            _failedSession = "local";
+            if (Preparation != PreparationPhase.실패)
+                SetPreparation(PreparationPhase.실패, "로컬 캐릭터 모델을 열지 못했습니다. 모델과 리깅을 확인한 뒤 준비를 다시 확인해주세요.");
+        }
         Finish();
     }
 
@@ -420,6 +463,12 @@ public class PersonaSpawner : MonoBehaviour
         // 애니메이션이 매 프레임 뼈를 다시 쓰면 그 위에 얹고, 정지 자세면 저장해 둔 기준에 얹는다.
         bool driven = posedExternally || (_poseAnim != null && _poseAnim.enabled && _poseAnim.isPlaying);
         if (driven) CaptureBreathBase();
+        else if (_appliedListeningNod > 0f)
+        {
+            // 애니메이션이 없는 정지 모델도 지난 프레임의 끄덕임을 누적하지 않는다.
+            if (_head) _head.localRotation = _headBase;
+            if (_neck) _neck.localRotation = _neckBase;
+        }
         Transform body = _spawnedInstance.transform;
 
         if (breathe)
@@ -437,6 +486,19 @@ public class PersonaSpawner : MonoBehaviour
         // 시선은 호흡 다음이다. 호흡이 목에 써 놓은 결과 위에 얹는다.
         if (gaze) AimGaze(body);
         LiftSeatedHead(body);
+        ApplyListeningNod(body);
+    }
+
+    void ApplyListeningNod(Transform body)
+    {
+        _appliedListeningNod = arrival != null ? arrival.ListeningNodAngle : 0f;
+        if (_head == null || _appliedListeningNod <= 0f) return;
+        Vector3 forward = gaze && _aim.sqrMagnitude > 1e-6f ? _aim : MeasureFaceForward(body, body.up);
+        Vector3 right = Vector3.Cross(body.up, forward).normalized;
+        float share = _neck != null ? .35f : 0f;
+        if (_neck != null)
+            _neck.rotation = Quaternion.AngleAxis(_appliedListeningNod * share, right) * _neck.rotation;
+        _head.rotation = Quaternion.AngleAxis(_appliedListeningNod * (1f - share), right) * _head.rotation;
     }
 
     // 앉은 애니메이션·시선이 정해진 뒤 보정한다. Animator가 매 프레임 원래 자세를
@@ -720,7 +782,7 @@ public class PersonaSpawner : MonoBehaviour
                 if (verboseLog) Debug.Log($"[PersonaSpawner] 인물이 {sid} 로 바뀌었고 모델이 없어 치웠습니다.");
             }
 
-            if (!string.IsNullOrEmpty(sid) && hasModel && sid != _loadedSession && !_isLoading)
+            if (!string.IsNullOrEmpty(sid) && hasModel && sid != _loadedSession && sid != _failedSession && !_isLoading)
             {
                 yield return StartCoroutine(LoadModel(sid));
                 waited = 0f;
@@ -734,6 +796,8 @@ public class PersonaSpawner : MonoBehaviour
                     yield break;
                 }
             }
+            if (string.IsNullOrEmpty(sid) && Preparation != PreparationPhase.실패) SetPreparation(PreparationPhase.인물확인, "등록 인물을 확인하는 중입니다.");
+            else if (!hasModel) SetPreparation(PreparationPhase.모델대기, "등록 인물의 모델이 아직 준비되지 않았습니다. 등록 화면의 제작 상태를 확인해주세요.");
             yield return wait;
         }
     }
@@ -747,6 +811,7 @@ public class PersonaSpawner : MonoBehaviour
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
+                SetPreparation(PreparationPhase.실패, "인물 등록 서버에 연결하지 못했습니다. 접속 설정을 확인하고 준비를 다시 확인해주세요.");
                 Note($"세션을 못 받았습니다 — {Describe(req)}  [{Url}/session/current]", warn: true);
                 yield break;
             }
@@ -763,6 +828,7 @@ public class PersonaSpawner : MonoBehaviour
     IEnumerator LoadModel(string sid)
     {
         _isLoading = true;
+        SetPreparation(PreparationPhase.다운로드, "캐릭터 모델을 내려받는 중입니다.");
         if (loadingIndicator) loadingIndicator.SetActive(true);
 
         byte[] glb = null;
@@ -779,10 +845,16 @@ public class PersonaSpawner : MonoBehaviour
                 // 404 는 아직 안 올라왔다는 뜻이라 오류가 아니다. 다만 영영 조용하면
                 // 기다리는 건지 끊긴 건지 알 수 없으니 한 번은 남긴다.
                 if (req.responseCode == 404)
+                {
+                    SetPreparation(PreparationPhase.모델대기, "캐릭터 모델 업로드를 기다리는 중입니다.");
                     Note($"세션 {Short(sid)} 의 모델이 서버에 아직 없습니다(404). " +
                          "만들어지면 자동으로 받습니다");
+                }
                 else
+                {
+                    SetPreparation(PreparationPhase.실패, "캐릭터 다운로드에 실패했습니다. 연결을 확인해주세요. 자동으로 재시도하며 준비 다시 확인도 사용할 수 있습니다.");
                     Note($"모델 요청 실패 — {Describe(req)}", warn: true);
+                }
                 Finish();
                 yield break;
             }
@@ -792,15 +864,23 @@ public class PersonaSpawner : MonoBehaviour
 
         if (glb == null || glb.Length == 0)
         {
+            SetPreparation(PreparationPhase.실패, "빈 캐릭터 모델을 받았습니다. 모델을 확인하고 준비를 다시 확인해주세요.");
+            _failedSession = sid;
             Debug.LogWarning("[PersonaSpawner] 받은 모델이 비어 있습니다.");
             Finish();
             yield break;
         }
 
         // glTFast 는 async/await 라 코루틴에서 완료를 기다린다.
+        SetPreparation(PreparationPhase.표시준비, "캐릭터 모델·재질을 준비하는 중입니다.");
         var task = SpawnAsync(sid, glb);
         while (!task.IsCompleted) yield return null;
-        if (task.IsFaulted) Debug.LogError($"[PersonaSpawner] 스폰 실패: {task.Exception}");
+        if (task.IsFaulted || !_modelReady || _loadedSession != sid)
+        {
+            _failedSession = sid;
+            if (Preparation != PreparationPhase.실패)
+                SetPreparation(PreparationPhase.실패, "캐릭터 모델을 표시하지 못했습니다. 모델·리깅을 확인하고 준비를 다시 확인해주세요.");
+        }
         Finish();
     }
 
@@ -867,11 +947,14 @@ public class PersonaSpawner : MonoBehaviour
         if (scaleMultiplier > 0f && Mathf.Abs(scaleMultiplier - 1f) > 0.0001f)
             _spawnedInstance.transform.localScale *= scaleMultiplier;
 
-        // 정점 변형만 적용하며 키 정규화·Humanoid 기준 자세·관절 배치는 유지한다.
+        // 키 정규화 이후 전체 배율·머리 결합·체형 키를 적용한다. Humanoid 기준 자세는 유지한다.
         var shapeController = _spawnedInstance.AddComponent<PersonaBodyShapeController>();
         shapeController.Bind(bodyShapeProfile != null ? bodyShapeProfile : PersonaBodyShapeProfile.LoadDefault());
 
+        if (!CheckArrivalPreparation(_spawnedInstance.transform)) return;
+
         _loadedSession = sid;
+        SetPreparation(PreparationPhase.준비완료, "캐릭터 모델 준비 완료");
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 스폰 완료: {sid} at {anchor.position}, " +
                       $"scale={_spawnedInstance.transform.localScale}" +
@@ -880,6 +963,38 @@ public class PersonaSpawner : MonoBehaviour
         // 크기를 먼저 맞춘다. 입장 요청이 로드보다 빨랐어도 여기서 이어 시작한다.
         _modelReady = true;
         TryShowPersona();
+    }
+
+    bool CheckArrivalPreparation(Transform root)
+    {
+        if (arrival == null || !arrival.isActiveAndEnabled) return true;
+        bool clipsValid = arrival.CanRun && arrival.seatedClip != null;
+        foreach (var clip in new[] { arrival.idleClip, arrival.greetClip, arrival.walkClip, arrival.turnClip,
+            arrival.sitDownClip, arrival.seatedClip, arrival.talkClip, arrival.nodClip, arrival.shakeClip })
+            if (clip != null && !clip.isHumanMotion) clipsValid = false;
+        if (!clipsValid)
+        {
+            SetPreparation(PreparationPhase.실패, "캐릭터 입장·착석 동작이 준비되지 않았습니다. 동작 연결을 확인한 뒤 준비를 다시 확인해주세요.");
+            return false;
+        }
+        // Avatar 생성 가능 여부를 시작 전에 확인하되, 로드된 원래 자세는 그대로 돌려놓는다.
+        var bones = root.GetComponentsInChildren<Transform>(true);
+        var positions = new Vector3[bones.Length];
+        var rotations = new Quaternion[bones.Length];
+        for (int i = 0; i < bones.Length; i++) { positions[i] = bones[i].localPosition; rotations[i] = bones[i].localRotation; }
+        Avatar probe = null;
+        try
+        {
+            if (PersonaHumanoid.TryPrepare(root, out _, out probe, out _, root, arrival.referencePose)) return true;
+            SetPreparation(PreparationPhase.실패, "캐릭터 리깅을 준비하지 못했습니다. 모델을 확인한 뒤 준비를 다시 확인해주세요.");
+            return false;
+        }
+        finally
+        {
+            for (int i = 0; i < bones.Length; i++)
+                if (bones[i] != null) { bones[i].localPosition = positions[i]; bones[i].localRotation = rotations[i]; }
+            if (probe != null) Destroy(probe);
+        }
     }
 
     [Serializable]

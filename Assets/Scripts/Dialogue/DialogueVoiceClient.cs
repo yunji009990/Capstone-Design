@@ -30,7 +30,10 @@ public partial class DialogueVoiceClient : MonoBehaviour
     public bool HasSession { get; private set; }
     public bool IsSpeaking => _playback != null && _playback.Playing;
     public bool TtsEnabled { get; private set; }
-    public string[] MicDevices => Microphone.devices;
+    public string[] MicDevices => _micDevices;
+    string[] _micDevices = Array.Empty<string>();
+    float _nextMicRefresh;
+    public bool MicrophoneAvailable => !RequiresMicrophone || Array.IndexOf(_micDevices, _micDevice) >= 0;
     public string CurrentMic => _micDevice ?? "";
     public bool IsListening => _listening;
     public float MicLevel { get; private set; }
@@ -63,7 +66,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
 #else
         _playback = new DialogueAudioPlayer(GetComponent<AudioSource>());
 #endif
-        if (Microphone.devices.Length > 0) _micDevice = Microphone.devices[0];
+        RefreshMicrophones();
     }
 
     void Start()
@@ -101,6 +104,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
     void OnApplicationFocus(bool focused) => DiagnosticsFocus(focused);
     void Update()
     {
+        if (!ExperienceActive && Time.unscaledTime >= _nextMicRefresh) RefreshMicrophones();
         UpdateLevel();
         UpdateRealtime();
         UpdatePlayback();
@@ -126,7 +130,19 @@ public partial class DialogueVoiceClient : MonoBehaviour
     public void SelectMic(string device)
     {
         if (ExperienceActive) return;
+        if (Array.IndexOf(_micDevices, device) < 0) return;
         _micDevice = device;
+    }
+
+    public void RefreshMicrophones()
+    {
+        _nextMicRefresh = Time.unscaledTime + 1f;
+        var devices = Microphone.devices;
+        bool same = devices.Length == _micDevices.Length;
+        for (int i = 0; same && i < devices.Length; i++) same = devices[i] == _micDevices[i];
+        if (!same) _micDevices = devices;
+        if (!ExperienceActive && Array.IndexOf(_micDevices, _micDevice) < 0)
+            _micDevice = _micDevices.Length > 0 ? _micDevices[0] : null;
     }
 
     void UpdateLevel()
@@ -218,7 +234,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
             serverReady = health != null && health.status == "ready" &&
                 (health.mode == "streaming_voice" || health.mode == "streaming_text") &&
                 (!health.tts || health.tts_ready) && (!useTestProfile || health.test_mode_available);
-            OnHealth?.Invoke(serverReady, serverReady ? (TtsEnabled ? "음성 대화 서버 준비 완료 · Qwen3-TTS" :
+            OnHealth?.Invoke(serverReady, serverReady ? (TtsEnabled ? "음성 대화 서버 준비 완료" :
                 "대화 서버 준비 완료 · 텍스트 답변 · TTS 꺼짐") : "대화 서버 연결을 확인해 주세요.");
         }
     }

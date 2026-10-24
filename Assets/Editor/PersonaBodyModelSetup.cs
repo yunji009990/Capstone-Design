@@ -11,7 +11,7 @@ public static class PersonaBodyModelSetup
     const string TextureFolder = "Assets/Models/human/tex/Hands/";
     const string MaterialFolder = "Assets/Models/human/tex/Materials/";
 
-    [MenuItem("Tools/Persona/기본 몸체 재질·기준 자세 적용")]
+    [MenuItem("Tools/다시봄/개발 도구/초기 설정·복구/기본 몸체 재질·기준 자세 재연결")]
     public static void Apply()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
@@ -61,7 +61,7 @@ public static class PersonaBodyModelSetup
         Debug.Log("[BodyModelSetup] 기본 몸체의 양손 재질과 Humanoid 기준 자세를 적용했습니다.");
     }
 
-    [MenuItem("Tools/Persona/기본 몸체 자산 검사")]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/기본 몸체 자산")]
     public static void Inspect()
     {
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(BodyPath);

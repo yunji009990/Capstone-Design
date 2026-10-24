@@ -13,7 +13,7 @@
 // 기대 파형·기대 프레임 수는 렌더러 코드를 재사용하지 않고 여기서 다시 계산한다.
 // 상태 기계를 복제하면 같은 버그를 복제해 거짓 통과가 난다.
 //
-// 이 검사는 Tools/Dialogue/Run resampler core check 를 대신하지 않는다. 일반 재생 파형은
+// 이 검사는 Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/리샘플링 코어 를 대신하지 않는다. 일반 재생 파형은
 // 그쪽이 본다. 여기서는 정지·보고 계약만 본다. 실제 TTS PCM 과 사람의 청취 판정도 아니다.
 
 using System;
@@ -59,7 +59,7 @@ public static class DialoguePauseBoundaryValidation
 
     static MethodInfo _callback;
 
-    [MenuItem("Tools/Dialogue/Run pause boundary check", priority = 23)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/일시정지·재개 경계", priority = 23)]
     public static void Run()
     {
         var report = new Report { time = DateTime.UtcNow.ToString("O"), unityVersion = Application.unityVersion };

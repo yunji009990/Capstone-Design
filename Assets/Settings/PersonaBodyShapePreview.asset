@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d28bba65a68f4c44986085f4364d7452, type: 3}
+  m_Name: PersonaBodyShapePreview
+  m_EditorClassIdentifier: 
+  upperBodyWidth: -0.413
+  upperBodyDepth: -0.22
+  waistWidth: 0.502
+  bellyVolume: 0.018
+  armThickness: -0.651
+  legThickness: 0
+  bodyScale: 1
+  headScale: 1.092
+  headHeight: 0
+  headForward: -0.0045

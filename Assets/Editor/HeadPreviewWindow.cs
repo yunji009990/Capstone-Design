@@ -13,7 +13,7 @@
 //   달아 두어 씬을 저장해도 파일에 남지 않게 한다.
 //
 // 쓰는 법
-//   Tools ▸ 다시봄 ▸ 머리 미리보기  →  GLB 를 고르고 「씬에 올리기」
+//   Tools ▸ 다시봄 ▸ 캐릭터 ▸ 모델 미리보기 열기  →  GLB 를 고르고 「씬에 올리기」
 //   카페 조명 아래에서 보려면 Scene_2 를 열어 둔 채로 쓴다. 조명이 얼굴을 얼마나
 //   깎는지가 생성 품질만큼 크게 듣기 때문이다(환경광만 올려 +0.084).
 using System.IO;
@@ -42,7 +42,7 @@ public class HeadPreviewWindow : EditorWindow
     string[] _found;
     string[] _labels;
 
-    [MenuItem("Tools/다시봄/모델 미리보기")]
+    [MenuItem("Tools/다시봄/캐릭터/모델 미리보기 열기", priority = 2)]
     static void Open() => GetWindow<HeadPreviewWindow>("모델 미리보기").minSize = new Vector2(430, 400);
 
     void OnEnable() => Refresh();

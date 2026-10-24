@@ -2,15 +2,17 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>스킨·본·공유 메시를 바꾸지 않고 렌더러의 체형 Blend Shape만 조절한다.</summary>
+/// <summary>체형 Blend Shape와 인스턴스별 머리 결합·전체 크기를 조절한다. 원본 메시·리깅은 보존한다.</summary>
 [ExecuteAlways, DisallowMultipleComponent]
 [AddComponentMenu("다시봄/캐릭터 체형 조절")]
 public sealed class PersonaBodyShapeController : MonoBehaviour
 {
-    [SerializeField, Tooltip("체형 설정 자산. Inspector에서 자산을 열어 6개 값을 조절한다.")]
+    [SerializeField, Tooltip("체형·전체 크기·머리 크기와 연결 위치 설정.")]
     PersonaBodyShapeProfile profile;
     public PersonaBodyShapeProfile Profile => profile;
     public int BoundShapeCount { get; private set; }
+    public bool HasSeparateHead => proportions != null && proportions.HasSeparateHead;
+    PersonaModelProportions proportions;
 
     struct Binding
     {
@@ -36,6 +38,7 @@ public sealed class PersonaBodyShapeController : MonoBehaviour
     // OnValidate는 import 스레드에서도 호출될 수 있어 Unity 메시 API를 실행하지 않는다.
     void OnValidate() { rebindPending = true; applied = false; }
     void OnTransformChildrenChanged() => rebindPending = true;
+    void OnDestroy() { proportions?.Dispose(); proportions = null; }
 
     void LateUpdate()
     {
@@ -43,6 +46,7 @@ public sealed class PersonaBodyShapeController : MonoBehaviour
         if (!applied) { ApplyNow(); return; }
         for (int i = 0; i < appliedValues.Length; i++)
             if (ReadValue(i) != appliedValues[i]) { ApplyNow(); return; }
+        if (proportions != null && proportions.NeedsUpdate(profile)) ApplyNow();
     }
 
     void Rebind()
@@ -76,6 +80,7 @@ public sealed class PersonaBodyShapeController : MonoBehaviour
             if ((found & (1 << i)) != 0) BoundShapeCount++;
         rebindPending = false;
         applied = false;
+        if (proportions == null) proportions = new PersonaModelProportions(transform);
     }
 
     float ReadValue(int index) => profile != null ? profile.GetValue(index) : 0f;
@@ -87,6 +92,7 @@ public sealed class PersonaBodyShapeController : MonoBehaviour
         foreach (var binding in bindings)
             if (binding.renderer != null)
                 binding.renderer.SetBlendShapeWeight(binding.index, appliedValues[binding.shape] * binding.frameWeight);
+        proportions?.Apply(profile);
         applied = true;
     }
 }

@@ -28,12 +28,43 @@ public partial class DialogueVoiceClient
     public event Action OnDialogueReset;
     public bool ExperienceActive => _experienceActive;
     public bool DialogueConnected => _dialogueReady;
+    public bool ConversationInputAllowed => _conversationInputAllowed;
+    bool _conversationInputAllowed = true;
+
+    /// <summary>접속·참조 음성 준비는 진행하면서 착석 전 마이크와 검사 입력을 막는다.</summary>
+    public void SetConversationInputAllowed(bool allowed)
+    {
+        if (_conversationInputAllowed == allowed) return;
+        _conversationInputAllowed = allowed;
+        autoDetect = _experienceActive && allowed;
+        if (!allowed) { StopListening(); _sendCursor = 0; }
+        else if (_experienceActive && _dialogueReady)
+        {
+            try { OpenDialogueMicrophone(); }
+            catch (Exception) { FailDialogue("microphone_open_failed", "마이크를 열 수 없습니다. 장치·권한을 확인하고 다시 준비해주세요."); }
+        }
+    }
+
+    void OpenDialogueMicrophone()
+    {
+        if (ShouldCaptureMicrophone)
+        {
+            StartListening();
+            if (!_listening || _recClip == null || _recClip.frequency != 16000)
+                throw new InvalidOperationException("16000 Hz 마이크를 열 수 없습니다. 장치와 권한을 확인해 주세요.");
+        }
+        // 착석 전의 음성이 새 대화의 입력으로 밀려 들어가지 않도록 새 녹음부터 읽는다.
+        _sendCursor = 0;
+        _lastMicPump = Time.realtimeSinceStartup;
+    }
     public string ResponseRoute { get; private set; } = "";
     public string VoiceAudioEvent { get; private set; } = "unknown";
     public string VoiceLanguage { get; private set; } = "unknown";
     public float VoiceDuration { get; private set; }
     public float VoiceRmsDb { get; private set; }
     public bool TranscriptIsFinal { get; private set; }
+    /// <summary>현재 입력의 턴. 확정 전사를 사용하는 캐릭터 반응이 같은 발화를 중복 처리하지 않게 한다.</summary>
+    public int CurrentInputTurn => _dialogueTurn;
     public float FirstTextSeconds { get; private set; } = -1;
     public float FirstAudioSeconds { get; private set; } = -1;
     public float TotalResponseSeconds { get; private set; } = -1;
@@ -239,7 +270,7 @@ public partial class DialogueVoiceClient
             ActiveReference = null;
             ConnectionStatus = "대화 서버에 연결 중입니다";
             _experienceActive = true;
-            autoDetect = true;
+            autoDetect = _conversationInputAllowed;
             // 서버와 같은 가명 ID 로 맞추려면 연결 전에 만들어 start 에 실어야 한다.
             _trace = new DialogueTraceLog(DialogueTraceLog.DefaultDirectory());
             TraceId = _trace.TraceId;
@@ -303,6 +334,7 @@ public partial class DialogueVoiceClient
         NoteStopReason("experience_end");
         StopStreamPlayback();
         StopListening();
+        _conversationInputAllowed = true;
         if (_trace != null)
         {
             DiagnosticsEndExperience();
@@ -375,7 +407,8 @@ public partial class DialogueVoiceClient
     }
 
     /// <summary>마이크를 직접 잡을지 여부. 에디터 검사에서 파일 PCM을 넣는 동안에만 꺼진다.</summary>
-    bool ShouldCaptureMicrophone
+    bool ShouldCaptureMicrophone => _conversationInputAllowed && RequiresMicrophone;
+    public bool RequiresMicrophone
     {
         get
         {
@@ -444,14 +477,7 @@ public partial class DialogueVoiceClient
                 TtsEnabled = message.tts;
                 // Start capture after prompt preparation so preparation time is
                 // not replayed as a stale microphone backlog on connection.
-                if (ShouldCaptureMicrophone)
-                {
-                    StartListening();
-                    if (!_listening || _recClip.frequency != 16000)
-                        throw new InvalidOperationException("16000 Hz 마이크를 열 수 없습니다. 장치와 권한을 확인해 주세요.");
-                }
-                _sendCursor = 0;
-                _lastMicPump = Time.realtimeSinceStartup;
+                OpenDialogueMicrophone();
                 VoiceMode = message.voice_mode ?? "";
                 ActiveReference = message.reference;
                 ConnectionStatus = TtsEnabled ? "참조 음성 준비 완료" : "텍스트 대화 준비 완료";
@@ -1024,7 +1050,7 @@ public partial class DialogueVoiceClient
 #if UNITY_EDITOR
     // Automated checks inject a public WAV through the exact microphone PCM path.
     // No typed question input is exposed by the test scene or player build.
-    public bool SendTestAudio(byte[] pcm) => useTestProfile && _dialogueReady && _dialogue.SendAudio(pcm);
+    public bool SendTestAudio(byte[] pcm) => _conversationInputAllowed && useTestProfile && _dialogueReady && _dialogue.SendAudio(pcm);
 
     // 등록 인물(useTestProfile=false) 그대로 검사할 때 쓰는 파일 입력 상태.
     // 켜져 있는 동안 마이크는 열리지 않으므로 실제 마이크 PCM이 섞이지 않는다.
@@ -1043,9 +1069,9 @@ public partial class DialogueVoiceClient
 
     /// <summary>마이크 전송과 같은 PCM 경로로 파일 조각을 보낸다.</summary>
     public bool SendInjectedAudio(byte[] pcm) =>
-        _editorAudioInjection && _dialogueReady && _dialogue != null && _dialogue.SendAudio(pcm);
+        _conversationInputAllowed && _editorAudioInjection && _dialogueReady && _dialogue != null && _dialogue.SendAudio(pcm);
     [Serializable] class TestTextMessage { public string type = "text", text; }
-    public bool SendTestText(string text) => useTestProfile && _dialogueReady &&
+    public bool SendTestText(string text) => _conversationInputAllowed && useTestProfile && _dialogueReady &&
         _dialogue.SendText(JsonUtility.ToJson(new TestTextMessage { text = text }));
 #endif
 

@@ -10,13 +10,15 @@
 //   발화 전달  — 말이 서버로 간 순간. 가장자리가 한 번 밝아졌다 잦아들고, 손이 짧게 떨린다.
 //   응답 준비  — 서버가 답을 만드는 동안. 가장자리가 숨 쉬듯 느리게 오르내린다.
 //   인물 발화  — 인물이 말을 시작하면 얼굴 쪽에 따뜻한 빛이 켜지고, 끝나면 꺼진다.
-//   시작·종료  — 눈을 감았다 뜨듯 어두워졌다가 밝아진다. 장면이 급하게 바뀌면 VR 에서는 어지럽다.
+//   시작      — 눈을 감았다 뜨듯 밝아진다. 일반 종료는 짧게 어두워진 뒤 그 상태로 마친다.
 //
-// 연출은 전부 Feel(MMF_Player)로 만든다. 인스펙터의 플레이어 칸이 비어 있으면 실행할 때
+// 상태 신호와 첫 시작은 Feel(MMF_Player), 일반 종료는 화면을 덮은 뒤 정리하는 페이드로 만든다.
+// 인스펙터의 플레이어 칸이 비어 있으면 실행할 때
 // 기본 연출을 조립한다. 메뉴 「다시봄/Feel 연출을 씬에 굽기」로 씬에 박아 두면 그때부터는
 // 인스펙터에서 곡선·시간·세기를 고칠 수 있다 — 코드를 안 열고 연출을 맞추려고 Feel 을 쓴다.
 
 using System;
+using System.Collections;
 using MoreMountains.Feedbacks;
 using MoreMountains.Tools;
 using UnityEngine;
@@ -55,7 +57,8 @@ public class ExperienceCues : MonoBehaviour
     public float beginDarkenSec = 0.6f;
     public float beginHoldSec = 0.4f;
     public float beginBrightenSec = 1.6f;
-    public float finishDarkenSec = 1.2f;
+    [Tooltip("일반 종료의 페이드아웃 시간. 완전히 어두워진 뒤 인물을 숨긴다.")]
+    public float finishDarkenSec = .8f;
     public float finishHoldSec = 1.0f;
     public float finishBrightenSec = 1.2f;
     public float sentPulseSec = 0.7f;
@@ -89,6 +92,8 @@ public class ExperienceCues : MonoBehaviour
     bool _started, _waiting, _speaking, _recording;
     bool _attached;
     Sprite _vignette;
+    Coroutine _screenFade;
+    Action _finishCovered;
 
     // ───────────────────────── 생명주기 ─────────────────────────
 
@@ -129,9 +134,57 @@ public class ExperienceCues : MonoBehaviour
 
     void OnDisable()
     {
+        var covered = _finishCovered;
+        CancelScreenFade();
         foreach (var p in AllPlayers())
             if (p != null && p.IsPlaying) p.StopFeedbacks();
         ResetVisuals();
+        covered?.Invoke();
+    }
+
+    /// <summary>입력·음성은 호출 쪽에서 먼저 닫고, 화면을 덮은 프레임에 인물을 정리한다.</summary>
+    public bool TryFadeOutForFinish(Action covered)
+    {
+        if (!isActiveAndEnabled || fadeGroup == null) return false;
+        float currentAlpha = fadeGroup.alpha;
+        CancelScreenFade(false);
+        Stop(beginCue);
+        Stop(finishCue);
+        Stop(waitingCue);
+        Stop(sentCue);
+        if (edgeBreathGroup != null) edgeBreathGroup.alpha = 0f;
+        if (edgePulseGroup != null) edgePulseGroup.alpha = 0f;
+        fadeGroup.alpha = currentAlpha;
+        _started = false; // 일반 종료를 소비했다. 다음 Update에서 기존 종료 연출을 겹쳐 재생하지 않는다.
+        _finishCovered = covered;
+        _screenFade = StartCoroutine(FadeScreen(1f, finishDarkenSec));
+        return true;
+    }
+
+    public void CancelScreenFade(bool clear = true)
+    {
+        if (_screenFade != null) StopCoroutine(_screenFade);
+        _screenFade = null;
+        _finishCovered = null;
+        if (clear && fadeGroup != null) fadeGroup.alpha = 0f;
+    }
+
+    IEnumerator FadeScreen(float target, float duration)
+    {
+        float from = fadeGroup.alpha;
+        duration = float.IsNaN(duration) || float.IsInfinity(duration) ? .8f : Mathf.Max(.05f, duration);
+        float elapsed = 0f;
+        while (elapsed < duration && fadeGroup != null)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            fadeGroup.alpha = Mathf.Lerp(from, target, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / duration)));
+            yield return null;
+        }
+        if (fadeGroup != null) fadeGroup.alpha = target;
+        var covered = _finishCovered;
+        _finishCovered = null;
+        _screenFade = null;
+        covered?.Invoke();
     }
 
     // ───────────────────────── 상태 감시 ─────────────────────────
@@ -143,14 +196,26 @@ public class ExperienceCues : MonoBehaviour
         if (started == _started) return;
         _started = started;
 
-        if (started) Play(beginCue);
+        if (started)
+        {
+            float currentAlpha = fadeGroup != null ? fadeGroup.alpha : 0f;
+            Stop(finishCue);
+            // 다음 체험은 검은 화면에서 바로 밝아진다. 처음부터 다시 어둡게 하면 한 프레임 번쩍인다.
+            if (fadeGroup != null && currentAlpha >= .999f)
+            {
+                CancelScreenFade(false);
+                fadeGroup.alpha = currentAlpha;
+                _screenFade = StartCoroutine(FadeScreen(0f, beginBrightenSec));
+            }
+            else Play(beginCue);
+        }
         else
         {
             // 끝나면 듣지 않으니 숨 쉬는 빛도 같이 걷는다. 인물이 말하던 중이면
             // 발화 종료는 아래 PollVoice 가 알아서 처리한다.
             Stop(waitingCue);
             if (edgeBreathGroup) edgeBreathGroup.alpha = 0f;
-            Play(finishCue);
+            if (!experience.IsFinishing) Play(finishCue);
         }
     }
 
@@ -520,7 +585,11 @@ public class ExperienceCues : MonoBehaviour
     // 서버 없이도 연출을 볼 수 있게. 플레이 중 컴포넌트 메뉴(⋮)에서 고른다.
 
     [ContextMenu("시험: 시작 연출")]      void TestBegin() => Play(beginCue);
-    [ContextMenu("시험: 종료 연출")]      void TestFinish() => Play(finishCue);
+    [ContextMenu("시험: 종료 연출")]      void TestFinish()
+    {
+        if (experience != null && experience.Started) experience.Finish();
+        else TryFadeOutForFinish(null);
+    }
     [ContextMenu("시험: 발화 전달")]      void TestSent() { Play(sentCue); Play(waitingCue); }
     [ContextMenu("시험: 응답 준비 끝")]   void TestWaitEnd() { Stop(waitingCue); if (edgeBreathGroup) edgeBreathGroup.alpha = 0f; }
     [ContextMenu("시험: 인물 발화 시작")] void TestSpeak() { PlacePersonaLight(); Play(speakStartCue); }

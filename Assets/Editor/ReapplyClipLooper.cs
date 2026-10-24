@@ -18,7 +18,7 @@ public static class ReapplyClipLooper
     // 이름으로 찾는다. 폴더 구조가 또 바뀌어도 따라간다.
     const string ClipAssetName = "barista_cafe_work_idle";
 
-    [MenuItem("Tools/바리스타 동작 재적용", false, 101)]
+    [MenuItem("Tools/다시봄/개발 도구/초기 설정·복구/바리스타 동작 재연결", false, 101)]
     static void Reapply()
     {
         string path = FindModelPath(ClipAssetName);

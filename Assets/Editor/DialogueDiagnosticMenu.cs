@@ -1,10 +1,10 @@
 // DialogueDiagnosticMenu.cs
 // 진단 메뉴. 제품 UI·씬·프리팹을 건드리지 않고 Editor 메뉴에만 붙는다.
 //
-// Tools/Dialogue/Diagnostics/
-//   Mark issue        진행 중인 체험에 "지금 이상하다" 표시만 남긴다. 응답·마이크는 그대로 둔다.
-//   Create local report  tools/analyze_dialogue_trace.py --latest 를 창 없이 돌려 새 보고서를 만든다.
-//   Open log folder   JSONL 폴더를 연다.
+// Tools/다시봄/대화·서버/진단/
+//   지금 문제 발생 표시       진행 중인 체험에 표시만 남긴다. 응답·마이크는 그대로 둔다.
+//   로컬 진단 보고서 만들기   tools/analyze_dialogue_trace.py --latest 를 창 없이 실행한다.
+//   대화 로그 폴더 열기       JSONL 폴더를 연다.
 //
 // 지키는 것:
 // - 메뉴를 고르기 전에는 아무 일도 하지 않는다. InitializeOnLoad·주기 실행이 없다.
@@ -37,7 +37,7 @@ public static class DialogueDiagnosticMenu
     static string _lastOut;
     static bool _outDone, _errDone;
 
-    [MenuItem("Tools/Dialogue/Diagnostics/Mark issue", priority = 40)]
+    [MenuItem("Tools/다시봄/대화·서버/진단/지금 문제 발생 표시", priority = 40)]
     static void MarkIssue()
     {
         if (!EditorApplication.isPlaying)
@@ -52,7 +52,7 @@ public static class DialogueDiagnosticMenu
         else Debug.LogWarning("[Diag] 기록 중인 체험이 없어 표시할 곳이 없습니다.");
     }
 
-    [MenuItem("Tools/Dialogue/Diagnostics/Open log folder", priority = 41)]
+    [MenuItem("Tools/다시봄/대화·서버/진단/대화 로그 폴더 열기", priority = 41)]
     static void OpenLogFolder()
     {
         string directory = DialogueTraceLog.DefaultDirectory();
@@ -64,7 +64,7 @@ public static class DialogueDiagnosticMenu
         EditorUtility.RevealInFinder(directory);
     }
 
-    [MenuItem("Tools/Dialogue/Diagnostics/Create local report", priority = 42)]
+    [MenuItem("Tools/다시봄/대화·서버/진단/로컬 진단 보고서 만들기", priority = 42)]
     static void CreateLocalReport()
     {
         if (_process != null) { Debug.LogWarning("[Diag] 보고서를 이미 만들고 있습니다."); return; }

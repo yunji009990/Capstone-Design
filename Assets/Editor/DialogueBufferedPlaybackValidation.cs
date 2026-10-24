@@ -55,7 +55,7 @@ public static class DialogueBufferedPlaybackValidation
     static Report _report;
     static bool _running;
 
-    [MenuItem("Tools/Dialogue/Run buffered playback check", priority = 24)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/전체 수신 재생", priority = 24)]
     public static void Run()
     {
         if (_running) { Debug.LogWarning("[BufferedPlaybackCheck] 이미 실행 중입니다."); return; }

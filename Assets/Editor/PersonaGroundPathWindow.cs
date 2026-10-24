@@ -24,7 +24,7 @@ public sealed class PersonaGroundPathWindow : EditorWindow
     bool CanEdit => !EditorApplication.isPlayingOrWillChangePlaymode && arrival != null &&
                     arrival.gameObject.scene == SceneManager.GetActiveScene();
 
-    [MenuItem("Tools/Persona/이동 경로 그리기", priority = 12)]
+    [MenuItem("Tools/다시봄/캐릭터/이동 경로 편집", priority = 0)]
     public static void Open()
     {
         var window = GetWindow<PersonaGroundPathWindow>("이동 경로");
@@ -38,24 +38,6 @@ public sealed class PersonaGroundPathWindow : EditorWindow
         if (window.Path != null && !EditorApplication.isPlayingOrWillChangePlaymode)
             Selection.activeGameObject = window.Path.gameObject;
         window.Show();
-    }
-
-    [MenuItem("Tools/Persona/바닥 경로 준비", priority = 11)]
-    public static void PrepareCurrentScene()
-    {
-        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
-        var candidates = SceneManager.GetActiveScene().GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren<PersonaArrival>(true)).ToArray();
-        if (candidates.Length != 1)
-        {
-            Debug.LogWarning("[PersonaGroundPath] 현재 씬의 도착 연출이 1개일 때 준비할 수 있습니다. 경로 창에서 대상을 선택하세요.");
-            return;
-        }
-        CreateFromLegacy(candidates[0]);
-        Open();
-        var window = GetWindow<PersonaGroundPathWindow>();
-        window.arrival = candidates[0];
-        window.FramePath();
     }
 
     void OnEnable()

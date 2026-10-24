@@ -10,7 +10,7 @@ public static class PersonaServerBodyValidation
 {
     const string Folder = "tools/_work/body_update_20261013";
 
-    [MenuItem("Tools/Persona/서버 몸체 반영 검사")]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/불러온 서버 모델 상태")]
     public static void Inspect()
     {
         var spawner = UnityEngine.Object.FindObjectsOfType<PersonaSpawner>(true)
@@ -57,7 +57,7 @@ public static class PersonaServerBodyValidation
             $"newHands={report.newHands}, cuffs={report.blackCuffs}, active={report.modelActive}, phase={report.phase}");
     }
 
-    [MenuItem("Tools/Persona/서버 몸체 등장 확인")]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/입장 연출만 실행 (Play)")]
     public static void ShowModel()
     {
         if (!EditorApplication.isPlaying)
@@ -72,7 +72,7 @@ public static class PersonaServerBodyValidation
         Inspect();
     }
 
-    [MenuItem("Tools/Persona/서버 캐릭터 체형 검사")]
+    [MenuItem("Tools/다시봄/개발 도구/캐릭터 검사/서버 모델 체형 변형 (Play)")]
     public static void CheckBodyShapes()
     {
         if (!EditorApplication.isPlaying) throw new InvalidOperationException("Play에서 검사해 주세요.");

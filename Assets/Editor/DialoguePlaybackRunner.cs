@@ -99,7 +99,7 @@ public static class DialoguePlaybackValidation
         public List<string> limits = new List<string>();
     }
 
-    [MenuItem("Tools/Dialogue/Run playback buffer diagnostic", priority = 21)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/스트리밍 버퍼 (Play)", priority = 21)]
     public static async void Run()
     {
         if (_running) { Debug.LogWarning("[PlaybackDiagnostic] 이미 실행 중입니다."); return; }

@@ -13,11 +13,9 @@ public static class TripoModelTestScene
 {
     public const string ScenePath = "Assets/Scenes/Tripo_Model_Test.unity";
     public const string CameraName = "Tripo Model Test Camera";
-    const string ComparisonKey = "TripoModelTest.ProductionComparison";
     static bool previewPending = true;
 
     public static bool IsOpen => SceneManager.GetActiveScene().path == ScenePath;
-    public static bool IsComparison => SessionState.GetBool(ComparisonKey, false);
     public static string PreferenceKey => "TripoModelTest." + Application.dataPath;
 
     static TripoModelTestScene()
@@ -29,27 +27,27 @@ public static class TripoModelTestScene
         AssemblyReloadEvents.beforeAssemblyReload += TripoRigInspector.Suspend;
     }
 
-    [MenuItem("Tools/Tripo/Open model test scene", priority = 0)]
-    public static void Open() { OpenScene(false); }
+    [MenuItem("Tools/다시봄/개발 도구/모델 검사/로컬 GLB 검사 씬 열기", priority = 0)]
+    public static void Open() { OpenScene(); }
 
-    public static bool OpenScene(bool comparison)
+    public static bool OpenScene()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
         {
-            if (IsOpen && !comparison) TripoRigInspector.Inspect(null);
+            if (IsOpen) TripoRigInspector.Inspect(null);
             else Debug.LogWarning("Stop Play Mode before opening the model test scene.");
             return false;
         }
         if (!IsOpen && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return false;
         TripoRigInspector.Suspend();
-        SessionState.SetBool(ComparisonKey, comparison);
         // Retire return requests left by the old temporary-scene tester.
+        SessionState.EraseBool("TripoModelTest.ProductionComparison");
         SessionState.SetBool("TripoTrial.Restore", false);
         SessionState.EraseString("TripoTrial.PreviousScene");
         SessionState.EraseString("TripoTrial.Source");
         if (!File.Exists(ScenePath)) CreateScene();
         else if (!IsOpen) EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
-        previewPending = !comparison;
+        previewPending = true;
         return true;
     }
 
@@ -72,13 +70,13 @@ public static class TripoModelTestScene
 
     static void OnSceneOpened(Scene scene, OpenSceneMode mode)
     {
-        if (scene.path == ScenePath) previewPending = !IsComparison;
+        if (scene.path == ScenePath) previewPending = true;
         else if (!IsOpen) TripoRigInspector.Suspend();
     }
 
     static void OnActiveSceneChanged(Scene previous, Scene current)
     {
-        if (current.path == ScenePath) previewPending = !IsComparison;
+        if (current.path == ScenePath) previewPending = true;
         else TripoRigInspector.Suspend();
     }
 
@@ -88,10 +86,9 @@ public static class TripoModelTestScene
             TripoRigInspector.Suspend();
         if (state == PlayModeStateChange.EnteredEditMode)
         {
-            SessionState.SetBool(ComparisonKey, false);
             previewPending = IsOpen;
         }
-        if (state == PlayModeStateChange.EnteredPlayMode) previewPending = IsOpen && !IsComparison;
+        if (state == PlayModeStateChange.EnteredPlayMode) previewPending = IsOpen;
     }
 
     static void OpenPendingPreview()
@@ -99,7 +96,7 @@ public static class TripoModelTestScene
         if (!previewPending || EditorApplication.isCompiling || EditorApplication.isUpdating ||
             (EditorApplication.isPlayingOrWillChangePlaymode && !EditorApplication.isPlaying)) return;
         previewPending = false;
-        if (IsOpen && !IsComparison) TripoRigInspector.Inspect(null);
+        if (IsOpen) TripoRigInspector.Inspect(null);
     }
 
     static void CreateScene()

@@ -63,7 +63,7 @@ public static class DialogueResamplerValidation
         public string outputPath = "";
     }
 
-    [MenuItem("Tools/Dialogue/Run resampler core check", priority = 22)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/로컬 음성 검사/리샘플링 코어", priority = 22)]
     public static void Run()
     {
         var report = new Report { time = DateTime.UtcNow.ToString("O"), unityVersion = Application.unityVersion };

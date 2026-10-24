@@ -47,6 +47,16 @@ public class DialogueVoiceUI : MonoBehaviour
     float _shownLevel;
     float _waitStart;
     bool _wasWaiting;
+    ExperienceControl _experience;
+    TMP_Text _healthLabel;
+    string[] _shownDevices;
+    bool _showingPreparation;
+
+    void Awake()
+    {
+        _experience = FindObjectOfType<ExperienceControl>();
+        if (healthButton != null) _healthLabel = healthButton.GetComponentInChildren<TMP_Text>();
+    }
 
     void OnEnable()
     {
@@ -72,7 +82,8 @@ public class DialogueVoiceUI : MonoBehaviour
 
         if (talkButton) talkButton.onClick.AddListener(ToggleTalk);
         if (resetButton) resetButton.onClick.AddListener(ResetConversation);
-        if (healthButton) healthButton.onClick.AddListener(() => StartCoroutine(client.CheckHealth()));
+        if (healthButton) healthButton.onClick.AddListener(CheckPreparation);
+        if (_experience != null && _healthLabel != null) _healthLabel.text = "준비 다시 확인";
 
         SetText(heardLabel, "");
         SetText(answerLabel, "");
@@ -85,7 +96,8 @@ public class DialogueVoiceUI : MonoBehaviour
     /// </summary>
     public void PopulateMicDropdown()
     {
-        if (micDropdown == null) return;
+        if (micDropdown == null || client.ExperienceActive) return;
+        _shownDevices = client.MicDevices;
 
         var devices = new List<string>(client.MicDevices);
         micDropdown.onValueChanged.RemoveAllListeners();   // 다시 채우면 두 번 걸린다
@@ -102,6 +114,13 @@ public class DialogueVoiceUI : MonoBehaviour
         int current = devices.IndexOf(client.CurrentMic);
         micDropdown.SetValueWithoutNotify(current < 0 ? 0 : current);
         micDropdown.onValueChanged.AddListener(i => client.SelectMic(devices[i]));
+    }
+
+    void CheckPreparation()
+    {
+        if (_experience != null) _experience.RetryPreparation();
+        else { client.RefreshMicrophones(); StartCoroutine(client.CheckHealth()); }
+        PopulateMicDropdown();
     }
 
     void ToggleTalk()
@@ -162,7 +181,16 @@ public class DialogueVoiceUI : MonoBehaviour
         if (client.isWaiting && !_wasWaiting) _waitStart = Time.time;
         _wasWaiting = client.isWaiting;
 
-        if (!client.ExperienceActive && client.serverReady && client.HasSession)
+        bool showPreparation = _experience != null && (!_experience.Started || !client.ConversationInputAllowed || !client.DialogueConnected);
+        if (showPreparation)
+        {
+            state = _experience.PreparationSummary;
+            color = _experience.CanStart ? Idle : Waiting;
+            string detail = _experience.PreparationMessage;
+            if (!_experience.Started && !string.IsNullOrEmpty(client.LastError)) detail = "중단됨 · " + client.LastError + " · " + detail;
+            SetText(messageLabel, detail);
+        }
+        else if (!client.ExperienceActive && client.serverReady && client.HasSession)
         {
             color = Idle;
             // 왜 끝났는지 한 줄이라도 남긴다. 표시할 라벨이 없어 사라지던 정보다.
@@ -186,10 +214,14 @@ public class DialogueVoiceUI : MonoBehaviour
 
         if (statusDot) statusDot.color = color;
         SetText(statusLabel, state);
+        if (!showPreparation && _showingPreparation) SetText(messageLabel, "");
+        _showingPreparation = showPreparation;
 
         if (talkButtonLabel) talkButtonLabel.text = client.isRecording ? "전송" : "말하기";
         if (talkButton) talkButton.interactable = !!client.isWaiting && client.HasSession;
-        if (micDropdown) micDropdown.interactable = !client.isRecording && client.MicDevices.Length > 0;
+        if (!client.ExperienceActive && !ReferenceEquals(_shownDevices, client.MicDevices)) PopulateMicDropdown();
+        if (micDropdown) micDropdown.interactable = !client.ExperienceActive && (_experience == null || !_experience.IsFinishing) && client.MicDevices.Length > 0;
+        if (healthButton) healthButton.interactable = !client.ExperienceActive && (_experience == null || (!_experience.CheckingPreparation && !_experience.IsFinishing));
 
         // 레벨 미터: 올라갈 땐 즉시, 내려올 땐 부드럽게
         float range = Mathf.Max(0.001f, levelDisplayRange);

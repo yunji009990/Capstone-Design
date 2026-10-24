@@ -59,79 +59,6 @@ public class TripoRigInspector : EditorWindow
         public MotionCheck[] motions;
     }
 
-    [MenuItem("Tools/Tripo/Rig view/Generated model")]
-    public static void ShowGenerated() { SwitchPhase(0); }
-
-    [MenuItem("Tools/Tripo/Rig view/Rig before animation")]
-    public static void ShowRig() { SwitchPhase(1); }
-
-    [MenuItem("Tools/Tripo/Rig view/Sitting animation")]
-    public static void ShowSitting() { SwitchPhase(2); }
-
-    [MenuItem("Tools/Tripo/Rig view/Animations")]
-    public static void ShowAnimations() { SwitchPhase(2); }
-
-    static TripoRigInspector ActiveMotionWindow()
-    {
-        var window = Resources.FindObjectsOfTypeAll<TripoRigInspector>().FirstOrDefault();
-        if (window == null || !TripoModelTestScene.IsOpen || window.loading || window.validating || window.clips.Length == 0)
-        {
-            Debug.LogWarning("Open Tools > Tripo > Inspect local rig, then select 3. 애니메이션.");
-            return null;
-        }
-        return window;
-    }
-
-    [MenuItem("Tools/Tripo/Rig view/Next animation")]
-    public static void NextAnimation()
-    {
-        var window = ActiveMotionWindow();
-        if (window != null) window.SelectClip((window.selectedClip + 1) % window.clips.Length);
-    }
-
-    [MenuItem("Tools/Tripo/Rig view/Next model")]
-    public static void NextModel()
-    {
-        var window = Resources.FindObjectsOfTypeAll<TripoRigInspector>().FirstOrDefault();
-        if (window == null || !TripoModelTestScene.IsOpen || window.loading || window.validating) return;
-        window.RefreshDirectories();
-        if (window.directories.Length == 0) return;
-        int next = (Array.IndexOf(window.directories, window.directory) + 1) % window.directories.Length;
-        window.UseDirectory(window.directories[next]);
-    }
-
-    [MenuItem("Tools/Tripo/Rig view/Sample selected middle")]
-    public static void SampleMiddle()
-    {
-        var window = ActiveMotionWindow();
-        if (window != null) window.Sample(window.animationComponent.clip.length * .5f);
-    }
-
-    [MenuItem("Tools/Tripo/Rig view/Play selected animation")]
-    public static void PlaySelected()
-    {
-        var window = ActiveMotionWindow();
-        if (window != null) window.PlayAnimation();
-    }
-
-    [MenuItem("Tools/Tripo/Rig view/Validate all animations")]
-    public static void ValidateAnimations()
-    {
-        var window = ActiveMotionWindow();
-        if (window != null) window.ValidateMotions();
-    }
-
-    static void SwitchPhase(int phase)
-    {
-        var window = Resources.FindObjectsOfTypeAll<TripoRigInspector>().FirstOrDefault();
-        if (window == null || !TripoModelTestScene.IsOpen || string.IsNullOrEmpty(window.directory))
-        {
-            Debug.LogWarning("Start with Tools > Tripo > Inspect local rig.");
-            return;
-        }
-        window.LoadPhase(phase);
-    }
-
     public static void Inspect(string sourceDirectory)
     {
         var window = GetWindow<TripoRigInspector>("Tripo 리깅 검사");
@@ -222,11 +149,6 @@ public class TripoRigInspector : EditorWindow
         {
             EditorGUILayout.HelpBox("Tripo_Model_Test 씬을 열면 모델이 자동으로 표시됩니다.", MessageType.Info);
             if (GUILayout.Button("모델 테스트 씬 열기")) TripoModelTestScene.Open();
-            return;
-        }
-        if (TripoModelTestScene.IsComparison)
-        {
-            EditorGUILayout.HelpBox("실제 로더의 재생·자세 고정을 비교하고 있습니다. Play Mode를 정지하면 모델 검사로 돌아옵니다.", MessageType.Info);
             return;
         }
         EditorGUILayout.HelpBox("Play 버튼 없이도 동작을 재생할 수 있습니다. Scene 탭에서 뼈대와 관절을, Game 탭에서 표면을 확인하세요.", MessageType.Info);
@@ -348,6 +270,7 @@ public class TripoRigInspector : EditorWindow
             if (GUILayout.Button("처음으로")) Sample(0);
             if (GUILayout.Button("다음 동작")) SelectClip((selectedClip + 1) % clips.Length);
         }
+        if (GUILayout.Button("모든 동작 검사")) ValidateMotions();
     }
 
     void SelectClip(int index)

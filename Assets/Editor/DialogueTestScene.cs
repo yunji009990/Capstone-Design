@@ -27,19 +27,19 @@ public static partial class DialogueTestScene
         public float firstTextSeconds, firstAudioSeconds, totalSeconds;
     }
 
-    [MenuItem("Tools/Dialogue/Run AI test scene check", priority = 10)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/음성 응답", priority = 10)]
     public static void CheckRunningScene() => RunCheck();
 
-    [MenuItem("Tools/Dialogue/Run voice interruption check", priority = 11)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/끼어들기·재개", priority = 11)]
     public static void CheckInterruption() => RunSemanticCheck();
 
-    [MenuItem("Tools/Dialogue/Run reference upload voice check", priority = 12)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/참조 음성 업로드·응답", priority = 12)]
     public static void CheckReferenceUpload() => RunCheck(true);
 
-    [MenuItem("Tools/Dialogue/Run text response check", priority = 14)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/텍스트 응답·행동 전달", priority = 14)]
     public static void CheckTextResponse() => RunCheck(false, true);
 
-    [MenuItem("Tools/Dialogue/Run reference preview check", priority = 13)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/참조 음성 미리 듣기", priority = 13)]
     public static async void CheckReferencePreview()
     {
         if (_checking) return;
@@ -167,7 +167,7 @@ public static partial class DialogueTestScene
         }
     }
 
-    [MenuItem("Tools/Dialogue/Open AI test scene", priority = 0)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/AI 테스트 씬 열기", priority = 0)]
     public static void Open()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
@@ -177,7 +177,6 @@ public static partial class DialogueTestScene
         EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
     }
 
-    [MenuItem("Tools/Dialogue/Create AI test scene asset", priority = 1)]
     public static void CreateAssetIfMissing()
     {
         if (File.Exists(ScenePath)) return;

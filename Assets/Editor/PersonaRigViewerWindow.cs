@@ -33,7 +33,7 @@ public class PersonaRigViewerWindow : EditorWindow
     double nextSearch;
     string error;
 
-    [MenuItem("Tools/Persona/리깅 보기", priority = 4)]
+    [MenuItem("Tools/다시봄/캐릭터/전체 리깅 보기", priority = 20)]
     public static void Open()
     {
         var window = GetWindow<PersonaRigViewerWindow>("캐릭터 리깅 보기");
@@ -41,7 +41,7 @@ public class PersonaRigViewerWindow : EditorWindow
         window.Show();
     }
 
-    [MenuItem("Tools/Persona/리깅 표시 켜기·끄기 _F8", priority = 5)]
+    [MenuItem("Tools/다시봄/캐릭터/리깅 표시 켜기·끄기 _F8", priority = 21)]
     public static void Toggle()
     {
         var windows = Resources.FindObjectsOfTypeAll<PersonaRigViewerWindow>();

@@ -5,7 +5,9 @@
 [TTS 실시간 스트리밍](TTS_실시간_스트리밍.md)에 기록했다.
 9월 18일부터 현재 운영 TTS는 VoxCPM2다. 현재 설정·복구는 [TTS 인계](TTS_작업인계_20260918.md),
 9월 29일 확인은 [현재 구현 현황](현재_구현_현황.md)을 따른다.
-몸짓 반응·동작 따라 하기 등 VR 추가 기능은 현재 음성 대화 작업 이후로 보류한다.
+2026-10-23 메뉴 경로만 통합 메뉴에 맞췄으며 당시 합성·품질 검사를 다시 수행하지 않았다.
+몸짓 인식·동작 따라 하기는 보류 중이다. 같은 날 추가한 확정 발화의 작은 끄덕임과 머리 위치 음향은
+[듣기 반응·공간 음향](캐릭터_듣기_반응_공간음향_20261023.md)의 별도 구현이다.
 
 ## 재연결 당시 동작
 
@@ -65,7 +67,7 @@ TTS는 기존 `Qwen/Qwen3-TTS-12Hz-1.7B-Base`와 독립 `~/venv/qwentts` 환경�
 
 ## 다시 실행하기
 
-1. Unity에서 `Tools > Dialogue > Open AI test scene`을 열고 Play한다.
+1. Unity에서 `Tools > 다시봄 > 개발 도구 > 대화 검사 > AI 테스트 씬 열기`을 열고 Play한다.
 2. 기존 접속 설정으로 `음성 대화 서버 준비 완료 · Qwen3-TTS` 표시를 확인한다.
 3. `참조 목소리 · 억양 설정`에서 본인이 사용할 WAV를 선택하고 미리 듣기·전사를 확인한다.
    별도 선택이 없으면 현재 등록 음성을 사용한다. 이번 자동 검사는 공개 WAV를 명시적으로 선택했다.
@@ -73,9 +75,9 @@ TTS는 기존 `Qwen/Qwen3-TTS-12Hz-1.7B-Base`와 독립 `~/venv/qwentts` 환경�
 
 자동 검사에서는 실제 마이크를 열지 않는다.
 
-- `Tools > Dialogue > Run reference upload voice check`: 공개 참조를 업로드하고 STT부터 음성 재생까지 검사.
-- `Tools > Dialogue > Run text response check`: 텍스트 질문·상황 전달·음성 재생 검사. 앞서 선택한 참조를 사용.
-- `Tools > Dialogue > Run voice interruption check`: 대화가 종료된 상태에서 실행. 아래 검사 WAV 5개가 필요.
+- `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 참조 음성 업로드·응답`: 공개 참조를 업로드하고 STT부터 음성 재생까지 검사.
+- `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 텍스트 응답·행동 전달`: 텍스트 질문·상황 전달·음성 재생 검사. 앞서 선택한 참조를 사용.
+- `Tools > 다시봄 > 개발 도구 > 대화 검사 > 실제 서버 검사 > 끼어들기·재개`: 대화가 종료된 상태에서 실행. 아래 검사 WAV 5개가 필요.
 
 공개 참조: `.dialogue-work/models/sensevoice/test_wavs/ko.wav`.
 끼어들기 입력: `.dialogue-work/semantic-fixtures/{ask,resume,revise,switch,hold}.wav`.

@@ -330,8 +330,8 @@ internal sealed class DialogueBufferedClipPlayer : IDisposable
 /// 선택은 다음 Play 부터 적용된다. 메뉴는 <c>Assets/Editor/DialoguePlaybackComparisonMenu.cs</c> 에 있다.</summary>
 public static class DialoguePlaybackComparison
 {
-    public const string WholeResponseMenu = "Tools/Dialogue/Playback mode/Receive whole response (AudioClip)";
-    public const string StreamingMenu = "Tools/Dialogue/Playback mode/Stream as received";
+    public const string WholeResponseMenu = "Tools/다시봄/개발 도구/대화 검사/재생 방식 비교/전체 수신 후 재생 (AudioClip)";
+    public const string StreamingMenu = "Tools/다시봄/개발 도구/대화 검사/재생 방식 비교/수신 즉시 스트리밍";
 
     // 같은 PC 의 다른 clone 이 서로의 선택을 덮어쓰지 않게 프로젝트 경로를 키에 넣는다.
     static string Key => "Dialogue.Playback.WholeResponse." + Application.dataPath;

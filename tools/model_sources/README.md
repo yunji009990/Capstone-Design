@@ -14,11 +14,12 @@ blender --background --python-exit-code 1 --python tools/body_export.py -- tools
 blender --background --python-exit-code 1 --python tools/body_prep.py -- Assets/Models/human/Human.fbx Assets/Models/human/tex tools/_work/fixed_body_animation/body.glb
 ```
 
-Unity Edit Mode에서 `Tools > Persona > 기본 몸체 재질·기준 자세 적용`을 실행한다.
+Unity Edit Mode에서 `Tools > 다시봄 > 개발 도구 > 초기 설정·복구 > 기본 몸체 재질·기준 자세 재연결`을 실행한다.
 이 메뉴는 의상 기존 재질, 양손 색·노멀·거칠기, 검은 소매 안감을 연결하고
 `HumanHumanoidReferencePose.asset`을 Walking 기준으로 갱신한다. 씬을 저장하거나 구성하지 않는다.
-`고정 몸체 애니메이션 검사`는 FBX와 준비한 GLB를 별도 미리보기 씬에서 검사한다.
-`기본 몸체 자산 검사`는 재질·본 구조를 검사하고 Project 창에서 FBX를 선택한다.
+`Tools > 다시봄 > 개발 도구 > 캐릭터 검사 > 고정 몸체 애니메이션`은 FBX와 준비한 GLB를 별도 미리보기 씬에서 검사한다.
+`Tools > 다시봄 > 개발 도구 > 캐릭터 검사 > 기본 몸체 자산`은 재질·본 구조를 검사하고 Project 창에서 FBX를 선택한다.
+메뉴 위치는2026-10-23 정리 기준이며 전체 도구는 [Unity 도구 사용법](../../docs/Unity_도구_사용법.md)을 따른다.
 
 양손 원본의 `MaleHands_MetalRoughness.png`는 glTF 형식(G=거칠기, B=금속도)이다.
 Unity URP의 `MaleHands_MetallicSmoothness.png`는 R=0, A=1−거칠기(G)로 변환한 파일이다.
@@ -70,6 +71,11 @@ Blender에서51개 값·포즈 조합을 검사했으며 GLB에 형태 키6개�
 기본 정점·노멀·UV·스킨 가중치는 이전 몸체와 같고, 현재 얼굴·설문·음성도 유지했다.
 
 ## Unity에서 체형 조절
+
+결합된 얼굴과 함께 비교하려면 **Tools > 다시봄 > 캐릭터 > 얼굴·몸체 비율 조절 씬 열기**를 사용한다.
+전용 씬에서 Play 없이6개 키·서있는 자세·앉은 자세를 확인한다. 미리보기와 공용 기본 설정을 별도로 저장한다.
+자세한 순서는 [체형 미리보기 안내](../../docs/얼굴_몸체_체형_미리보기_20261023.md)를 따른다.
+아래는 기존 카페 Play에서 직접 공용 설정을 조절하는 순서다.
 
 1. Scene_2에서 Play하고 체험을 시작해 캐릭터를 표시한다.
 2. **Tools > 다시봄 > 캐릭터 > 체형 조절 열기**로 설정 자산을 선택한다.

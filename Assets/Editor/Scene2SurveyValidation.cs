@@ -72,7 +72,7 @@ public static class Scene2SurveyValidation
         public List<string> limits = new List<string>();
     }
 
-    [MenuItem("Tools/Dialogue/Run Scene 2 registered survey check", priority = 20)]
+    [MenuItem("Tools/다시봄/개발 도구/대화 검사/실제 서버 검사/등록 설문·대화 (Scene_2)", priority = 20)]
     public static async void Run()
     {
         if (_running) { Debug.LogWarning("[Scene2SurveyCheck] 이미 실행 중입니다."); return; }
