@@ -165,6 +165,13 @@ public class ExperienceControl : MonoBehaviour
         if (Started && voice != null)
             voice.SetConversationInputAllowed(!UsesCharacter || spawner.ReadyForConversation);
         Refresh();
+        // 시작 화면의 요청도 수동 시작과 같은 최신 준비 조건을 통과해야 한다.
+        // 요청을 먼저 소비해 시작 실패나 종료 뒤에 매 프레임 다시 시작하지 않는다.
+        if (StartSelection.startRequested && !Started && CanStart)
+        {
+            StartSelection.startRequested = false;
+            Begin();
+        }
     }
 
     /// <summary>기존 서버 확인 버튼에서 모델 재시도·마이크 목록 확인도 함께 수행한다.</summary>

@@ -16,7 +16,7 @@ using Object = UnityEngine.Object;
 
 public static partial class Scene2SkyCafe
 {
-    const string Folder = "Assets/Graphics/Scene2/SkyCafe";
+    internal const string Folder = "Assets/Graphics/Scene2/SkyCafe";
     const string RootName = "하늘 위 카페";
     const string UndoName = "하늘 카페 배경 전환";
     static string Work => Path.Combine(Path.GetDirectoryName(Application.dataPath), "tools/_work/sky_cafe_20261022");
