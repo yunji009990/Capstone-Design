@@ -39,26 +39,33 @@ public static class PersonaArrivalSetup
         }
         var probe = spawnerForProbe.GetComponent<PersonaArrival>();
 
-        // 1) 재생 클립과 몸체 기준 자세용 Walking만 변환한다. 같은 이름의 예전 FBX를 고르지 않는다.
-        //    턴은 현재 연결된 클립을 보존하고, 없을 때만 기존 Left Turn을 사용한다.
+        // 1) 검증한 클립 연결을 보존한다. 새로 준비할 때만 현재 입장 연출의 기본 클립을 사용한다.
+        string CurrentOr(AnimationClip clip, string fallback) => clip != null ? AssetDatabase.GetAssetPath(clip) : fallback;
+        const string performance = "Assets/Animations/PersonaPerformance/";
         string turnPath = probe != null && probe.turnClip != null
-            ? AssetDatabase.GetAssetPath(probe.turnClip) : ModelFolder + "/Left Turn.fbx";
+            ? AssetDatabase.GetAssetPath(probe.turnClip) : performance + "TurnLeft90.fbx";
         var paths = new[]
         {
-            AnimationFolder + "/Idle.fbx", AnimationFolder + "/Waving.fbx",
-            AnimationFolder + "/" + WalkAnimationName + ".fbx", AnimationFolder + "/Sitting Idle.fbx", turnPath,
-            ReferenceAnimationPath, AnimationFolder + "/Sitting Talking.fbx",
+            CurrentOr(probe != null ? probe.idleClip : null, "Assets/Animations/PersonaLocomotion/UnityMaleIdle.fbx"),
+            CurrentOr(probe != null ? probe.greetClip : null, performance + "NaturalGreeting.anim"),
+            CurrentOr(probe != null ? probe.walkClip : null, performance + "NaturalWalk.anim"),
+            CurrentOr(probe != null ? probe.seatedClip : null, AnimationFolder + "/Sitting Idle.fbx"), turnPath,
+            ReferenceAnimationPath, CurrentOr(probe != null ? probe.talkClip : null, performance + "CalmSeatedTalk.fbx"),
+            CurrentOr(probe != null ? probe.rightTurnClip : null, performance + "TurnRight90.fbx"),
+            CurrentOr(probe != null ? probe.sitDownClip : null, performance + "SitDown.fbx"),
         };
-        if (paths.Any(path => !(AssetImporter.GetAtPath(path) is ModelImporter)))
+        bool Missing(string path) => !(AssetImporter.GetAtPath(path) is ModelImporter) && AssetDatabase.LoadAssetAtPath<AnimationClip>(path) == null;
+        if (paths.Any(Missing))
         {
-            Debug.LogError("[PersonaArrivalSetup] 필요한 FBX가 없습니다: " +
-                string.Join(", ", paths.Where(path => !(AssetImporter.GetAtPath(path) is ModelImporter))));
+            Debug.LogError("[PersonaArrivalSetup] 필요한 애니메이션 자산이 없습니다: " +
+                string.Join(", ", paths.Where(Missing)));
             return;
         }
         int converted = 0;
         foreach (string path in paths.Distinct())
         {
-            var importer = (ModelImporter)AssetImporter.GetAtPath(path);
+            var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+            if (importer == null) continue; // 분리한 Humanoid .anim은 이미 검증한 곡선을 그대로 사용한다.
             bool changed = importer.animationType != ModelImporterAnimationType.Human ||
                            importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel;
             if (importer.animationType != ModelImporterAnimationType.Human)
@@ -87,8 +94,8 @@ public static class PersonaArrivalSetup
         // 2) 모든 파일의 Humanoid Avatar와 동작을 확인한 뒤 씬 참조를 한꺼번에 교체한다.
         AnimationClip Clip(string path) => AssetDatabase.LoadAllAssetsAtPath(path)
             .OfType<AnimationClip>().FirstOrDefault(c => !c.name.StartsWith("__preview__") && c.isHumanMotion);
-        if (paths.Any(path => Clip(path) == null || !AssetDatabase.LoadAllAssetsAtPath(path)
-            .OfType<Avatar>().Any(avatar => avatar.isValid && avatar.isHuman)))
+        if (paths.Any(path => Clip(path) == null || (AssetImporter.GetAtPath(path) is ModelImporter && !AssetDatabase.LoadAllAssetsAtPath(path)
+            .OfType<Avatar>().Any(avatar => avatar.isValid && avatar.isHuman))))
         {
             Debug.LogError("[PersonaArrivalSetup] Humanoid 임포트 실패. 씬의 기존 연결은 유지했습니다.");
             return;
@@ -103,7 +110,8 @@ public static class PersonaArrivalSetup
 
         // 3) 기존 경로·배율을 유지하며 클립 연결만 교체한다.
         // 연출은 스포너와 같은 오브젝트에 둔다. 스포너가 스폰 직후 Begin() 을 부른다.
-        if (probe == null) probe = Undo.AddComponent<PersonaArrival>(spawnerForProbe.gameObject);
+        bool newlyAdded = probe == null;
+        if (newlyAdded) probe = Undo.AddComponent<PersonaArrival>(spawnerForProbe.gameObject);
         if (spawnerForProbe.arrival != probe)
         {
             Undo.RecordObject(spawnerForProbe, "Link arrival");
@@ -117,19 +125,23 @@ public static class PersonaArrivalSetup
         probe.greetClip = greet;
         probe.walkClip = walk;
         probe.turnClip = turn;
-        probe.sitDownClip = null;
-        probe.useSitDown = false;
-        probe.blendSec = .4f;
-        probe.sitTransitionSeconds = 1.1f;
+        probe.rightTurnClip = Clip(paths[7]);
+        probe.sitDownClip = Clip(paths[8]);
+        if (newlyAdded)
+        {
+            probe.useSitDown = true;
+            probe.sitDownOffset = Vector3.zero;
+            probe.walkSpeed = .8f;
+            probe.blendSec = .4f;
+            probe.sitTransitionSeconds = 1.1f;
+            probe.loopSeated = true;
+            probe.seatedPoseTime = 0f;
+            probe.autoTalkGesture = true;
+            probe.talkGestureRate = .25f;
+            probe.autoNodWhileListening = false;
+        }
         probe.seatedClip = seated;
-        probe.loopSeated = true;
-        probe.seatedPoseTime = 0f;
         probe.talkClip = Clip(paths[6]);
-        probe.autoTalkGesture = true;
-        probe.talkGestureRate = .25f;
-        probe.nodClip = null;
-        probe.shakeClip = null;
-        probe.autoNodWhileListening = false;
 
         // 4) 입구 표시를 만든다. 씬 뷰에서 카페 문 앞으로 끌어다 놓으면 된다.
         if (probe.entrance == null)
@@ -191,15 +203,14 @@ public static class PersonaArrivalSetup
         EditorSceneManager.MarkSceneDirty(probe.gameObject.scene);
         Selection.activeObject = probe.gameObject;
 
-        report.Insert(0, $"[PersonaWalkInTest] 준비 완료 — Humanoid 임포트 {converted}개, 새 클립 4개 + 기존 턴");
+        report.Insert(0, $"[PersonaWalkInTest] 준비 완료 — Humanoid 임포트 {converted}개, 기존 연결·조절값 유지");
         report.Add($"  서서 대기: {Name(idle)} ({probe.initialIdleSeconds:0.00}초)");
         report.Add($"  인사   : {Name(greet)}");
         report.Add($"  걷기   : {Name(walk)}");
-        report.Add($"  돌기   : {Name(turn)}");
+        report.Add($"  좌회전 : {Name(turn)} / 우회전: {Name(probe.rightTurnClip)}");
         report.Add($"  앉음   : {Name(seated)} 반복");
-        report.Add("  착석 전환: 1.1초 동안 자세·위치를 함께 보간");
-        report.Add("  대화 동작: Sitting Talking, 평균 4회 중 1회 / 연속 선택 금지");
-        report.Add("  기존 앉기·박수·끄덕임·고개 젓기 클립은 연결 해제");
+        report.Add(probe.useSitDown ? $"  착석 전환: {Name(probe.sitDownClip)}" : $"  착석 전환: {probe.sitTransitionSeconds:0.00}초 동안 자세·위치 보간");
+        report.Add($"  대화 동작: {Name(probe.talkClip)}, 선택 확률 {probe.talkGestureRate:0.00} / 연속 선택 금지");
         report.Add($"  경유지 : {(probe.waypoints != null ? probe.waypoints.Length : 0)}개");
         report.Add($"  입구   : {(probe.entrance != null ? probe.entrance.name : "없음")}  " +
                    $"의자: {(probe.seat != null ? probe.seat.name : "없음 — 스포너 spawnPoint 를 확인할 것")}");

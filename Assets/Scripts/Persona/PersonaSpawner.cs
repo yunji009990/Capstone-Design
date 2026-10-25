@@ -151,6 +151,12 @@ public class PersonaSpawner : MonoBehaviour
     [Tooltip("앉았을 때 고개를 위로 올리는 보정 각도. 0은 원래 자세이며 목과 머리가 나눠 적용한다.")]
     [Range(0f, 30f)] public float seatedHeadLiftDeg;
 
+    [Tooltip("앉는 동작 동안 목·머리의 상대 회전을 시작 대기 자세로 유지한다. 착석 뒤에는 시선·끄덕임을 다시 사용한다.")]
+    public bool stabilizeHeadWhileSitting;
+
+    [Tooltip("분리된 피부 목 메시가 있으면 열린 안쪽을 같은 피부색·본 가중치로 메운다.")]
+    public bool fillNeckInterior;
+
     [Tooltip("좌우 한계(도). 넘어가면 그 각도에서 멈추고 더 돌지 않는다.")]
     [Range(0f, 90f)] public float gazeMaxYaw = 55f;
 
@@ -283,6 +289,7 @@ public class PersonaSpawner : MonoBehaviour
     // 시선. _aim 은 지금 보고 있는 방향(월드)이고 목표를 서서히 따라간다.
     Transform _head, _lFootBone, _lToeBone, _rFootBone, _rToeBone;
     Quaternion _headBase;
+    Quaternion _sitNeckReference, _sitHeadReference;
     Vector3 _aim, _gazeBreakDir;
     Camera _gazeCamera;
     float _gazeBreakAt, _gazeBreakUntil;
@@ -402,13 +409,19 @@ public class PersonaSpawner : MonoBehaviour
         }
         if (!started && applyPoseAnimation) ApplyPose(_spawnedInstance);
         FindFacing(_spawnedInstance);
-        if (breathe || gaze) FindBreathBones(_spawnedInstance);
+        if (breathe || gaze || stabilizeHeadWhileSitting) FindBreathBones(_spawnedInstance);
     }
 
     void ClearSpawnedModel()
     {
         StopPresentation();
-        if (_spawnedInstance != null) Destroy(_spawnedInstance);
+        if (_spawnedInstance != null)
+        {
+            // 시작 전 비활성 모델도 생성한 목 덮개 메시를 해제한다.
+            var interior = _spawnedInstance.GetComponent<PersonaNeckInterior>();
+            if (interior != null) interior.Dispose();
+            Destroy(_spawnedInstance);
+        }
         _spawnedInstance = null;
         _modelReady = false;
         _loadedSession = "";
@@ -487,6 +500,18 @@ public class PersonaSpawner : MonoBehaviour
         if (gaze) AimGaze(body);
         LiftSeatedHead(body);
         ApplyListeningNod(body);
+        StabilizeSittingHead();
+    }
+
+    void StabilizeSittingHead()
+    {
+        float weight = stabilizeHeadWhileSitting && posedExternally && arrival != null
+            ? arrival.SitDownPoseWeight : 0f;
+        if (weight <= 0f) return;
+        // 머리의 월드 위치를 고정하면 상체와 분리된다. 관절의 상대 회전만 유지해 상체를 함께 따른다.
+        // 클립과 같은 혼합 비중을 쓰므로 착석 진입·종료에도 시선이 갑자기 꺾이지 않는다.
+        if (_neck != null) _neck.localRotation = Quaternion.Slerp(_neck.localRotation, _sitNeckReference, weight);
+        if (_head != null) _head.localRotation = Quaternion.Slerp(_head.localRotation, _sitHeadReference, weight);
     }
 
     void ApplyListeningNod(Transform body)
@@ -722,6 +747,8 @@ public class PersonaSpawner : MonoBehaviour
             else if (_head == null && n.EndsWith("head")) _head = t;
         }
         CaptureBreathBase();
+        if (_neck != null) _sitNeckReference = _neck.localRotation;
+        if (_head != null) _sitHeadReference = _head.localRotation;
         if (verboseLog)
             Debug.Log($"[PersonaSpawner] 호흡 뼈: spine={_spine?.name} chest={_chest?.name} neck={_neck?.name} " +
                       $"clavicle={_lClav?.name}/{_rClav?.name} head={_head?.name}");
@@ -953,8 +980,9 @@ public class PersonaSpawner : MonoBehaviour
         // 자세를 잡은 뒤에 뼈를 찾는다 — 기준 자세를 그때 저장하기 때문이다.
         // ApplyPose 안에 두면 도착 연출을 쓸 때(=ApplyPose 를 건너뛸 때) 뼈가 안 잡혀
         // 시선과 호흡이 통째로 죽는다. 시선은 호흡을 꺼도 머리 뼈가 필요하다.
-        if (breathe || gaze) FindBreathBones(_spawnedInstance);
+        if (breathe || gaze || stabilizeHeadWhileSitting) FindBreathBones(_spawnedInstance);
         if (sanitizeMaterials) SanitizeMaterials(_spawnedInstance);
+        if (fillNeckInterior) PersonaNeckInterior.Attach(_spawnedInstance.transform);
 
         // 자세를 먼저 잡고 높이를 잰다. 선 자세와 앉은 자세는 바운즈가 크게
         // 달라서, 순서가 뒤바뀌면 앉은 인물을 선 키에 맞춰 키워버린다.

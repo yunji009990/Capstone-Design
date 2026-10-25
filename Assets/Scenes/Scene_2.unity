@@ -3240,8 +3240,8 @@ RectTransform:
   - {fileID: 159465773}
   m_Father: {fileID: 941757888}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.34, y: 0.8}
-  m_AnchorMax: {x: 0.58, y: 0.98}
+  m_AnchorMin: {x: 0.34, y: 0.52}
+  m_AnchorMax: {x: 0.58, y: 0.71}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -70764,8 +70764,8 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 941757888}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.34, y: 0.51}
-  m_AnchorMax: {x: 0.58, y: 0.77}
+  m_AnchorMin: {x: 0.34, y: 0.74}
+  m_AnchorMax: {x: 0.58, y: 0.99}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -86151,6 +86151,8 @@ MonoBehaviour:
   gaze: 1
   gazeTarget: {fileID: 0}
   seatedHeadLiftDeg: 15
+  stabilizeHeadWhileSitting: 1
+  fillNeckInterior: 1
   gazeMaxYaw: 55
   gazeMaxPitch: 22
   gazeNeckShare: 0.35
@@ -86204,14 +86206,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   referencePose: {fileID: 11400000, guid: 2d905d755441faa4f85f5ca44d8c0057, type: 2}
-  idleClip: {fileID: -203655887218126122, guid: 0aaef92472505e84687b9b9096c6b9f1, type: 3}
+  idleClip: {fileID: 7400000, guid: 8a847b59cebd40798926fe691b483925, type: 3}
   initialIdleSeconds: 1
-  greetClip: {fileID: -203655887218126122, guid: 258ca929028281f4c902ea488f51433e, type: 3}
-  walkClip: {fileID: -203655887218126122, guid: e8d775755e13b0149974991b0ceab4fc, type: 3}
-  turnClip: {fileID: -203655887218126122, guid: 2e38ccef7d810b641828cf845aa1116b, type: 3}
-  sitDownClip: {fileID: 0}
+  greetClip: {fileID: 7400000, guid: e4feafc6ba33345478191e8a136b7ee3, type: 2}
+  walkClip: {fileID: 7400000, guid: 4ffb1a4178af355479ddb12637c5d1ea, type: 2}
+  turnClip: {fileID: -203655887218126122, guid: bd84895e89017d74e85bd8b5e40007b8, type: 3}
+  rightTurnClip: {fileID: -203655887218126122, guid: 0cb5fcd37f17e3c4c99410398427f894, type: 3}
+  sitDownClip: {fileID: -203655887218126122, guid: 233a677a3314f6040b38282dc6caa89d, type: 3}
   seatedClip: {fileID: -203655887218126122, guid: 24d69b8a5545337459f7ffd366066359, type: 3}
-  talkClip: {fileID: -203655887218126122, guid: 74c0f424651a58049a9010c915d05445, type: 3}
+  talkClip: {fileID: -203655887218126122, guid: 03667cf71cce60645a8e86fbd83776cb, type: 3}
   nodClip: {fileID: 0}
   shakeClip: {fileID: 0}
   upperBodyMask: {fileID: 0}
@@ -86236,7 +86239,7 @@ MonoBehaviour:
   - {fileID: 1252000807}
   - {fileID: 989002577}
   seat: {fileID: 2002497041}
-  walkSpeed: 1
+  walkSpeed: 0.8
   walkAcceleration: 2.5
   walkDeceleration: 3.5
   pathFacingLookAhead: 0.3
@@ -86244,11 +86247,12 @@ MonoBehaviour:
   arriveDistance: 0.12
   blendSec: 0.4
   sitTransitionSeconds: 1.1
+  sitDownPlaybackSpeed: 1.3
   seatedPoseTime: 0
   seatOffset: {x: 0, y: 0, z: 0}
-  sitDownOffset: {x: 0, y: -0.3, z: 0}
+  sitDownOffset: {x: 0, y: 0, z: 0}
   greetFacesUser: 1
-  useSitDown: 0
+  useSitDown: 1
   sitDownMoveToSeat: 1
   loopSeated: 1
   applyFootIK: 0

@@ -1,7 +1,7 @@
 # 등록 캐릭터 로딩·이동·애니메이션 설정
 
-기준일: 2026-10-23. 현재 등록 체험 씬은 `Assets/Scenes/Scene_2.unity`다.
-등록 서버의 GLB를 glTFast로 불러오고 고정 몸체의 뼈대에 Unity Humanoid·Mixamo 동작을 연결한다.
+기준일: 2026-10-25. 현재 등록 체험 씬은 `Assets/Scenes/Scene_2.unity`다.
+등록 서버의 GLB를 glTFast로 불러오고 고정 몸체의 뼈대에 Unity Humanoid 동작을 연결한다.
 등록 순서는 [Scene_2 체험](../../../docs/Scene_2_웹설문_테스트.md), 본 매핑·검사 이력은
 [머리 파이프라인](../../../docs/Tripo_머리_생성_파이프라인.md)을 따른다.
 
@@ -31,7 +31,11 @@ Scene_2에 있는 캐릭터 로더와 입장 동선을 사용한다. glTFast 6.1
 | `scaleMultiplier` | 얼굴·머리·몸체 전체의 추가 배율. Scene_2는 `1.2` |
 | `bodyShapeProfile` |6개 체형 키 설정. 비워두면 `Assets/Resources/PersonaBodyShape.asset` 사용 |
 | `seatedHeadLiftDeg` | 착석 후 고개 높이 보정. Scene_2는 `15`도 |
+| `stabilizeHeadWhileSitting` | Scene_2는 켬. 앉기 클립의 혼합 비중에 맞춰 목·머리의 상대 회전을 안정화하고 착석 후 시선 복귀 |
+| `fillNeckInterior` | Scene_2는 켬. 별도 피부 목 구조가 있는 모델의 열린 윗면·어두운 내부 면을 피부색으로 채움. 모델 로드 시 적용 |
 | `arrival` | 이동·인사·착석을 제어하는 `PersonaArrival` |
+| `PersonaArrival.walkSpeed` | Scene_2는 `0.8m/s`. 선택한 걷기와 최종 몸체의 보폭에 맞춘 값 |
+| `PersonaArrival.sitDownPlaybackSpeed` | Scene_2는 `1.3`. 3.1초 앉기 클립을 약2.385초에 재생하며 위치 보간도 함께 조절 |
 | `waitForExperienceStart` | Scene_2는 켬. 로드를 마쳐도 체험 시작 전에는 숨김 |
 | `ExperienceControl.spawner` | 체험 시작·종료를 캐릭터 표시와 입장 연출에 연결 |
 | `PersonaArrival.referencePose` | 고정 Human의 Humanoid 기준 자세 보정 자산 |
@@ -65,9 +69,9 @@ Play 중 수정은 확인용이며 종료하면 되돌아갈 수 있다. AI_Resp
 Scene_2의 `입장 동선 / 04_이동 경로 (바닥)`이 현재 연결된 경로다. 가구를 피하는 경로를 직접 그린다.
 
 ```text
-Idle → Catwalk Walk Forward 03 → 사용자 쪽 회전 → Waving
-     → 경로 방향 회전 → Catwalk Walk Forward 03
-     → 의자 방향 정렬 → 착석 전환 → Sitting Idle
+UnityMaleIdle → NaturalWalk → 사용자 쪽 회전 → NaturalGreeting
+     → 경로 방향 회전 → NaturalWalk
+     → 의자 방향 정렬 (좌/우 회전) → SitDown (1.3배) → Sitting Idle
 ```
 
 실제 이동은 코드가 담당하며 Animator Root Motion은 끈다. 속도에 맞춰 걷기 재생과
@@ -75,7 +79,12 @@ Idle/Walk 비율을 조절하고 PlayableGraph로 동작을 섞는다. 회전은
 현재 NavMesh 장애물 회피나 매 프레임 신발 바닥 추종은 없다. 9월 30일 사용자 요청으로
 자동 바닥 추종을 제거했으며 이동·인사·회전 중 루트 높이를 고정한다.
 
-착석 후 기본은 `Sitting Idle`이다. NPC 음성이 실제 재생되는 답변에서 `Sitting Talking`을
+현재 걷기는 Quaternius, 인사는 Mesh2Motion 클립이다. 인사 진입의 손목·아래팔3개 곡선을 보정했다.
+보행 중 골반·다리 IK는 사용하지 않는다. 착석 발 보정은 `Sitting Idle`의 실제 혼합 비중에 맞춰 적용한다.
+클립 출처·고정 버전·라이선스는 [클립 구성](../../Animations/PersonaPerformance/Source.md),
+실제 Editor 검사·남은 HMD 범위는 [동작·목 내부 기록](../../../docs/머리_목_결합_수정_20261024.md#착석-배속인사-진입-손목목-내부-피부색--2026-10-25)을 따른다.
+
+착석 후 기본은 `Sitting Idle`이다. NPC 음성이 실제 재생되는 답변에서6초 `CalmSeatedTalk`를
 평균 25%로 선택하고 다음 답변은 강제로 건너뛴다. 정확히 매 네 번째마다 실행하는 규칙은 아니다.
 같은 답변의 음성 조각이나 재개는 다시 추첨하지 않는다. 상체 마스크로 다리는 앉은 자세를 유지한다.
 
@@ -100,8 +109,8 @@ Idle/Walk 비율을 조절하고 PlayableGraph로 동작을 섞는다. 회전은
 
 ## 4. 시작·종료와 미리보기
 
-- Scene_2의 `체험 시작`은 등록·서버·마이크 장치·모델과 입장 준비가 끝나면 활성화된다. 입장 중 음성을 준비하고 착석 뒤 새 마이크 입력을 시작한다.
-- 운영자 화면의 `준비 다시 확인`으로 마이크 목록·대화 health·미완료 모델을 다시 확인한다. [시작 준비와 검사](../../../docs/체험_시작_준비_20261024.md)를 따른다.
+- Scene_2의 `체험 시작`은 같은 버튼으로 등록·서버·마이크 장치·모델과 입장 준비를 재확인한다. 미준비 상태에서 누르면 버튼 위에 빨간 미완료 항목을 표시한다.
+- 별도 `준비 다시 확인` 버튼은 제거했다. 준비 조건을 통과해야 입장하며, 입장 중 음성을 준비하고 착석 뒤 새 마이크 입력을 시작한다. 시작 버튼은 대화 초기화 바로 위다. [시작 준비와 검사](../../../docs/체험_시작_준비_20261024.md)를 따른다.
 - `체험 종료`는 입력·음성을 멈추고0.8초 페이드아웃 뒤 인물을 숨긴다. 다음 시작 때 화면이 밝아지고 같은 모델을 경로 처음부터 사용한다. 연결 실패·컴포넌트 비활성화 시에는 즉시 정리한다.
 - `Tools > 다시봄 > 캐릭터 > 모델 미리보기 열기`는 로컬 GLB 확인용이며 여는 것만으로 Tripo API를 호출하지 않는다.
 - `Tools > 다시봄 > 캐릭터 > 전체 리깅 보기`에서 Play 중 실제 Skin 본과 Humanoid 연결을 표시한다. `F8`로 표시를 전환한다.

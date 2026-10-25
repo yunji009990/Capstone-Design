@@ -7,7 +7,7 @@
 // 폴링이라 시점도 일정하지 않다. 걸어 들어오게 하면 그 로딩 시간이 연출로 덮이고, 재회라는
 // 주제에도 "이미 앉아 있음"보다 "문을 열고 들어옴"이 맞다.
 //
-// 재생은 Humanoid 아바타 위에서 한다. Tripo 리깅에는 걷기·인사 프리셋이 없어 외부(Mixamo)
+// 재생은 Humanoid 아바타 위에서 한다. Tripo 리깅에는 걷기·인사 프리셋이 없어 외부 Humanoid
 // 클립을 써야 하고, 그러려면 런타임에 아바타를 만들어야 한다(PersonaHumanoid).
 // 고정 Human 몸체의 본 매핑을 재사용한다. 이전 Tripo 리그도 별도 매핑으로 읽는다.
 //
@@ -20,17 +20,17 @@
 // 듣고 있다는 신호라, 서버가 감정을 알려 주지 않아도 마이크 크기만으로 낼 수 있다.
 //
 // 앉은 뒤에는 Sitting Idle을 반복한다. 대화 제스처는 별도 클립을 연결했을 때만
-// 상반신에 얹는다(아바타 마스크). Scene_2는 Sitting Talking을 평균 4회 중 1회 선택한다.
+// 상반신에 얹는다(아바타 마스크). Scene_2는 CalmSeatedTalk를 평균 4회 중 1회 선택한다.
 // 다리·골반은 앉은 자세가 계속 붙들고 있으므로 의자에서 뜨지 않는다.
 //
 // 아는 한계:
 //  - 손가락이 없는 이전 Tripo 리그에서는 손 모양이 편 채 고정이다.
 //  - 상반신 클립의 허리 각도가 앉은 자세와 다르면 허리께가 살짝 꺾인다. maskFromSpine 으로
 //    가르는 지점을 척추/가슴 중에 고른다.
-//  - 도는 클립이 한 방향뿐이라 반대로 도는 경로에서는 발이 반대로 딛는 것처럼 보인다.
+//  - 회전 클립은 좌우 90도용이다. 큰 회전이나 매우 좁은 자리의 발 접촉은 별도 조정이 필요하다.
 //  - 바닥 경로는 그린 선을 그대로 따른다. 장애물 회피·계단용 발 IK는 별도다.
 //
-// 발 미끄러짐은 walkSpeed 로 맞춘다. Mixamo Walking 기준 1.0 m/s 가 맞았다.
+// 발 미끄러짐은 선택한 클립과 최종 몸체의 보폭에 맞춰 walkSpeed 로 조절한다.
 
 using UnityEngine;
 using System.Collections.Generic;
@@ -58,8 +58,11 @@ public class PersonaArrival : MonoBehaviour
     [Tooltip("걷기. 제자리 클립이어도 된다 — 이동은 코드가 시킨다. 비어 있으면 도착 연출을 쓰지 않는다.")]
     public AnimationClip walkClip;
 
-    [Tooltip("방향 전환. 비워두면 걷기 클립인 채로 돈다.")]
+    [Tooltip("왼쪽 방향 전환. 오른쪽 클립을 비워두면 양방향에 사용한다. 비워두면 대기 또는 걷기 클립으로 정렬한다.")]
     public AnimationClip turnClip;
+
+    [Tooltip("오른쪽 방향 전환. 비워두면 기존 방향 전환 클립을 사용한다.")]
+    public AnimationClip rightTurnClip;
 
     [Tooltip("의자에 앉는 동작. useSitDown 을 켰을 때만 쓴다.")]
     public AnimationClip sitDownClip;
@@ -158,6 +161,9 @@ public class PersonaArrival : MonoBehaviour
     [Tooltip("별도 앉기 클립 없이 서 있는 자세에서 Sitting Idle로 내려앉는 시간(초).")]
     [Range(.2f, 3f)] public float sitTransitionSeconds = 1.1f;
 
+    [Tooltip("별도 앉기 클립의 재생 배속. 의자까지 이동하는 시간도 같은 비율로 맞춘다.")]
+    [Range(.2f, 3f)] public float sitDownPlaybackSpeed = 1f;
+
     [Tooltip("앉은 뒤 유지할 자세의 시각(초). 손이 편안하게 놓인 구간을 고른다.")]
     [Range(0f, 3f)] public float seatedPoseTime;
 
@@ -197,8 +203,19 @@ public class PersonaArrival : MonoBehaviour
 
     /// <summary>앉아서 대화할 준비가 됐는지. 대화 쪽에서 연출을 걸 때 본다.</summary>
     public bool IsSeated => phase == Phase.앉음;
-    public float SeatedPoseWeight => IsSeated ? 1f : phase == Phase.앉는중
-        ? Mathf.SmoothStep(0f, 1f, _sitElapsed / Mathf.Max(.2f, _sitDuration)) : 0f;
+    // 앉기 클립의 무릎·발 궤적은 그대로 두고, 기본 착석 자세가 섞일 때만 발 보정을 켠다.
+    public float SeatedPoseWeight => BaseClipWeight(seatedClip);
+    public float SitDownPoseWeight => BaseClipWeight(sitDownClip);
+
+    float BaseClipWeight(AnimationClip clip)
+    {
+        if (!_mixer.IsValid() || clip == null) return 0f;
+        float weight = 0f;
+        for (int i = 0; i < _slots.Length; i++)
+            if (_slots[i].IsValid() && _slots[i].GetAnimationClip() == clip)
+                weight += _mixer.GetInputWeight(i);
+        return Mathf.Clamp01(weight);
+    }
 
     /// <summary>도착 연출을 돌릴 수 있는 상태인지. 걷기 클립이 없으면 스포너가 건너뛴다.</summary>
     public bool CanRun => isActiveAndEnabled && walkClip != null;
@@ -249,8 +266,17 @@ public class PersonaArrival : MonoBehaviour
     public float PathLength => _groundRoute != null ? _groundRoute.Length : 0f;
     public float PathGreetingDistance => _pathGreetingDistance;
     public float CurrentWalkSpeed => _walkVelocity;
-    public float LocomotionWeight => _active >= 0 && _walkMixers[_active].IsValid()
-        ? _walkMixers[_active].GetInputWeight(1) : 0f;
+    public float LocomotionWeight
+    {
+        get
+        {
+            if (!_mixer.IsValid()) return 0f;
+            float weight = 0f;
+            for (int slot = 0; slot < _walkMixers.Length; slot++)
+                if (_walkMixers[slot].IsValid()) weight += _mixer.GetInputWeight(slot) * _walkMixers[slot].GetInputWeight(1);
+            return Mathf.Clamp01(weight);
+        }
+    }
     public float RootHeightAboveFloor => _rootHeightAboveFloor;
     public Vector3 GroundPosition => _persona != null
         ? _persona.position - Vector3.up * _rootHeightAboveFloor : transform.position;
@@ -269,7 +295,7 @@ public class PersonaArrival : MonoBehaviour
     {
         ReleasePlayback();
         if (!CanRun || personaRoot == null || spawner == null) return false;
-        foreach (var clip in new[] { idleClip, greetClip, walkClip, turnClip, sitDownClip, seatedClip, talkClip, nodClip, shakeClip })
+        foreach (var clip in new[] { idleClip, greetClip, walkClip, turnClip, rightTurnClip, sitDownClip, seatedClip, talkClip, nodClip, shakeClip })
         {
             if (clip == null || clip.isHumanMotion) continue;
             Debug.LogWarning($"[PersonaArrival] {clip.name}은 Humanoid 클립이 아니다 — 기본 재생으로 돌아간다");
@@ -545,12 +571,17 @@ public class PersonaArrival : MonoBehaviour
         _sitFrom = _persona.position;
         _sitElapsed = 0f;
         _blendDirectlyToSeat = !useSitDown || sitDownClip == null;
+        float playbackSpeed = Mathf.Clamp(sitDownPlaybackSpeed, .2f, 3f);
         _sitDuration = _blendDirectlyToSeat ? Mathf.Max(.2f, sitTransitionSeconds)
-            : Mathf.Max(.2f, sitDownClip.length);
+            : Mathf.Max(.2f, sitDownClip.length / playbackSpeed);
         if (!_blendDirectlyToSeat && !sitDownMoveToSeat) _sitFrom = SeatPosition() + sitDownOffset;
         if (_blendDirectlyToSeat)
             Play(seatedClip, loopSeated, loopSeated ? -1f : seatedPoseTime, transitionSeconds: _sitDuration);
-        else Play(sitDownClip, false);
+        else
+        {
+            Play(sitDownClip, false);
+            _playbackRate = playbackSpeed;
+        }
         phase = Phase.앉는중;
     }
 
@@ -627,11 +658,13 @@ public class PersonaArrival : MonoBehaviour
     {
         _walkVelocity = 0f;
         Vector3 want = seat != null ? Flat(seat.forward) : Facing();
-        float angle = Vector3.Angle(Facing(), want);
+        float signedAngle = Vector3.SignedAngle(Facing(), want, Vector3.up);
+        float angle = Mathf.Abs(signedAngle);
+        var directionClip = signedAngle > 0f && rightTurnClip != null ? rightTurnClip : turnClip;
         // 작은 정렬에는 90도 회전 클립의 큰 발걸음을 넣지 않는다.
-        var clip = angle < 30f && idleClip != null ? idleClip : turnClip;
+        var clip = angle < 30f && idleClip != null ? idleClip : directionClip;
         if (clip == null) clip = idleClip != null ? idleClip : walkClip;
-        bool turningClip = clip == turnClip;
+        bool turningClip = clip != null && (clip == turnClip || clip == rightTurnClip);
         BeginFacing(want, turningClip ? clip.length : blendSec);
         Play(clip, !turningClip);
         if (turningClip) _playbackRate = clip.length / _turnDuration;
@@ -838,8 +871,12 @@ public class PersonaArrival : MonoBehaviour
             if (!_walkMixers[slot].IsValid()) continue;
             float length = idleClip.length;
             _walkIdles[slot].SetTime(length > .01f ? (_walkIdles[slot].GetTime() + Time.deltaTime) % length : 0);
+            // 전환 중인 이전 슬롯은 직전 보행 혼합을 유지한 채 바깥 믹서에서 사라진다.
+            // 상태가 바뀌었다고 이전 슬롯을 즉시 Idle로 바꾸면 크로스페이드 중 자세가 튄다.
+            if (slot != _active) continue;
+            float speed = _groundRoute != null ? _walkVelocity : walkSpeed;
             float walking = phase == Phase.걷기 ? Mathf.SmoothStep(0f, 1f,
-                Mathf.Clamp01(_walkVelocity / Mathf.Max(.01f, walkSpeed))) : 0f;
+                Mathf.Clamp01(speed / Mathf.Max(.01f, walkSpeed))) : 0f;
             _walkMixers[slot].SetInputWeight(0, 1f - walking);
             _walkMixers[slot].SetInputWeight(1, walking);
         }

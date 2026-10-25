@@ -1,0 +1,12 @@
+{
+  "checked_date": "2026-10-25",
+  "quaternius_source": "https://quaternius.itch.io/universal-animation-library",
+  "quaternius_tier": "free Standard",
+  "mesh2motion_repository": "https://github.com/Mesh2Motion/mesh2motion-app",
+  "mesh2motion_commit": "653a9698f5f315523072f1c3ff3496100401317b",
+  "public_source_sha256": {
+    "universal-animation-library.zip": "cc73fc4e495b82958207316596317a3f40b9fa38065bde1027937452da537724",
+    "UAL1_Standard.fbx": "21b32d912da3cb93426d974fb945e86f5b2e86970acd2ce89905e0fbf9f1dcc2",
+    "human-addon-animations.glb": "a0d64d555e0d492026b72d58bf8e16c5e86779295f9093e376dcc001915c2c95"
+  }
+}
