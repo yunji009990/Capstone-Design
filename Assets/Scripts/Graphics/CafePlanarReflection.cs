@@ -230,6 +230,8 @@ public sealed class CafePlanarReflection : MonoBehaviour
 #pragma warning disable CS0618
         UniversalRenderPipeline.RenderSingleCamera(context, target);
 #pragma warning restore CS0618
+        // 반사 영상을 그린 직후 거리별 밉을 갱신한 뒤 유리에서 샘플링한다.
+        texture.GenerateMips();
         GL.invertCulling = originalCulling;
         // 렌더 텍스처의 UV를 계산하므로, 렌더 대상용 GPU 투영의 Y 반전을 다시 적용하지 않는다.
         return GL.GetGPUProjectionMatrix(target.projectionMatrix, false) * view;
@@ -252,12 +254,13 @@ public sealed class CafePlanarReflection : MonoBehaviour
         float aspect = source.stereoEnabled ? 1f : Mathf.Max(.25f, source.aspect);
         int width = aspect >= 1f ? size : Mathf.RoundToInt(size * aspect);
         int height = aspect >= 1f ? Mathf.RoundToInt(size / aspect) : size;
-        if (texture != null && texture.width == width && texture.height == height) return;
+        if (texture != null && texture.width == width && texture.height == height && texture.useMipMap) return;
         Release(texture);
         texture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf)
         {
             name = "CafePlanarEye", hideFlags = HideFlags.HideAndDontSave,
-            filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp
+            filterMode = FilterMode.Trilinear, wrapMode = TextureWrapMode.Clamp,
+            useMipMap = true, autoGenerateMips = false
         };
         texture.Create();
     }

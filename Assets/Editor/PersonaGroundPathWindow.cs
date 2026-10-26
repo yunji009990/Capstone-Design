@@ -129,6 +129,13 @@ public sealed class PersonaGroundPathWindow : EditorWindow
             if (arrival.greetOnPath)
             {
                 EditorGUI.BeginChangeCheck();
+                bool movingGreeting = EditorGUILayout.Toggle("이동하며 한 손 인사", arrival.greetWhileWalking);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(arrival, "이동 중 인사 변경");
+                    arrival.greetWhileWalking = movingGreeting; Changed(arrival);
+                }
+                EditorGUI.BeginChangeCheck();
                 float percent = EditorGUILayout.Slider("인사 위치 (%)", arrival.greetPathProgress * 100f, 0f, 100f);
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -146,7 +153,9 @@ public sealed class PersonaGroundPathWindow : EditorWindow
                 }
                 EditorGUILayout.HelpBox(placingGreeting
                     ? "Scene 창에서 원하는 곳을 클릭하세요. 가장 가까운 경로 위에 인사 표시가 붙습니다. Esc로 취소합니다."
-                    : "분홍색 인사 표시를 끌어서 옮길 수도 있습니다. 그 자리에서 멈춰 인사한 뒤 남은 경로를 걷습니다.", MessageType.Info);
+                    : arrival.greetWhileWalking
+                        ? "분홍색 표시를 지날 때 걷기를 유지하며 오른팔로 인사합니다. 의자 방향으로 돌 때 팔을 자연스럽게 내립니다. 마지막 지점의 인사는 서서 합니다."
+                        : "분홍색 인사 표시를 끌어서 옮길 수도 있습니다. 그 자리에서 멈춰 인사한 뒤 남은 경로를 걷습니다.", MessageType.Info);
                 if (arrival.greetClip == null)
                     EditorGUILayout.HelpBox("Greet Clip이 비어 있어 재생할 때 인사를 생략합니다.", MessageType.Warning);
             }

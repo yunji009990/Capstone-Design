@@ -1,10 +1,41 @@
 # 입장·착석·대화 클립 구성
 
-## 2026-10-25 후속 기본 선택
+## 2026-10-26 사용자 선택 Mixamo 동작
+
+사용자가 Mixamo에서 현재 얼굴·몸통 결합 캐릭터에 적용해 내려받은 두 동작을 사용한다.
+
+| 현재 파일 | 사용자 원본 | 사용 구간·설정 |
+|---|---|---|
+| `MixamoStandardWalk.anim` | `Standard Walk.fbx` | 전체 1.167초, 30fps, 반복·Loop Pose |
+| `MixamoWaving.anim` | `Waving.fbx` | 전체 4.733초, 30fps, 한 번 재생 |
+
+출처는 [Adobe Mixamo](https://www.mixamo.com/)다. 두 동작은 기존 CC0 자료와 구별한다.
+`With Skin` FBX는 실제 얼굴이 포함된 로컬 자료이므로 저장소에 넣지 않고, Unity에서 독립 Humanoid 동작만 분리했다.
+텍스처·메시·외부 자산 참조를 포함하지 않는다. 새 클립은 키프레임 압축을 끄고 가져왔다.
+
+자동 생성한 소스 Avatar의 기준 자세에서는 팔다리 방향과 골반 높이가 잘못 해석됐다.
+동일 FBX의 스킨 바인드 T포즈를 복원해 소스 Avatar를 만든 후 동작을 분리했다.
+Y의 골반 움직임은 자세에 포함하며, 수평 이동·회전은 기존 경로 기능이 담당한다.
+서버 몸체·리그·런타임 Avatar 생성 코드는 변경하지 않는다.
+
+사용자 후속 요청으로 `MixamoWaving`의 손을 흔드는 구간만 조정했다.
+오른팔·팔꿈치·손목6개 곡선을 손이 얼굴 옆에 올라간2초 자세를 중심으로 압축했다.
+0.7~3.15초 구간에 부드럽게 적용하고, 가운데 구간의 곡선 편차는 원본의42%다.
+현재 몸체의 Editor 비교에서 손·손끝의 좌우 이동 폭은 각각 약50%·49% 줄었다.
+인사의 시작·끝 자세, 4.733초 길이, 나머지124개 곡선·GUID·Scene_2 연결은 유지한다.
+
+Scene_2에서는 `MixamoStandardWalk` 위에 오른팔·손가락만 `MixamoWaving`으로 겹친다.
+몸통·골반·다리·왼팔과 시선 추적은 걷기·기존 제어를 유지한다. 의자 방향으로 돌 때는 진행 중인 인사를 부드럽게 내린다.
+따라서 걷는 인사는 의자에 도착하는 시점에 따라 원본4.733초보다 먼저 걷힐 수 있으며, 클립 자체 길이는 유지한다.
+착석은 `SitDown.fbx`와 `Sitting Idle`을 유지하고 재생 속도만1.5배로 올렸다. 목/머리 안정화 설정도 유지한다.
+이전 `NaturalWalk.anim`·`NaturalGreeting.anim`은 원본 보존용으로 남기고 Scene_2에서는 사용하지 않는다.
+검사 결과·이동 속도는 `docs/머리_목_결합_수정_20261024.md`의 2026-10-26 Mixamo 적용 기록을 따른다.
+
+## 2026-10-25 이전 선택
 
 사용자가 기존 걷기·인사의 외관을 다시 지적해 두 동작을 다른 제작자의 클립으로 교체했다.
 
-| 현재 파일 | 제작자·원본 | 처리 |
+| 보관 파일 | 제작자·원본 | 당시 처리 |
 |---|---|---|
 | `NaturalWalk.anim` | [Quaternius Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html), 무료 Standard의 `Unity/UAL1_Standard.fbx`, `Armature\|Walk_Loop` | 1.333초 반복 Humanoid 클립 분리. Scene_2 이동 속도0.8m/s |
 | `NaturalGreeting.anim` | [Mesh2Motion](https://mesh2motion.org/), `human-addon-animations.glb`의 `Greeting` | Blender4.5에서 해당 동작만 FBX로 내보내 Humanoid로 임포트한 뒤 4.8초 클립 분리 |

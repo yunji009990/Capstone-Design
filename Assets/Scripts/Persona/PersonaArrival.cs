@@ -1,4 +1,4 @@
-// PersonaArrival.cs — 인물이 도착하는 연출. 경로 중간 인사를 켜면 걷기 → 인사 → 걷기 → 착석.
+// PersonaArrival.cs — 경로를 따라 입장하고 인사한 뒤 착석한다. 이동 중 인사는 오른팔에만 겹친다.
 //
 // PersonaSpawner 가 인물을 세운 뒤 Begin() 을 불러 넘겨준다. 클립이 꽂혀 있지 않으면
 // 스포너는 이걸 건너뛰고 예전처럼 preset:sit 을 제자리에서 돌린다 — 기본 동작은 그대로다.
@@ -121,8 +121,11 @@ public class PersonaArrival : MonoBehaviour
     [Tooltip("Scene 창에서 그린 바닥 경로. 첫 점에서 시작해 마지막 점까지 걷는다. 비우면 기존 경유지를 쓴다.")]
     public PersonaGroundPath groundPath;
 
-    [Tooltip("바닥 경로의 지정 위치까지 걸어간 뒤 인사하고, 남은 경로를 이어서 걷는다.")]
+    [Tooltip("바닥 경로의 지정 위치에서 인사한다. 이동하며 인사를 켜면 걷기를 유지한다.")]
     public bool greetOnPath;
+
+    [Tooltip("중간 인사를 할 때 멈추지 않고 오른팔 동작만 걷기에 겹친다. 경로 마지막에 지정한 인사는 서서 한다.")]
+    public bool greetWhileWalking;
 
     [Tooltip("경로 전체 길이에서 인사할 위치. 0은 출발점, 1은 도착점. 경로 창의 분홍색 표시로 조절한다.")]
     [Range(0f, 1f)] public float greetPathProgress = .5f;
@@ -179,7 +182,7 @@ public class PersonaArrival : MonoBehaviour
     public Vector3 sitDownOffset = new Vector3(0f, -0.3f, 0f);
 
     [Header("선택")]
-    [Tooltip("인사할 때 체험자(Camera.main)를 향한다. 끄면 걸어갈 방향을 향한다.")]
+    [Tooltip("멈춰서 인사할 때 체험자(Camera.main)를 향한다. 이동 중 인사에서는 몸은 경로를 따르고 기존 시선 추적을 쓴다.")]
     public bool greetFacesUser = true;
 
     [Tooltip("별도 앉기 클립을 쓴다. 끄면 Sit Transition Seconds 동안 기본 앉은 자세로 섞는다.")]
@@ -232,9 +235,9 @@ public class PersonaArrival : MonoBehaviour
     readonly AnimationClipPlayable[] _walkIdles = new AnimationClipPlayable[2];
     AnimationClipPlayable _gesture;
     AnimationClip _gestureClip;
-    AvatarMask _builtMask;
+    AvatarMask _builtMask, _builtWalkingGreetingMask;
     float _gestureTime, _gestureWeight;
-    bool _gestureLoop, _gestureFading;
+    bool _gestureLoop, _gestureFading, _walkingGreeting;
     readonly PersonaTalkGestureSelector _talkSelector = new PersonaTalkGestureSelector();
     string _talkResponseId;
     bool _talkPending, _automaticTalkActive;
@@ -265,6 +268,9 @@ public class PersonaArrival : MonoBehaviour
     public float PathDistance => _pathDistance;
     public float PathLength => _groundRoute != null ? _groundRoute.Length : 0f;
     public float PathGreetingDistance => _pathGreetingDistance;
+    public bool UsesWalkingGreeting => greetOnPath && greetWhileWalking && greetClip != null && _groundRoute != null &&
+        _pathGreetingDistance < _groundRoute.Length - .001f;
+    public bool IsWalkingGreeting => _walkingGreeting && _gesture.IsValid();
     public float CurrentWalkSpeed => _walkVelocity;
     public float LocomotionWeight
     {
@@ -421,8 +427,9 @@ public class PersonaArrival : MonoBehaviour
         {
             if (_groundRoute != null)
             {
-                float limit = _pathGreetingPending ? _pathGreetingDistance : _groundRoute.Length;
-                // 한 프레임에 멀리 이동해도 인사 지점을 건너뛰지 않고 정확히 멈춘다.
+                bool stopForGreeting = _pathGreetingPending && !UsesWalkingGreeting;
+                float limit = stopForGreeting ? _pathGreetingDistance : _groundRoute.Length;
+                // 정지 인사 모드에서는 한 프레임에 멀리 이동해도 인사 지점을 건너뛰지 않는다.
                 float remaining = Mathf.Max(0f, limit - _pathDistance);
                 float brakingSpeed = Mathf.Sqrt(2f * Mathf.Max(.1f, walkDeceleration) * remaining);
                 float targetSpeed = Mathf.Min(walkSpeed, brakingSpeed);
@@ -443,9 +450,14 @@ public class PersonaArrival : MonoBehaviour
                 TurnToward(direction);
                 // 몸의 회전 속도와 이동 선을 분리한다. 급한 코너에서도 선 밖으로 밀리지 않는다.
                 _persona.position = point + Vector3.up * _rootHeightAboveFloor;
+                if (_pathGreetingPending && UsesWalkingGreeting && _pathDistance >= _pathGreetingDistance)
+                {
+                    _pathGreetingPending = false;
+                    BeginGesture(greetClip, false, true);
+                }
                 if (_blend >= 1f)
                 {
-                    if (_pathGreetingPending && _pathDistance >= _pathGreetingDistance) StartPathGreeting();
+                    if (stopForGreeting && _pathDistance >= _pathGreetingDistance) StartPathGreeting();
                     else if (_pathDistance >= _groundRoute.Length) StartTurning();
                 }
                 return;
@@ -463,7 +475,7 @@ public class PersonaArrival : MonoBehaviour
         }
         else if (phase == Phase.돌기)
         {
-            if (AdvanceFacing() && _blend >= 1f) StartSitting();
+            if (AdvanceFacing() && _blend >= 1f && !IsWalkingGreeting) StartSitting();
         }
         else if (phase == Phase.앉는중)
         {
@@ -631,7 +643,7 @@ public class PersonaArrival : MonoBehaviour
     /// <summary>걷기로 들어간다. 첫 목표 쪽으로 몸을 돌리고 걷기 클립을 튼다.</summary>
     void StartWalking(Vector3 from)
     {
-        if (_pathGreetingPending && _pathGreetingDistance <= 0f) { StartPathGreeting(); return; }
+        if (_pathGreetingPending && !UsesWalkingGreeting && _pathGreetingDistance <= 0f) { StartPathGreeting(); return; }
         FaceGoal(from);
         Play(walkClip, true);
         _walkVelocity = 0f;
@@ -656,6 +668,8 @@ public class PersonaArrival : MonoBehaviour
 
     void StartTurning()
     {
+        // 의자 방향으로 돌 때 한 손 인사도 같은 시간에 부드럽게 내린다.
+        if (IsWalkingGreeting) StopGesture();
         _walkVelocity = 0f;
         Vector3 want = seat != null ? Flat(seat.forward) : Facing();
         float signedAngle = Vector3.SignedAngle(Facing(), want, Vector3.up);
@@ -723,8 +737,14 @@ public class PersonaArrival : MonoBehaviour
     {
         if (clip == null || phase != Phase.앉음 || !_graph.IsValid()) return;
         if (_gestureClip == clip && !_gestureFading) return;
+        BeginGesture(clip, loop, false);
+    }
 
+    void BeginGesture(AnimationClip clip, bool loop, bool walkingGreeting)
+    {
         DropGesture();
+        _walkingGreeting = walkingGreeting;
+        _layers.SetLayerMaskFromAvatarMask(1, walkingGreeting ? WalkingGreetingMask() : UpperBodyMask());
         _gesture = AnimationClipPlayable.Create(_graph, clip);
         _gesture.SetSpeed(0);
         _gesture.SetApplyFootIK(false);      // 상반신만 쓰므로 발 IK 는 의미가 없다
@@ -900,7 +920,7 @@ public class PersonaArrival : MonoBehaviour
 
         float step = gestureBlendSec <= 0f ? 1f : Time.deltaTime / gestureBlendSec;
         _gestureWeight = Mathf.Clamp01(_gestureWeight + (_gestureFading ? -step : step));
-        _layers.SetInputWeight(1, _gestureWeight);
+        _layers.SetInputWeight(1, _walkingGreeting ? Mathf.SmoothStep(0f, 1f, _gestureWeight) : _gestureWeight);
 
         if (_gestureFading && _gestureWeight <= 0f) DropGesture();
     }
@@ -908,6 +928,7 @@ public class PersonaArrival : MonoBehaviour
     void DropGesture()
     {
         _automaticTalkActive = false;
+        _walkingGreeting = false;
         if (!_gesture.IsValid()) return;
         _layers.SetInputWeight(1, 0f);
         _layers.DisconnectInput(1);
@@ -922,6 +943,7 @@ public class PersonaArrival : MonoBehaviour
     AvatarMask UpperBodyMask()
     {
         if (upperBodyMask != null) return upperBodyMask;
+        if (_builtMask != null) return _builtMask;
         _builtMask = new AvatarMask { name = "PersonaUpperBody" };
         for (AvatarMaskBodyPart part = 0; part < AvatarMaskBodyPart.LastBodyPart; part++)
             _builtMask.SetHumanoidBodyPartActive(part, false);
@@ -932,6 +954,18 @@ public class PersonaArrival : MonoBehaviour
         _builtMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
         _builtMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
         return _builtMask;
+    }
+
+    AvatarMask WalkingGreetingMask()
+    {
+        if (_builtWalkingGreetingMask != null) return _builtWalkingGreetingMask;
+        _builtWalkingGreetingMask = new AvatarMask { name = "PersonaWalkingGreeting" };
+        for (AvatarMaskBodyPart part = 0; part < AvatarMaskBodyPart.LastBodyPart; part++)
+            _builtWalkingGreetingMask.SetHumanoidBodyPartActive(part, false);
+        // 골반·다리·척추·왼팔·머리는 걷기와 기존 시선 추적이 계속 담당한다.
+        _builtWalkingGreetingMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightArm, true);
+        _builtWalkingGreetingMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
+        return _builtWalkingGreetingMask;
     }
 
     /// <summary>한 번짜리 클립이 끝까지 재생됐는지.</summary>
@@ -991,8 +1025,10 @@ public class PersonaArrival : MonoBehaviour
         if (_animator != null && _animator.avatar == _avatar) _animator.avatar = null;
         ReleaseObject(_avatar);
         ReleaseObject(_builtMask);
+        ReleaseObject(_builtWalkingGreetingMask);
         _avatar = null;
         _builtMask = null;
+        _builtWalkingGreetingMask = null;
         _animator = null;
         _active = -1;
         _current = _gestureClip = null;
@@ -1007,7 +1043,7 @@ public class PersonaArrival : MonoBehaviour
         _outgoingLoop = _blendDirectlyToSeat = false;
         _seatBlendOffset = Vector3.zero;
         _holdAt = -1f;
-        _gestureFading = _gestureLoop = _loop = false;
+        _gestureFading = _gestureLoop = _loop = _walkingGreeting = false;
         _talkSelector.Reset();
         _talkResponseId = null;
         _talkPending = _automaticTalkActive = false;

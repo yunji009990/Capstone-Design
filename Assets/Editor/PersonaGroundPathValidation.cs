@@ -16,6 +16,7 @@ public static class PersonaGroundPathValidation
     const string ObserveKey = "PersonaGroundPathValidation.Observe";
     static PlayReport playReport;
     static double startedAt;
+    static bool walkingGreetingWasActive;
 
     [Serializable] class Report
     {
@@ -34,6 +35,9 @@ public static class PersonaGroundPathValidation
         public float length, maxPathError, maxFloorError, endpointError, rootHeight;
         public bool expectsPathGreeting;
         public float greetingDistance, maxGreetingPositionError;
+        public bool usesWalkingGreeting;
+        public int walkingGreetingSamples;
+        public float greetingStartDistance, greetingEndDistance;
     }
 
     static PersonaGroundPathValidation()
@@ -184,6 +188,7 @@ public static class PersonaGroundPathValidation
         {
             playReport = new PlayReport { utc = DateTime.UtcNow.ToString("o") };
             startedAt = EditorApplication.timeSinceStartup;
+            walkingGreetingWasActive = false;
         }
         if (EditorApplication.timeSinceStartup - startedAt > 180) { Finish("180초 안에 착석하지 않았습니다."); return; }
         var arrival = SceneManager.GetActiveScene().GetRootGameObjects()
@@ -193,18 +198,34 @@ public static class PersonaGroundPathValidation
         bool phaseChanged = playReport.phases.Count == 0 || playReport.phases[playReport.phases.Count - 1] != phase;
         if (phaseChanged) playReport.phases.Add(phase);
         if (phaseChanged && arrival.phase == PersonaArrival.Phase.인사) playReport.greetingCount++;
+        bool walkingGreeting = arrival.IsWalkingGreeting;
+        if (walkingGreeting && !walkingGreetingWasActive)
+        {
+            playReport.greetingCount++;
+            playReport.greetingStartDistance = arrival.PathDistance;
+        }
+        walkingGreetingWasActive = walkingGreeting;
+        if (walkingGreeting)
+        {
+            playReport.walkingGreetingSamples++;
+            playReport.greetingEndDistance = arrival.PathDistance;
+        }
         playReport.length = arrival.PathLength;
         playReport.rootHeight = arrival.RootHeightAboveFloor;
         playReport.expectsPathGreeting = arrival.greetOnPath && arrival.greetClip != null;
+        playReport.usesWalkingGreeting = arrival.UsesWalkingGreeting;
         playReport.greetingDistance = arrival.PathGreetingDistance;
-        if (playReport.expectsPathGreeting && (arrival.phase == PersonaArrival.Phase.인사 ||
+        if (playReport.expectsPathGreeting && (walkingGreeting || arrival.phase == PersonaArrival.Phase.인사 ||
             arrival.phase == PersonaArrival.Phase.인사방향전환 || arrival.phase == PersonaArrival.Phase.경로방향전환))
         {
             playReport.greetingSamples++;
-            Vector3 stop = arrival.groundPath.CreateRoute().Evaluate(arrival.PathGreetingDistance, out _, out _);
-            stop.y = arrival.GroundPosition.y;
-            playReport.maxGreetingPositionError = Mathf.Max(playReport.maxGreetingPositionError,
-                Vector3.Distance(stop, arrival.GroundPosition));
+            if (!walkingGreeting)
+            {
+                Vector3 stop = arrival.groundPath.CreateRoute().Evaluate(arrival.PathGreetingDistance, out _, out _);
+                stop.y = arrival.GroundPosition.y;
+                playReport.maxGreetingPositionError = Mathf.Max(playReport.maxGreetingPositionError,
+                    Vector3.Distance(stop, arrival.GroundPosition));
+            }
         }
         if (arrival.phase == PersonaArrival.Phase.걷기)
         {
@@ -235,7 +256,10 @@ public static class PersonaGroundPathValidation
         {
             playReport.reachedSeat = true;
             bool greetingOK = !playReport.expectsPathGreeting || (playReport.greetingCount == 1 &&
-                playReport.greetingSamples > 3 && playReport.maxGreetingPositionError < .002f &&
+                playReport.greetingSamples > 3 &&
+                (playReport.usesWalkingGreeting
+                    ? playReport.walkingGreetingSamples > 3 && playReport.greetingEndDistance - playReport.greetingStartDistance > .025f
+                    : playReport.maxGreetingPositionError < .002f) &&
                 (arrival.greetPathProgress <= 0f || playReport.walkBeforeGreeting > 0) &&
                 (arrival.greetPathProgress >= 1f || playReport.walkAfterGreeting > 0));
             Finish(greetingOK && playReport.walkSamples > 3 && playReport.maxPathError < .002f && playReport.maxFloorError < .002f && playReport.endpointError < .002f

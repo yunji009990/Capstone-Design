@@ -86150,14 +86150,14 @@ MonoBehaviour:
   posedExternally: 0
   gaze: 1
   gazeTarget: {fileID: 0}
-  seatedHeadLiftDeg: 15
+  seatedHeadLiftDeg: 0
   stabilizeHeadWhileSitting: 1
   fillNeckInterior: 1
   gazeMaxYaw: 55
-  gazeMaxPitch: 22
+  gazeMaxPitch: 35
   gazeNeckShare: 0.35
   gazeResponseSec: 0.28
-  gazeBreaks: 1
+  gazeBreaks: 0
   gazeFlipForward: 0
   gazeForwardNow: {x: 0, y: 0, z: 0}
   gazeForwardFromFeet: {x: 0, y: 0, z: 0}
@@ -86208,8 +86208,8 @@ MonoBehaviour:
   referencePose: {fileID: 11400000, guid: 2d905d755441faa4f85f5ca44d8c0057, type: 2}
   idleClip: {fileID: 7400000, guid: 8a847b59cebd40798926fe691b483925, type: 3}
   initialIdleSeconds: 1
-  greetClip: {fileID: 7400000, guid: e4feafc6ba33345478191e8a136b7ee3, type: 2}
-  walkClip: {fileID: 7400000, guid: 4ffb1a4178af355479ddb12637c5d1ea, type: 2}
+  greetClip: {fileID: 7400000, guid: a08395dfc6925ba46a870b8f548d7fde, type: 2}
+  walkClip: {fileID: 7400000, guid: 8bb8ab0cb66d63e47836ef6942b001c9, type: 2}
   turnClip: {fileID: -203655887218126122, guid: bd84895e89017d74e85bd8b5e40007b8, type: 3}
   rightTurnClip: {fileID: -203655887218126122, guid: 0cb5fcd37f17e3c4c99410398427f894, type: 3}
   sitDownClip: {fileID: -203655887218126122, guid: 233a677a3314f6040b38282dc6caa89d, type: 3}
@@ -86233,13 +86233,14 @@ MonoBehaviour:
   listeningNodSeconds: 0.9
   groundPath: {fileID: 78905127}
   greetOnPath: 1
+  greetWhileWalking: 1
   greetPathProgress: 0.59829146
   entrance: {fileID: 199746905}
   waypoints:
   - {fileID: 1252000807}
   - {fileID: 989002577}
   seat: {fileID: 2002497041}
-  walkSpeed: 0.8
+  walkSpeed: 1.25
   walkAcceleration: 2.5
   walkDeceleration: 3.5
   pathFacingLookAhead: 0.3
@@ -86247,7 +86248,7 @@ MonoBehaviour:
   arriveDistance: 0.12
   blendSec: 0.4
   sitTransitionSeconds: 1.1
-  sitDownPlaybackSpeed: 1.3
+  sitDownPlaybackSpeed: 1.5
   seatedPoseTime: 0
   seatOffset: {x: 0, y: 0, z: 0}
   sitDownOffset: {x: 0, y: 0, z: 0}
@@ -103072,7 +103073,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 582356737390864423, guid: 8346e884795c2b84097de4080d8a6e45, type: 3}
       propertyPath: m_Dithering
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 582356737390864423, guid: 8346e884795c2b84097de4080d8a6e45, type: 3}
       propertyPath: m_RenderPostProcessing
@@ -103112,7 +103113,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1860413186799087726, guid: 8346e884795c2b84097de4080d8a6e45, type: 3}
       propertyPath: m_Dithering
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1860413186799087726, guid: 8346e884795c2b84097de4080d8a6e45, type: 3}
       propertyPath: m_RenderPostProcessing
@@ -103503,7 +103504,7 @@ MonoBehaviour:
   m_Antialiasing: 0
   m_AntialiasingQuality: 2
   m_StopNaN: 0
-  m_Dithering: 1
+  m_Dithering: 0
   m_ClearDepth: 1
   m_AllowXRRendering: 1
   m_AllowHDROutput: 1

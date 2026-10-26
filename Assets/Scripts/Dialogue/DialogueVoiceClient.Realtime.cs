@@ -31,7 +31,7 @@ public partial class DialogueVoiceClient
     public bool ConversationInputAllowed => _conversationInputAllowed;
     bool _conversationInputAllowed = true;
 
-    /// <summary>접속·참조 음성 준비는 진행하면서 착석 전 마이크와 검사 입력을 막는다.</summary>
+    /// <summary>마이크 장치는 미리 준비하되 착석 전 음성 송신과 검사 입력은 막는다.</summary>
     public void SetConversationInputAllowed(bool allowed)
     {
         if (_conversationInputAllowed == allowed) return;
@@ -47,15 +47,19 @@ public partial class DialogueVoiceClient
 
     void OpenDialogueMicrophone()
     {
-        if (ShouldCaptureMicrophone)
-        {
-            StartListening();
-            if (!_listening || _recClip == null || _recClip.frequency != 16000)
-                throw new InvalidOperationException("16000 Hz 마이크를 열 수 없습니다. 장치와 권한을 확인해 주세요.");
-        }
-        // 착석 전의 음성이 새 대화의 입력으로 밀려 들어가지 않도록 새 녹음부터 읽는다.
-        _sendCursor = 0;
+        if (ShouldCaptureMicrophone) PrepareDialogueMicrophone();
+        // 이미 열린 링 버퍼의 현재 지점부터 읽는다. 입장·서버 준비 중의 녹음은 보내지 않는다.
+        // 장치 위치가 아직 유효하지 않으면 첫 Pump에서 현재 위치로 다시 맞춘다.
+        _sendCursor = ShouldCaptureMicrophone && _recClip != null ? Microphone.GetPosition(_micDevice) : 0;
         _lastMicPump = Time.realtimeSinceStartup;
+    }
+
+    void PrepareDialogueMicrophone()
+    {
+        if (!RequiresMicrophone) return;
+        StartListening();
+        if (!_listening || _recClip == null || _recClip.frequency != 16000)
+            throw new InvalidOperationException("16000 Hz 마이크를 열 수 없습니다. 장치와 권한을 확인해 주세요.");
     }
     public string ResponseRoute { get; private set; } = "";
     public string VoiceAudioEvent { get; private set; } = "unknown";
@@ -246,6 +250,9 @@ public partial class DialogueVoiceClient
         {
             StopListening();
             sampleRate = 16000;
+            // Windows의 Microphone.Start는 장치 초기화 동안 메인 스레드를 멈출 수 있다.
+            // 인물 입장 전에 한 번 열고, 착석 시에는 송신 커서만 현재 위치로 맞춘다.
+            PrepareDialogueMicrophone();
             var uri = new UriBuilder(DialogueServerUrl);
             uri.Scheme = uri.Scheme == "https" ? "wss" : "ws";
             uri.Path = uri.Path.TrimEnd('/') + "/dialogue";
@@ -434,6 +441,7 @@ public partial class DialogueVoiceClient
         _lastMicPump = Time.realtimeSinceStartup;
         int pos = Microphone.GetPosition(_micDevice);
         if (pos < 0) return;
+        if (_sendCursor < 0) { _sendCursor = pos; return; }
         int available = (pos - _sendCursor + _recClip.samples) % _recClip.samples;
         while (available >= DialogueSamples)
         {

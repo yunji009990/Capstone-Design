@@ -47,8 +47,8 @@ public static class PersonaArrivalSetup
         var paths = new[]
         {
             CurrentOr(probe != null ? probe.idleClip : null, "Assets/Animations/PersonaLocomotion/UnityMaleIdle.fbx"),
-            CurrentOr(probe != null ? probe.greetClip : null, performance + "NaturalGreeting.anim"),
-            CurrentOr(probe != null ? probe.walkClip : null, performance + "NaturalWalk.anim"),
+            CurrentOr(probe != null ? probe.greetClip : null, performance + "MixamoWaving.anim"),
+            CurrentOr(probe != null ? probe.walkClip : null, performance + "MixamoStandardWalk.anim"),
             CurrentOr(probe != null ? probe.seatedClip : null, AnimationFolder + "/Sitting Idle.fbx"), turnPath,
             ReferenceAnimationPath, CurrentOr(probe != null ? probe.talkClip : null, performance + "CalmSeatedTalk.fbx"),
             CurrentOr(probe != null ? probe.rightTurnClip : null, performance + "TurnRight90.fbx"),
@@ -131,7 +131,7 @@ public static class PersonaArrivalSetup
         {
             probe.useSitDown = true;
             probe.sitDownOffset = Vector3.zero;
-            probe.walkSpeed = .8f;
+            probe.walkSpeed = 1.25f;
             probe.blendSec = .4f;
             probe.sitTransitionSeconds = 1.1f;
             probe.loopSeated = true;

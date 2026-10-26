@@ -128,7 +128,9 @@ public static class Scene2PlanarReflectionValidation
                         float observedWidth = maxX - minX + 1;
                         float widthError = Mathf.Abs(observedWidth - expectedWidth);
                         if (positionError > 4f || widthError > expectedWidth * .15f + 2f)
-                            throw new InvalidOperationException("반사의 위치·배율·상하 방향이 실제 투영과 다릅니다.");
+                            throw new InvalidOperationException($"반사의 위치·배율·상하 방향이 실제 투영과 다릅니다. " +
+                                $"surface={surface.name}, offset={offset}, marker={markerIndex}, " +
+                                $"positionError={positionError:F2}px, width={observedWidth:F2}/{expectedWidth:F2}px");
                         samples.Add(new { surface = window ? "window" : "mirror", offset, markerIndex, positionErrorPixels = positionError,
                             expectedWidthPixels = expectedWidth, observedWidthPixels = observedWidth });
                     }

@@ -26,10 +26,12 @@ from realtime_llm import LLMClient
 class TextDetector:
     def __init__(self):
         self.audio, self.pending = bytearray(), bytearray()
+        self.recent = bytearray()
         self.speaking = False
     def reset(self):
         self.audio.clear()
         self.pending.clear()
+        self.recent.clear()
         self.speaking = False
 
 
