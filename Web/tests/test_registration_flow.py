@@ -50,7 +50,7 @@ class SurveyCompileTests(unittest.TestCase):
     def compiled(self, answers):
         return survey_v2.compile_survey(survey_v2.validate(answers))
 
-    def test_two_preset_profiles_compile_without_issues(self):
+    def test_all_preset_profiles_compile_without_issues(self):
         for profile in PRESETS:
             with self.subTest(profile=profile["key"]):
                 result = self.compiled(profile["answers"])

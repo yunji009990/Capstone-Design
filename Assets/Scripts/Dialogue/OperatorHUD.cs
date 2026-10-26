@@ -19,11 +19,13 @@ using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.XR;
 
 [DisallowMultipleComponent]
 public class OperatorHUD : MonoBehaviour
 {
+    // PC 미리보기는 씬 전환·헤드셋 활성 여부와 관계없이 가로 화면을 유지한다.
+    const float PreviewAspect = 16f / 9f;
+
     [Header("연결")]
     [Tooltip("체험자가 보는 화면이 나올 자리.")]
     public RawImage vrView;
@@ -40,7 +42,7 @@ public class OperatorHUD : MonoBehaviour
     public Camera vrCamera;
 
     [Header("설정")]
-    [Tooltip("띄울 화면의 가로 해상도. 세로는 비율에 맞춰 정한다.")]
+    [Tooltip("PC 미리보기의 가로 해상도. 세로는 16:9 비율에 맞춰 정한다.")]
     public int captureWidth = 1280;
 
     [Tooltip("정보를 몇 초마다 새로 그릴지. 매 프레임 문자열을 만들 이유는 없다.")]
@@ -68,22 +70,11 @@ public class OperatorHUD : MonoBehaviour
         SetupSpectator();
     }
 
-    /// <summary>
-    /// 헤드셋 한쪽 눈의 가로세로 비. Quest 는 세로가 더 긴 편이라 16:9 로 찍으면
-    /// 실제로 보이는 것과 다른 화면이 된다.
-    /// </summary>
-    float EyeAspect()
-    {
-        if (XRSettings.enabled && XRSettings.eyeTextureWidth > 0 && XRSettings.eyeTextureHeight > 0)
-            return (float)XRSettings.eyeTextureWidth / XRSettings.eyeTextureHeight;
-        if (vrCamera != null && vrCamera.aspect > 0.01f) return vrCamera.aspect;
-        return 16f / 9f;
-    }
-
     /// <summary>체험자 카메라와 같은 자리에서 같은 것을 찍는 카메라를 하나 더 둔다.</summary>
     void SetupSpectator()
     {
-        float aspect = EyeAspect();
+        // 한쪽 눈의 거의 정사각형인 비율을 UI에 넘기면 카페 진입 후 미리보기도 정사각형이 된다.
+        float aspect = PreviewAspect;
         int h = Mathf.Max(360, Mathf.RoundToInt(captureWidth / aspect));
         _rt = new RenderTexture(captureWidth, h, 24) { name = "VRSpectator" };
 

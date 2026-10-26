@@ -3,13 +3,13 @@
 //
 // "듣고 있습니다 · 생각 중 · 말하는 중"은 DialogueVoiceUI 가 운영자 화면에만 적는다. 헤드셋을
 // 쓴 사람은 그 화면을 못 본다. 말을 걸고 몇 초 동안 아무 반응이 없으면 못 들은 줄 알고
-// 같은 말을 되풀이하게 된다. 여기서는 그 순간들을 시야 가장자리의 빛, 인물 얼굴의 빛,
+// 같은 말을 되풀이하게 된다. 여기서는 그 순간들을 시야 가장자리의 빛과
 // 손의 진동으로 알린다. 추모 콘텐츠라 세게 하면 안 된다 — 기본값은 눈에 겨우 띄는 정도고,
 // 세기는 세 단계 중에서 고른다.
 //
 //   발화 전달  — 말이 서버로 간 순간. 가장자리가 한 번 밝아졌다 잦아들고, 손이 짧게 떨린다.
 //   응답 준비  — 서버가 답을 만드는 동안. 가장자리가 숨 쉬듯 느리게 오르내린다.
-//   인물 발화  — 인물이 말을 시작하면 얼굴 쪽에 따뜻한 빛이 켜지고, 끝나면 꺼진다.
+//   인물 발화  — 말할 때 얼굴을 밝히던 추가 조명은 사용하지 않는다.
 //   시작      — 눈을 감았다 뜨듯 밝아진다. 일반 종료는 짧게 어두워진 뒤 그 상태로 마친다.
 //
 // 상태 신호와 첫 시작은 Feel(MMF_Player), 일반 종료는 화면을 덮은 뒤 정리하는 페이드로 만든다.
@@ -237,16 +237,16 @@ public class ExperienceCues : MonoBehaviour
             if (edgeBreathGroup) edgeBreathGroup.alpha = 0f;
         }
 
-        if (speaking && !_speaking)
+        if (speaking != _speaking)
         {
-            PlacePersonaLight();
-            Stop(speakEndCue);
-            Play(speakStartCue);
-        }
-        else if (!speaking && _speaking)
-        {
+            // 기존 씬에 구워진 Feel 참조는 유지하되 발화 조명은 재생하지 않는다.
             Stop(speakStartCue);
-            Play(speakEndCue);
+            Stop(speakEndCue);
+            if (personaLight)
+            {
+                personaLight.intensity = 0f;
+                personaLight.enabled = false;
+            }
         }
 
         if (recording != _recording || waiting != _waiting || speaking != _speaking)
