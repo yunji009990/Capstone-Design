@@ -2,7 +2,7 @@
 // 시작화면. 배경을 고르고 시작을 누르면 Scene_2 를 연다.
 //
 // 체험자는 헤드셋을 쓴 채 컨트롤러 레이저나 손 집기(VRUIPointer)로 단추를 누른다.
-// 운영자는 Editor·PC 화면에서 마우스로 눌러도 된다(같은 uGUI 단추다).
+// 운영자는 Editor·PC 화면에서 마우스 또는 숫자1~3·Enter로 같은 uGUI 단추를 누를 수 있다.
 //
 // 고른 값은 StartSelection 에 남기고, Scene_2 쪽(CafeBackgroundSet·ExperienceControl)이 읽는다.
 // 단추와 글자는 Tools > 다시봄 > 시작화면 > 시작 씬 만들기 가 만들어 연결한다.
@@ -62,8 +62,31 @@ public class StartScreen : MonoBehaviour
         }
         if (startButton) startButton.onClick.AddListener(Begin);
         Choose(defaultBackground);
-        if (statusText) statusText.text = "";
+        if (statusText) statusText.text = "키보드 1·2·3: 배경 선택 / Enter: 시작";
         StartCoroutine(PlaceInFront());
+    }
+
+    void Update()
+    {
+        if (_loading) return;
+        if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) ChooseWithKeyboard(0);
+        else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) ChooseWithKeyboard(1);
+        else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) ChooseWithKeyboard(2);
+
+        if ((Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) &&
+            startButton != null && startButton.isActiveAndEnabled && startButton.IsInteractable())
+            startButton.onClick.Invoke();
+    }
+
+    void ChooseWithKeyboard(int index)
+    {
+        if (index >= backgroundButtons.Length) return;
+        var button = backgroundButtons[index].button;
+        if (button == null || !button.isActiveAndEnabled || !button.IsInteractable()) return;
+        button.onClick.Invoke();
+        // EventSystem의 Enter 제출도 시작 버튼으로 보낸다. 이전 배경 버튼을 다시 누르지 않게 한다.
+        if (startButton != null && startButton.isActiveAndEnabled && startButton.IsInteractable())
+            startButton.Select();
     }
 
     /// <summary>헤드셋 추적이 잡힌 뒤 패널을 눈앞에 둔다. 처음 몇 프레임은 머리 위치가 0 이다.</summary>
