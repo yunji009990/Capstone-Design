@@ -9,17 +9,40 @@ import hashlib
 import os
 import sys
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import database, model_queue, storage
 from core.head_cutout import CutoutFailed, CutoutUnavailable
-from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
+from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown, run_blender
 from core.tripo import TransientError, _classify
 
 HEAD_PNG = b"\x89PNG\r\n\x1a\nfake-head-cutout"
+
+
+class BlenderProcessTests(unittest.TestCase):
+    def test_interrupted_job_stops_its_blender_child(self):
+        child = MagicMock()
+        child.__enter__.return_value = child
+        child.communicate.side_effect = [subprocess.TimeoutExpired("blender", 1), ("", "")]
+        check = MagicMock(side_effect=[None, InterruptedError("stopping")])
+        with patch("core.model_pipeline.subprocess.Popen", return_value=child):
+            with self.assertRaises(InterruptedError):
+                run_blender("head_trim.py", "source.glb", "output.glb", check=check)
+        child.kill.assert_called_once()
+        self.assertEqual(child.communicate.call_count, 2)
+
+    def test_blender_script_failure_is_not_successful_delivery(self):
+        child = MagicMock()
+        child.__enter__.return_value = child
+        child.communicate.return_value = ("", "script failed")
+        child.returncode = 1
+        with patch("core.model_pipeline.subprocess.Popen", return_value=child):
+            with self.assertRaises(PipelineFailure):
+                run_blender("head_trim.py", "source.glb", "output.glb")
 
 
 class FakeTripo:

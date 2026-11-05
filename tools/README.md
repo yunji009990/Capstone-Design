@@ -1,5 +1,14 @@
 # 개발·실험 도구
 
+`local_demo.ps1`·`local_demo.py`는 기존 학교 서버와 분리한 로컬 API 실행기다.
+`start-web`은 등록·CPU 모델 작업자·웹을, `start`는 OpenAI 대화 연결·PC VoxCPM2까지 시작한다.
+`prepare-friend`는 기존 사진·WAV·완성 모델을 비공개 준비 폴더에 보관한다.
+`local_demo_web_setup.py`는 개발용 웹·모델 작업자의 Windows 준비를 담당한다.
+`package_local_demo.py`는 별도로 빌드한 Windows 플레이어와 독립 Python·검증된 패키지·기존 친구 자료를 배포 폴더에 묶는다.
+배포용 `local_demo_launcher.py`는 웹 친구 등록 후 플레이어를 실행하고 종료 시 자신이 시작한 서비스를 정리한다.
+`OPENAI_API_KEY`는 환경변수로만 전달하며 개발 설정·개발 세션 기록은 배포하지 않는다.
+설치·모드 전환·배포 재생성·FAT32 USB 복원은 [로컬 API 시연](../docs/로컬_API_시연.md)을 따른다.
+
 `project_runtime.py`는 2026-10-03 서버 일시 중지 시 저장한 실행 구성으로 6개 서비스를 재개·조회·종료한다.
 현재 서버에 배치한 사본을 SSH로 실행하며, 운영 환경을 새로 설치하지 않는다.
 명령과 비공개 프로필·백업 위치는 [프로젝트 보관과 재시작](../docs/프로젝트_보관_재시작_20261003.md)에 있다.

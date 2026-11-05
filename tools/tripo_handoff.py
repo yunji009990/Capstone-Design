@@ -41,7 +41,7 @@ def selected(name):
                 "tools/eval_turn_judge.py", "tools/turn_judge_cases.json",
                 "tools/tripo_trial.py", "tools/tripo_motion_pack.py", "tools/tripo_handoff.py",
                 "tools/tests/test_tripo_handoff.py", "Survey/model_worker.py", "Survey/requirements-worker.txt",
-                "Web/app.py", "Web/survey_v2.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt",
+                "Web/app.py", "Web/survey_v2.py", "Web/prepared_friend.py", "Web/README.md", "Web/.env.example", "Web/requirements.txt",
                 # 설문 v2로 대체된 v1 변환 모듈. 삭제가 전달되도록 범위에 남겨 둔다.
                 "Web/persona.py", "Web/registration_input.py"}:
         return True
@@ -62,7 +62,7 @@ def selected(name):
         # presets_v2.json은 화면과 검사가 함께 쓰는 가상 예시다. 참여자 자료가 아니다.
         return path.suffix in {".html", ".css", ".js"} or name == "Web/static/presets_v2.json"
     if name.startswith("Web/tests/"):
-        return path.suffix in {".py", ".cjs"}
+        return path.suffix in {".py", ".cjs"} or name == "Web/tests/fixtures/grandmother.json"
     return False
 
 

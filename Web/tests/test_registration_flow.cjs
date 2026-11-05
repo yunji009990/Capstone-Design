@@ -1,5 +1,5 @@
 // 등록 화면의 실제 스크립트를 실행한다. DOM과 HTTP를 대체하며 외부 서비스는 호출하지 않는다.
-// 가상 인물 자료는 화면이 쓰는 presets_v2.json 을 그대로 읽는다.
+// 화면 목록은 presets_v2.json을 읽고, 이전 관계 검사는 별도 고정 자료를 쓴다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -9,6 +9,7 @@ const {createHash, randomUUID} = require('node:crypto');
 const html = fs.readFileSync(path.resolve(__dirname, '../static/index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const presets = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../static/presets_v2.json'), 'utf8'));
+const grandmother = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'fixtures/grandmother.json'), 'utf8'));
 const SECTION_KINDS = ['background', 'shared_memory', 'preference', 'person',
                        'place_activity', 'about_user', 'news'];
 
@@ -90,7 +91,8 @@ async function page(options = {}) {
   let timer = 0, blobs = 0;
   const context = vm.createContext({
     document: {querySelector: find, querySelectorAll: select, createElement: () => element()},
-    window: {scrollTo() {}}, location: {reload() {}}, FormData: Form,
+    window: {scrollTo() {}}, location: {reload() {}}, FormData: Form, File, Blob,
+    DataTransfer: class {constructor() {this.files=[]; this.items={add: f=>this.files.push(f)};}},
     // 미리 듣기 URL 이 파일마다 다르고, 바꿀 때 해제되는지 보려면 실제처럼 세어야 한다.
     AbortController, URL: {createObjectURL: () => 'blob:' + (++blobs),
                            revokeObjectURL: url => revoked.push(url)},
@@ -102,6 +104,19 @@ async function page(options = {}) {
       if (url === '/gate') return response({required: false});
       if (url === '/status') return response({health: {}, current: {}});
       if (url === '/presets_v2.json') return response(presets);
+      if (url === '/test/friend') {
+        if (options.missingPrepared) return response({detail:'준비된 친구 자료가 없습니다.'}, false);
+        const payload = vm.runInContext('surveyPayload()', context);
+        payload.consent = {image:true,voice:true,understand:true};
+        const info = {ready:true,model_ready:true,revision:'a'.repeat(64),photo_name:'photo.png',
+          photo_url:'/test/friend/photo',voice_url:'/test/friend/voice.wav',
+          preview_revision:options.preparedMismatch ? '0'.repeat(64) : sha('preview'+JSON.stringify(payload))};
+        return options.deferPrepared ? new Promise(resolve=>waiting.push(()=>resolve(response(info)))) : response(info);
+      }
+      if (url === '/test/friend/photo' || url === '/test/friend/voice.wav')
+        return {ok:true,headers:{get:()=>url.endsWith('photo')?'image/png':'audio/wav'},blob:async()=>new Blob(['test'])};
+      if (url === '/test/friend/start') return response({session:randomUUID().replaceAll('-',''),
+        has_model:true,model_reused:true,model_queued:false,photo_url:'/test/friend/photo',voice_url:'/test/friend/voice.wav'});
       if (url === '/persona') {
         const data = draft(request.body.get('survey'), options);
         if (options.deferPersona) return new Promise((resolve, reject) => {
@@ -169,27 +184,67 @@ test('빈 설문으로 시작하고 예시 인물·세션 ID 입력이 없다', 
   await p.publish(); assert.equal(p.calls.filter(x => x.url.startsWith('/publish')).length, 0);
 });
 
-test('테스트 버튼은 고른 가상 인물만 채우고 등록을 대신 누르지 않는다', async () => {
+test('테스트 메뉴를 열기만 하면 등록하지 않고 설문 입력 함수는 자료를 비운다', async () => {
   const p = await page();
+  // 이미 열린 페이지가 삭제 전 목록을 기억하고 있어도 최신 메뉴로 바뀌어야 한다.
+  p.run("presets = [{key:'grandmother',label:'할머니'}, {key:'friend_cafe_demo',label:'친구 시연 · 카페 재회'}]");
   await p.loadTest();
   assert.equal(p.payload().person.relation, '');            // 메뉴를 연 것만으로는 채우지 않는다
-  p.run("applyPreset(presets.find(x => x.key === 'grandmother'))");
+  assert.deepEqual(presets.profiles.map(p => p.key), ['friend']);
+  assert.match(p.get('#testlist').innerHTML, /data-preset="friend"/);
+  assert.doesNotMatch(p.get('#testlist').innerHTML, /grandmother|friend_cafe_demo/);
+  p.run("applyPreset(presets.find(x => x.key === 'friend'))");
   const survey = p.payload(), source = presets.profiles[0].answers;
   assert.equal(survey.person.relation, source.person.relation);
   assert.equal(survey.person.person_name, source.person.person_name);
   assert.equal(survey.speech.form, source.speech.form);
   assert.equal(survey.sections.shared_memory.cards.length, source.sections.shared_memory.cards.length);
-  assert.equal(survey.sections.news.cards.some(c => c.mention_policy === 'exclude_ai'), true);
+  same(survey.sections.news.cards.map(c => c.mention_policy), source.sections.news.cards.map(c => c.mention_policy));
   assert.notEqual(p.get('#testflag').style.display, 'none');
   assert.equal(p.calls.filter(x => x.url.startsWith('/publish')).length, 0);
   assert.equal(p.get('#s_img').files.length, 0);
+});
+
+test('준비된 친구 선택은 마지막 단계에서 사진·음성을 채우고 완성 모델로 자동 등록한다', async () => {
+  const p = await page(); await p.loadTest();
+  await p.run("startPreparedFriend(presets[0])");
+  assert.equal(p.run('step'),10);
+  assert.equal(p.get('#s_img').files[0].name,'photo.png');
+  assert.equal(p.run('dirFile.name'),'친구_참조음성.wav');
+  assert.equal(p.get('#done').style.display,'');
+  assert.equal(p.get('#donevoice').src,'/test/friend/voice.wav');
+  assert.equal(p.calls.filter(c=>c.url==='/test/friend/start').length,1);
+  assert.equal(p.calls.filter(c=>c.url==='/publish_direct').length,0);
+  await p.publish();
+  assert.equal(p.calls.filter(c=>c.url==='/test/friend/start').length,1);
+});
+
+test('준비 자료 누락·불일치 때 재시도해도 일반 사진 생성 경로를 호출하지 않는다', async () => {
+  for (const options of [{missingPrepared:true},{preparedMismatch:true}]) {
+    const p = await page(options); await p.loadTest();
+    await p.run('startPreparedFriend(presets[0])');
+    await p.publish();
+    assert.equal(p.run('step'),10);
+    assert.equal(p.get('#done').style.display,'none');
+    assert.equal(p.calls.filter(c=>c.url==='/publish_direct'||c.url==='/test/friend/start').length,0);
+    assert(p.get('#out').textContent.length>0);
+  }
+});
+
+test('친구 자료 준비 중 연속 클릭은 추가 등록을 만들지 않는다', async () => {
+  const p = await page({deferPrepared:true}); await p.loadTest();
+  const pending = p.run('startPreparedFriend(presets[0])');
+  await p.publish(); await p.run('startPreparedFriend(presets[0])');
+  assert.equal(p.calls.filter(c=>c.url==='/test/friend').length,1);
+  p.waiting.shift()(); await pending;
+  assert.equal(p.calls.filter(c=>c.url==='/test/friend/start').length,1);
 });
 
 test('가상 인물을 바꾸면 이전 카드·상태가 섞이지 않는다', async () => {
   const p = await page();
   p.readyInputs();
   await p.loadTest();
-  p.run("applyPreset(presets.find(x => x.key === 'grandmother'))");
+  p.run(`applyPreset(${JSON.stringify(grandmother)})`);
   // 가상 예시 두 인물이 모두 '적겠습니다'이므로 모름·거절 상태는 여기서 직접 만든다.
   p.run("setSectionState('person', 'unknown')");
   p.run("setSectionState('about_user', 'declined')");
@@ -197,7 +252,7 @@ test('가상 인물을 바꾸면 이전 카드·상태가 섞이지 않는다', 
   await p.reviewed();
   assert.equal(p.get('#publish').disabled, false);
   p.run("applyPreset(presets.find(x => x.key === 'friend'))");
-  const survey = p.payload(), friend = presets.profiles[1].answers;
+  const survey = p.payload(), friend = presets.profiles[0].answers;
   assert.equal(survey.person.relation, '친구');
   assert.equal(survey.sections.person.state, 'answered');   // 이전 '모름'이 남지 않는다
   assert.equal(survey.sections.about_user.state, 'answered'); // 이전 '거절'도 남지 않는다
@@ -577,10 +632,10 @@ test('경위를 고치면 확인한 내용이 무효가 되고 다시 확인해�
 test('가상 인물의 경위를 가져오고 인물을 바꾸면 남기지 않는다', async () => {
   const p = await page();
   await p.loadTest();
-  p.run("applyPreset(presets.find(x => x.key === 'grandmother'))");
-  same(p.payload().passing, presets.profiles[0].answers.passing);
+  p.run(`applyPreset(${JSON.stringify(grandmother)})`);
+  same(p.payload().passing, grandmother.answers.passing);
   p.run("applyPreset(presets.find(x => x.key === 'friend'))");
-  same(p.payload().passing, presets.profiles[1].answers.passing);
+  same(p.payload().passing, presets.profiles[0].answers.passing);
   assert.equal(p.payload().passing.state, 'answered');
   assert.equal(p.payload().passing.time, '2026년 5월 29일');
   assert(!JSON.stringify(p.payload()).includes('오래 앓으시다'));

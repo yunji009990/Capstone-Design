@@ -1,0 +1,15 @@
+# -*- coding: utf-8 -*-
+# Python 3.11 / Windows. CUDA 패키지는 local_demo.ps1 setup에서 별도 설치한다.
+-r requirements-test.txt
+uvicorn[standard]==0.34.3
+sherpa-onnx==1.12.26
+psutil==7.1.3
+soxr==1.0.0
+soundfile==0.13.1
+librosa==0.11.0
+transformers==4.57.1
+huggingface-hub==0.36.0
+einops==0.8.1
+safetensors==0.6.2
+sentencepiece==0.2.1
+# VoxCPM 소스는 운영에서 사용한 commit으로 고정한다. Gradio/denoiser/STT는 설치하지 않는다.

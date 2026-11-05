@@ -31,6 +31,11 @@
   <div class="card">
     <h2>다음 단계</h2>
     <div class="hint" id="donemodel">이제 VR 기기에서 대화를 시작할 수 있습니다.</div>
+    <div id="doneassets" style="display:none; margin-top:16px">
+      <img id="donephoto" alt="준비된 친구 사진" style="width:120px; height:140px; object-fit:contain; border-radius:8px">
+      <div class="hint">등록된 참조 음성</div>
+      <audio id="donevoice" controls style="width:100%"></audio>
+    </div>
     <div class="warn" id="donewarning" style="display:none; margin-top:12px"></div>
     <div class="row" style="margin-top:16px">
       <button onclick="location.reload()">처음으로 돌아가기</button>
@@ -42,12 +47,12 @@
   <div class="topnav">
     <a href="/" class="on">등록</a><a href="/after">체험 후</a><a href="/admin">관리자</a>
     <span class="grow"></span>
-    <!-- 테스트용 가상 인물. 누르기 전에는 아무것도 채우지 않는다. -->
+    <!-- 준비된 친구는 버튼을 눌렀을 때만 등록한다. -->
     <button class="ghost" id="testbtn" type="button">테스트</button>
   </div>
   <div class="testmenu" id="testmenu" style="display:none">
-    <div class="hint" style="margin:0 0 8px">아래는 <b>가상 예시 인물</b>입니다. 실제 사람의 자료가 아니며,
-      고르면 설문 입력만 채웁니다. 사진·음성 파일과 등록은 직접 하셔야 합니다.</div>
+    <div class="hint" style="margin:0 0 8px"><b>친구</b>를 누르면 마지막 단계로 이동해 준비된 사진·음성·모델로
+      세션을 바로 시작합니다. 모델을 새로 생성하지 않습니다.</div>
     <div class="row" id="testlist"></div>
     <div class="hint" id="testmsg" style="margin:8px 0 0"></div>
   </div>
@@ -308,6 +313,11 @@
     <h2>등록</h2>
     <div class="note">등록하면 고유한 세션 코드가 자동으로 발급되고, 이 인물이 현재 체험 인물로 선택됩니다.</div>
     <div class="hint" id="refnow" style="margin:0 0 12px">참조 음성이 선택되지 않았습니다.</div>
+    <div id="preparedassets" style="display:none; margin-bottom:16px">
+      <img id="preparedphoto" alt="준비된 친구 사진" style="width:120px; height:140px; object-fit:contain; border-radius:8px">
+      <div class="hint">기존 사진·참조 음성·완성 모델을 사용합니다.</div>
+      <audio id="preparedvoice" controls style="width:100%"></audio>
+    </div>
     <div class="row">
       <button id="publish" disabled>세션 시작</button>
       <button class="ghost" id="endbtn">현재 세션 종료</button>
@@ -710,6 +720,7 @@ const LAST = 10;
 let step = 1, generatedSurvey = null, pendingSurvey = null;
 let surveyRevision = "", previewRevision = "", confirmedRevision = "", issues = [];
 let personaBusy = false, publishBusy = false, published = false, generationId = 0, personaAbort = null;
+let preparedFriend = null, preparedBusy = false;
 
 function previewReady() {
   return !personaBusy && generatedSurvey === JSON.stringify(surveyPayload())
@@ -849,22 +860,22 @@ async function makePersona() {
 }
 
 $("#next").onclick = async () => {
-  if (personaBusy || publishBusy || published) return;
+  if (personaBusy || publishBusy || published || preparedFriend) return;
   const why = blockedReason(step);
   if (why) { $("#navinfo").textContent = why; return; }
   const n = step + 1;
   showStep(n);
   if (n === 9 && !previewReady()) await makePersona();
 };
-$("#prev").onclick = () => { if (!publishBusy && !published) showStep(step - 1); };
+$("#prev").onclick = () => { if (!publishBusy && !published && !preparedFriend) showStep(step - 1); };
 $("#remake").onclick = makePersona;
 
-// ── 가상 예시 인물 ──
-// 명시적으로 고를 때만 채운다. 사진·음성 파일을 만들거나 등록을 대신 누르지 않는다.
+// ── 테스트 인물 ──
+// 설문 입력과 준비된 자료 등록을 나눈다. 친구 버튼은 준비된 자료 전용 경로를 사용한다.
 let presets = null;
 async function loadPresets() {
-  if (presets) return presets;
-  presets = (await (await fetch("/presets_v2.json")).json()).profiles;
+  // 목록을 정리한 뒤에도 이전 항목이 남지 않도록 열 때마다 새로 읽는다.
+  presets = (await (await fetch("/presets_v2.json", {cache: "no-store"})).json()).profiles;
   return presets;
 }
 
@@ -878,6 +889,8 @@ function clearFiles() {
 }
 
 function clearSurvey() {
+  preparedFriend = null;
+  $("#preparedassets").style.display = "none";
   clearFiles();
   for (const id of ["#s_rel", "#s_hon", "#s_calls", "#s_name", "#s_pname", "#s_era",
                     "#s_trait_other", "#s_missed2", "#s_unsaid", "#s_wished",
@@ -932,6 +945,7 @@ function applyPreset(profile) {
 }
 
 $("#testbtn").onclick = async () => {
+  if (preparedBusy || publishBusy || published) return;
   const box = $("#testmenu");
   if (box.style.display !== "none") { box.style.display = "none"; return; }
   box.style.display = "";
@@ -942,17 +956,63 @@ $("#testbtn").onclick = async () => {
       `<button class="ghost" type="button" data-preset="${esc(p.key)}">${esc(p.label)}</button>`).join("")
       + `<button class="ghost" type="button" data-preset="">설문 비우기</button>`;
     $("#testlist").querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
-      if (published || publishBusy) return;
+      if (published || publishBusy || preparedBusy) return;
       const key = b.dataset.preset;
       if (!key) {
         clearSurvey();
+        showStep(1);
         $("#testmsg").textContent = "설문과 사진·음성 선택을 비웠습니다. 2~3단계에서 다시 골라 주세요.";
         return;
       }
-      applyPreset(list.find(p => p.key === key));
+      return startPreparedFriend(list.find(p => p.key === key));
     });
   } catch (e) { $("#testmsg").textContent = "가상 예시를 불러오지 못했습니다: " + e.message; }
 };
+
+async function startPreparedFriend(profile) {
+  if (preparedBusy || publishBusy || published || !profile) return;
+  applyPreset(profile);
+  preparedFriend = profile; preparedBusy = true;
+  $("#testmenu").style.display = "none";
+  $("#testflag").textContent = "준비된 친구의 사진·음성·완성 모델로 체험합니다.";
+  showStep(LAST);
+  show("친구의 사진·음성·모델을 불러오는 중…");
+  $("#publish").textContent = "친구 준비 중…";
+  try {
+    const info = await readResponse(await fetch("/test/friend", {cache: "no-store"}));
+    if (!info.ok) throw new Error(info.message);
+    const d = info.data;
+    if (!d.ready || !d.model_ready || !/^[a-f0-9]{64}$/.test(d.revision || ""))
+      throw new Error("준비된 친구 자료를 확인하지 못했습니다.");
+    const [photo, voice] = await Promise.all([
+      fetch(d.photo_url, {cache: "no-store"}), fetch(d.voice_url, {cache: "no-store"})]);
+    if (!photo.ok || !voice.ok) throw new Error("친구의 사진·음성을 불러오지 못했습니다.");
+    pickImage(new File([await photo.blob()], d.photo_name, {type: photo.headers.get("content-type")}));
+    pick(new File([await voice.blob()], "친구_참조음성.wav", {type: "audio/wav"}));
+    // 이미 등록된 테스트 자료를 사용한다. 일반 등록의 동의·확인 절차는 그대로 둔다.
+    for (const id of ["#c1", "#c2", "#c3"]) $(id).checked = true;
+    if (!await makePersona() || !previewReady() || previewRevision !== d.preview_revision)
+      throw new Error("친구의 설문과 준비된 자료가 일치하지 않습니다. 자료를 확인해 주세요.");
+    $("#confirm").checked = true; confirmedRevision = previewRevision;
+    $("#preparedphoto").src = d.photo_url; $("#preparedvoice").src = d.voice_url;
+    $("#preparedassets").style.display = "";
+    show("준비된 모델로 친구 세션을 시작하는 중…");
+    $("#publish").textContent = "세션 시작 중…";
+    const fd = new FormData(); fd.append("revision", d.revision);
+    const answer = await readResponse(await fetch("/test/friend/start", {method: "POST", body: fd}));
+    if (!answer.ok) throw new Error(answer.message);
+    const jj = answer.data;
+    if (!/^[a-f0-9]{32}$/.test(String(jj.session || "")) || !jj.has_model || !jj.model_reused)
+      throw new Error("완성 모델이 포함된 세션 시작을 확인하지 못했습니다.");
+    finishRegistration(jj);
+  } catch (e) {
+    show(e.message || "친구 세션을 준비하지 못했습니다. 다시 시도해 주세요.", true);
+  } finally {
+    preparedBusy = false;
+    $("#publish").textContent = "친구 세션 다시 시작";
+    refresh(); status();
+  }
+}
 
 drawSections(); drawSamples(); drawTones(); drawForms(); drawPassing();
 
@@ -997,15 +1057,18 @@ status(); setInterval(status, 5000); refresh();
 // "무엇이 서버로 가는가"를 항상 등록 카드에 적는다.
 function refresh() {
   const ok = !!dirFile;
-  $("#publish").disabled = publishBusy || published || !ok || !confirmedReady() || !!blockedReason(1);
+  $("#publish").disabled = publishBusy || published || preparedBusy
+    || (!preparedFriend && (!ok || !confirmedReady() || !!blockedReason(1)));
   $("#refnow").innerHTML = ok ? `참조: <b>${esc(dirFile.name)}</b> — 파일 그대로`
     : "참조 음성이 선택되지 않았습니다.";
   // 파일을 올리기 전에는 다음을 잠근다. 열어 두면 등록 직전에야 막혀서
   // 무엇이 모자란지 알기 어렵다.
-  const why = blockedReason(step);
+  const why = preparedFriend ? null : blockedReason(step);
   $("#next").disabled = personaBusy || publishBusy || published || !!why;
-  $("#prev").disabled = publishBusy || published;
-  $("#remake").disabled = personaBusy || publishBusy || published;
+  $("#prev").disabled = publishBusy || published || !!preparedFriend;
+  $("#remake").disabled = personaBusy || publishBusy || published || !!preparedFriend;
+  $("#testbtn").disabled = publishBusy || published || preparedBusy;
+  $("#endbtn").disabled = publishBusy || preparedBusy;
   $("#navinfo").textContent = why || "";
 }
 
@@ -1139,7 +1202,8 @@ async function watchModel(sid) {
 }
 
 $("#publish").onclick = async () => {
-  if (publishBusy || published) return;
+  if (publishBusy || published || preparedBusy) return;
+  if (preparedFriend) return startPreparedFriend(preparedFriend);
   const why = blockedReason(1) || blockedReason(4) || blockedReason(9);
   if (why || !dirFile) {
     show(why || "참조 음성을 먼저 선택해 주세요.", true); refresh(); return;
@@ -1165,25 +1229,7 @@ $("#publish").onclick = async () => {
     show(answer.ok
       ? (registered ? jj : "등록 결과를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")
       : answer.message, !registered);
-    if (registered) {   // 실제로 넘어간 것을 되들려준다. 두 경로 모두 같은 처리를 받는다
-      published = true;
-      $("#verify").style.display = "";
-      $("#sentplayer").src = "/last_ref.wav?t=" + Date.now();
-      $("#bootinfo").textContent = "등록한 음성을 보관했습니다. 대화 시작 시 참조 목소리와 말투를 준비해 음성으로 답합니다.";
-      const w = (jj.sent || {}).warning;
-      $("#refwarn").style.display = w ? "" : "none";
-      $("#refwarn").textContent = w || "";
-      if (jj.model_queued) watchModel(jj.session);
-      // 설문 앱과 같이, 끝나면 세션 코드를 크게 알려 준다. 이 코드가 있어야 본인이 지운다.
-      $("#donesid").textContent = jj.session;
-      $("#donemodel").innerHTML = jj.model_queued
-        ? "AI가 인물의 모습을 빚고 있습니다. 몇 분 걸립니다.<br>그 사이에도 VR 기기에서 대화는 시작할 수 있습니다."
-        : "이제 VR 기기에서 대화를 시작할 수 있습니다.";
-      $("#donewarning").textContent = jj.registration_warning || "";
-      $("#donewarning").style.display = jj.registration_warning ? "" : "none";
-      $("#main").style.display = "none"; $("#done").style.display = "";
-      window.scrollTo({ top: 0 });
-    }
+    if (registered) finishRegistration(jj);
   } catch (e) {
     // 네트워크가 끊긴 경우다. 원문 예외를 그대로 보여주지 않는다.
     show("등록 요청을 보내지 못했습니다. 연결을 확인하고 다시 시도해 주세요.", true);
@@ -1193,6 +1239,31 @@ $("#publish").onclick = async () => {
   refresh();
   status();
 };
+
+function finishRegistration(jj) {
+  published = true;
+  $("#verify").style.display = "";
+  $("#sentplayer").src = jj.model_reused ? jj.voice_url : "/last_ref.wav?t=" + Date.now();
+  $("#bootinfo").textContent = "등록한 음성을 보관했습니다. 대화 시작 시 참조 목소리와 말투를 준비해 음성으로 답합니다.";
+  const w = (jj.sent || {}).warning;
+  $("#refwarn").style.display = w ? "" : "none";
+  $("#refwarn").textContent = w || "";
+  if (jj.model_queued) watchModel(jj.session);
+  $("#donesid").textContent = jj.session;
+  $("#donemodel").innerHTML = jj.model_reused
+    ? "친구의 사진·참조 음성·완성 모델을 준비했습니다. VR에서 이 세션을 선택해 체험을 시작하세요."
+    : jj.model_queued
+      ? "AI가 인물의 모습을 빚고 있습니다. 몇 분 걸립니다.<br>그 사이에도 VR 기기에서 대화는 시작할 수 있습니다."
+      : "이제 VR 기기에서 대화를 시작할 수 있습니다.";
+  if (jj.model_reused) {
+    $("#donephoto").src = jj.photo_url; $("#donevoice").src = jj.voice_url;
+    $("#doneassets").style.display = "";
+  }
+  $("#donewarning").textContent = jj.registration_warning || "";
+  $("#donewarning").style.display = jj.registration_warning ? "" : "none";
+  $("#main").style.display = "none"; $("#done").style.display = "";
+  window.scrollTo({top: 0});
+}
 $("#endbtn").onclick = async () => {
   let current;
   try { current = await readResponse(await fetch("/status")); }

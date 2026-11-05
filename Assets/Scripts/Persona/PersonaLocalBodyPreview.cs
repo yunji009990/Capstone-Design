@@ -1,10 +1,9 @@
-#if UNITY_EDITOR
 using System;
 using System.IO;
 using System.Security.Cryptography;
 using UnityEngine;
 
-/// <summary>현재 서버 모델과 일치할 때만 개인 자료가 든 로컬 몸체 시험본을 사용한다.</summary>
+/// <summary>등록 모델의 해시와 일치하는 준비된 몸체를 사용한다. 빌드는 StreamingAssets의 시연 자료를 읽는다.</summary>
 public static class PersonaLocalBodyPreview
 {
     public const string SettingsRelativePath = "UserSettings/PersonaLocalBodyPreview.json";
@@ -19,7 +18,17 @@ public static class PersonaLocalBodyPreview
         public float seatedHeightOffset;
     }
 
-    public static string SettingsPath => Path.GetFullPath(Path.Combine(Application.dataPath, "..", SettingsRelativePath));
+    public static string SettingsPath
+    {
+        get
+        {
+#if UNITY_EDITOR
+            return Path.GetFullPath(Path.Combine(Application.dataPath, "..", SettingsRelativePath));
+#else
+            return Path.Combine(Application.streamingAssetsPath, "LocalDemoBody.json");
+#endif
+        }
+    }
     public static Settings ReadSettings() => File.Exists(SettingsPath)
         ? JsonUtility.FromJson<Settings>(File.ReadAllText(SettingsPath)) : null;
 
@@ -40,8 +49,13 @@ public static class PersonaLocalBodyPreview
             if (settings == null || !settings.enabled || serverModel == null ||
                 string.IsNullOrEmpty(settings.sourceSha256) ||
                 !string.Equals(Digest(serverModel), settings.sourceSha256, StringComparison.OrdinalIgnoreCase)) return false;
+#if UNITY_EDITOR
             string root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "tools/_work")) + Path.DirectorySeparatorChar;
             string path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", settings.modelRelativePath ?? ""));
+#else
+            string root = Path.GetFullPath(Application.streamingAssetsPath) + Path.DirectorySeparatorChar;
+            string path = Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, settings.modelRelativePath ?? ""));
+#endif
             if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
                 throw new InvalidDataException();
             var bytes = File.ReadAllBytes(path);
@@ -59,9 +73,8 @@ public static class PersonaLocalBodyPreview
         catch (Exception)
         {
             // 경로·해시·세션 등 개인 자료 식별자는 Console에 남기지 않는다.
-            Debug.LogWarning("[PersonaSpawner] 로컬 몸체 시험본을 확인하지 못해 서버 모델을 사용합니다.");
+            Debug.LogWarning("[PersonaSpawner] 준비된 몸체를 확인하지 못해 등록 모델을 사용합니다.");
             return false;
         }
     }
 }
-#endif

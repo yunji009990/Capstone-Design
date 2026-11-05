@@ -29,6 +29,7 @@ Scene_2 의 환경광을 올리는 편이 이보다 크게 듣는다(+0.084, 크
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 # 얼굴 5점(양눈·코·입꼬리)으로 닮음변환을 구한다. 표정·각도 차이는 못 고치므로
 # 정면 사진일수록 잘 맞는다.
@@ -55,7 +56,8 @@ def _analyzer(det_size: int = 640):
             from insightface.app import FaceAnalysis
         except ImportError as exc:
             raise TransplantUnavailable(str(exc)) from exc
-        app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+        app = FaceAnalysis(name="buffalo_l", root=os.environ.get("INSIGHTFACE_ROOT", "~/.insightface"),
+                           providers=["CPUExecutionProvider"])
         app.prepare(ctx_id=-1, det_size=(det_size, det_size))
         _app = app
     return _app

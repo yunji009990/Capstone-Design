@@ -11,7 +11,7 @@ import threading
 import uuid
 
 
-def load_settings():
+def load_settings(overrides=None):
     """Read only worker settings; never import the web app or AI dependencies."""
     path = Path(os.environ.get("MODEL_WORKER_ENV") or
                 Path(__file__).resolve().parents[1] / "Web" / ".env")
@@ -35,6 +35,8 @@ def load_settings():
                 values[key] = value.strip().strip('"').strip("'")
     for key, value in values.items():
         os.environ[key] = value
+    if overrides:
+        os.environ.update(overrides)
 
 
 def main():
@@ -48,13 +50,21 @@ def main():
     if args.status:
         print(json.dumps(model_queue.status()))
         return
-    import httpx
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    log = logging.getLogger("model-worker")
-    owner = uuid.uuid4().hex
     stopped = threading.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: stopped.set())
+    run_worker(stopped, once=args.once)
+
+
+def run_worker(stopped, *, once=False, owner=None, settings_override=None):
+    """CLI와 로컬 실행기가 같은 영속 큐를 처리한다. 종료 요청 시 작업 ID를 보존한다."""
+    load_settings(settings_override)
+    from core import model_queue, tripo
+    from core.model_pipeline import ModelPipeline, PipelineFailure, SubmissionUnknown
+    import httpx
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    log = logging.getLogger("model-worker")
+    owner = owner or uuid.uuid4().hex
 
     def deliver(sid, path):
         base = os.environ.get("SESSION_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -68,19 +78,19 @@ def main():
             raise PipelineFailure("모델 전달 실패 · HTTP " + str(response.status_code))
 
     while not stopped.is_set():
-        load_settings()
+        load_settings(settings_override)
         client = tripo.TripoClient.from_secrets()
         model_queue.heartbeat(owner, configured=not client.is_stub)
         job = model_queue.claim(owner)
         if job is None:
-            if args.once:
+            if once:
                 break
             stopped.wait(3)
             continue
         sid = job["session_id"]
         if client.is_stub:
             model_queue.save(job, owner, state="blocked", error="Tripo API 키 설정 후 재시도해 주세요")
-            if args.once:
+            if once:
                 break
             continue
         finished, lease_lost = threading.Event(), threading.Event()
@@ -135,7 +145,7 @@ def main():
             finished.set()
             thread.join(timeout=2)
             model_queue.heartbeat(owner, configured=not client.is_stub)
-        if args.once:
+        if once:
             break
 
 

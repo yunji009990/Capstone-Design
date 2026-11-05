@@ -69,9 +69,11 @@ class HandoffTests(unittest.TestCase):
                   "tools/check.py": "# shared runner\n", ".claude/settings.json": "{}\n",
                   ".github/workflows/checks.yml": "name: checks\n",
                   "Web/survey_v2.py": "# survey v2 contract\n",
+                  "Web/prepared_friend.py": "# prepared assets only\n",
                   "Web/static/presets_v2.json": "{\"profiles\": []}\n",
                   "Web/tests/test_registration_flow.py": "# web API checks\n",
                   "Web/tests/test_registration_flow.cjs": "// browser script checks\n",
+                  "Web/tests/fixtures/grandmother.json": "{\"key\":\"grandmother\",\"answers\":{}}\n",
                   "docs/웹_등록_흐름_개선.md": "registration workflow\n"}
         for name, content in shared.items():
             self.put(name, content)

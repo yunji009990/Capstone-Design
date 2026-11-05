@@ -78,7 +78,7 @@ logging.getLogger("uvicorn.access").addFilter(_HidePolling())
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.path.join(HERE, "workspace")
+WORK = os.environ.get("WEB_WORKSPACE_DIR") or os.path.join(HERE, "workspace")
 
 
 def _load_env():
@@ -91,7 +91,7 @@ def _load_env():
     **이미 설정된 환경변수는 덮지 않는다.** 한 번만 다른 값으로 띄워보고 싶을 때
     터미널에서 `set` 한 것이 파일에 먹히면 곤란하다.
     """
-    path = os.path.join(HERE, ".env")
+    path = os.environ.get("WEB_ENV_FILE") or os.path.join(HERE, ".env")
     if not os.path.exists(path):
         return
     n = 0
@@ -224,7 +224,7 @@ def admin_login(password: str = Form(...)):
 # 지우는 것도 이 엔드포인트로 한다(빈 값을 보내면 지워진다).
 
 def _env_path():
-    return os.path.join(HERE, ".env")
+    return os.environ.get("WEB_ENV_FILE") or os.path.join(HERE, ".env")
 
 
 def _write_env_key(key, value):
@@ -609,4 +609,6 @@ def status():
     return out
 
 
+from prepared_friend import create_router as prepared_friend_router
+app.include_router(prepared_friend_router(os.environ.get("WEB_PREPARED_FRIEND_DIR"), SESSION_URL, SESSION_TOKEN))
 app.mount("/", StaticFiles(directory=os.path.join(HERE, "static"), html=True), name="static")

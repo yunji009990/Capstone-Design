@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def files_for(area):
     if area == "platform":
-        paths = [ROOT / "Web/app.py", ROOT / "Web/survey_v2.py", ROOT / "Web/.env.example", ROOT / "Web/requirements.txt",
+        paths = [ROOT / "Web/app.py", ROOT / "Web/survey_v2.py", ROOT / "Web/prepared_friend.py", ROOT / "Web/.env.example", ROOT / "Web/requirements.txt",
                  ROOT / "Survey/model_worker.py", ROOT / "Survey/requirements-worker.txt"]
         paths += [ROOT / "Web/static" / name for name in ("index.html", "admin.html", "after.html",
                                                           "style.css", "presets_v2.json")]

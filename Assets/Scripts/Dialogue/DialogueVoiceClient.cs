@@ -27,6 +27,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
     public event Action<bool, string> OnHealth;
     public event Action<string, bool> OnSessionChanged;
     public bool SessionHasModel { get; private set; }
+    public bool UsesLocalApi { get; internal set; }
     public bool HasSession { get; private set; }
     public bool IsSpeaking => _playback != null && _playback.Playing;
     public bool TtsEnabled { get; private set; }
@@ -56,6 +57,7 @@ public partial class DialogueVoiceClient : MonoBehaviour
 
     void Awake()
     {
+        DialogueConnectionProfile.Apply(this);
 #if UNITY_EDITOR
         // 재생 비교 모드는 에디터 선택값으로만 정하고 Play 중에는 바뀌지 않는다.
         bool wholeResponse = DialoguePlaybackComparison.WholeResponseEnabled;

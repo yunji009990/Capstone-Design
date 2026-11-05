@@ -50,6 +50,9 @@ public partial class DialogueTestPanel : MonoBehaviour
         Voice.dialogueServerUrl = UnityEditor.EditorPrefs.GetString(PreferenceKey + ".url", Voice.dialogueServerUrl);
         Voice.token = UnityEditor.EditorPrefs.GetString(PreferenceKey + ".token", Voice.token);
 #endif
+        // 별도 로컬 시연을 선택한 경우 UI 입력도 같은 연결을 표시한다.
+        // 기존 테스트 씬의 주소·토큰 저장값은 덮어쓰지 않는다.
+        DialogueConnectionProfile.Apply(Voice);
         _font = koreanFont != null ? koreanFont : Font.CreateDynamicFontFromOSFont(
             new[] { "Malgun Gothic", "Arial" }, 22);
         BuildPanel();
@@ -149,8 +152,11 @@ public partial class DialogueTestPanel : MonoBehaviour
         if (begin && string.IsNullOrWhiteSpace(Voice.testPersona))
         { ShowError("테스트 인물 설정을 입력하세요."); yield break; }
 #if UNITY_EDITOR
-        UnityEditor.EditorPrefs.SetString(PreferenceKey + ".url", Voice.dialogueServerUrl);
-        UnityEditor.EditorPrefs.SetString(PreferenceKey + ".token", Voice.token);
+        if (!Voice.UsesLocalApi)
+        {
+            UnityEditor.EditorPrefs.SetString(PreferenceKey + ".url", Voice.dialogueServerUrl);
+            UnityEditor.EditorPrefs.SetString(PreferenceKey + ".token", Voice.token);
+        }
 #endif
         if (string.IsNullOrWhiteSpace(Voice.token))
         {

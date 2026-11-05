@@ -27,11 +27,12 @@ from core import database
 from registration.app import create_app
 
 PRESETS = json.loads((ROOT / "Web/static/presets_v2.json").read_text(encoding="utf-8"))["profiles"]
+REGRESSION_PRESETS = [*PRESETS, json.loads((Path(__file__).parent / "fixtures/grandmother.json").read_text(encoding="utf-8"))]
 
 
 def preset(key):
-    """화면 테스트 버튼과 같은 가상 자료를 쓴다. 실제 인물이 아니다."""
-    return copy.deepcopy(next(p for p in PRESETS if p["key"] == key)["answers"])
+    """가상 검사 자료. 이전 관계의 회귀 자료는 웹에 노출하지 않는다."""
+    return copy.deepcopy(next(p for p in REGRESSION_PRESETS if p["key"] == key)["answers"])
 
 
 def audio():

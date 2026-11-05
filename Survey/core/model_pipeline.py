@@ -68,12 +68,32 @@ def blender_bin():
     return os.environ.get("BLENDER_BIN", "blender").strip() or "blender"
 
 
-def run_blender(script, *args, timeout=900):
+def run_blender(script, *args, timeout=900, check=lambda: None):
     """Blender 를 배치로 돌린다. 결과 파일은 호출부가 확인한다."""
-    command = [blender_bin(), "--background", "--python", str(BLENDER_DIR / script), "--",
+    command = [blender_bin(), "--background", "--python-exit-code", "1", "--python", str(BLENDER_DIR / script), "--",
                *[str(a) for a in args]]
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        # 작업자 종료·임대 만료를 Blender 작업 중에도 확인한다. Windows 한글 로그도 보존한다.
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, encoding="utf-8", errors="replace",
+                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0) as child:
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    check()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    try:
+                        stdout, stderr = child.communicate(timeout=min(1, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            except BaseException:
+                child.kill()
+                child.communicate()
+                raise
+            done = subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
     except FileNotFoundError as exc:
         raise PipelineFailure("Blender 를 찾지 못했습니다: " + str(exc)) from exc
     except subprocess.TimeoutExpired as exc:
@@ -201,7 +221,7 @@ class ModelPipeline:
         if record and record.get("state") == "done" and dest.is_file():
             if hashlib.sha256(dest.read_bytes()).hexdigest() == record["sha256"]:
                 return dest
-        run_blender("head_trim.py", head_path, dest)
+        run_blender("head_trim.py", head_path, dest, check=self.check)
         if not dest.is_file() or dest.read_bytes()[:4] != b"glTF":
             raise PipelineFailure("머리 다듬기 결과가 GLB 가 아닙니다")
         steps["trim"] = {"state": "done", "bytes": dest.stat().st_size,
@@ -236,7 +256,7 @@ class ModelPipeline:
         if out_scale:
             # 씬에서 쓰는 크기 그대로 내보낸다. 유니티에서 매번 손으로 줄이지 않도록.
             options += ["--out-scale", out_scale]
-        run_blender("head_body_merge.py", body, head_path, partial, *options)
+        run_blender("head_body_merge.py", body, head_path, partial, *options, check=self.check)
         if not partial.is_file() or partial.read_bytes()[:4] != b"glTF":
             raise PipelineFailure("합치기 결과가 GLB 가 아닙니다")
         if partial.stat().st_size > 100 * 1024 * 1024:

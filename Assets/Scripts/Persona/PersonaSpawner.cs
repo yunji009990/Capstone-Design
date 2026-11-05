@@ -922,7 +922,6 @@ public class PersonaSpawner : MonoBehaviour
         float modelHeight = targetHeightMeters;
         float modelSeatHeightOffset = 0f;
         bool measureSkinHeight = false;
-#if UNITY_EDITOR
         // 서버 세션·음성 연결을 유지한 채 같은 원본에 대응하는 로컬 시험본만 교체한다.
         if (PersonaLocalBodyPreview.TryResolve(glb, out var preview, out float previewHeight, out float previewSeatOffset))
         {
@@ -931,9 +930,8 @@ public class PersonaSpawner : MonoBehaviour
             modelHeight = previewHeight / (scaleMultiplier > 0f ? scaleMultiplier : 1f);
             measureSkinHeight = true;
             modelSeatHeightOffset = previewSeatOffset;
-            Debug.Log("[PersonaSpawner] 현재 등록 인물의 새 몸체 로컬 시험본을 사용합니다.");
+            Debug.Log("[PersonaSpawner] 현재 등록 인물의 준비된 몸체를 사용합니다.");
         }
-#endif
         var gltf = new GltfImport();
 
         // 밉맵과 필터링은 임포트 시점에만 정할 수 있다. 텍스처가 만들어진
@@ -996,10 +994,8 @@ public class PersonaSpawner : MonoBehaviour
 
         // 몸체별 원점 차이는 사용자 의자·착석 기준점·수동 Seat Offset과 별도로 보정한다.
         if (arrival != null) arrival.ModelSeatHeightOffset = modelSeatHeightOffset;
-#if UNITY_EDITOR
         if (measureSkinHeight && arrival != null)
             _spawnedInstance.AddComponent<PersonaSeatedFootPlacement>().Bind(arrival);
-#endif
         if (!CheckArrivalPreparation(_spawnedInstance.transform)) return;
 
         _loadedSession = sid;
